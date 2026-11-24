@@ -1,5 +1,54 @@
 # @iris-mcp/shared
 
+## 1.2.0
+
+### Minor Changes
+
+- 20b7762: Epic 44 Correctness & Safety Fixes. The `@iris-mcp/*` fixed group moves to a minor release, approved by the owner on 2026-11-23, because this release makes sanctioned behaviour changes. See the "Behavior changes" section of the 1.2.0 entry in `CHANGELOG.md`.
+
+### Patch Changes
+
+- 3d7e878: fix: `iris_docdb_manage` `create` registers the database's `Security.DocDBs` record, so the database is usable at once (Story 44.1, DW-688)
+  - IRIS denies every DocDB call other than `list` on a database without a `Security.DocDBs` record (`ERROR #822: Access Denied`), and the DocDB REST API never writes one. After the DocDB create, `create` now registers the record through the new ExecuteMCPv2 route `POST /api/executemcp/v2/security/docdb` (IRIS's own `$$Create^%SYS.DOCDB`; no Resource). The result is the DocDB definition plus `registered: true`. `create` on a database that exists without a record (made by `1.1.0` or earlier) registers it and returns `{database, namespace, created: false, registered: true}`; with the record present it returns the unchanged "already defined" error. A registration failure is an error naming what was created, the real text and the two fixes.
+  - A document, find, property or drop call that answers `#822` with `%Service_DocDB` enabled now checks the record (`GET /api/executemcp/v2/security/docdb`) and names a missing record or database. The disabled-service message and the pass-through of any other `#822` are unchanged.
+  - The `iris_docdb_manage` description gains one appended sentence (sanction `S-44.1-docdb-manage-text`). `BOOTSTRAP_VERSION` moves from `1.1.0+2.244fe8623c76` to `1.1.0+3.3e97060f5bc4`.
+
+  No tool, action, input field, governance key or visibility is added or changed, and the requests of `list`, `drop` and the other DocDB tools are byte-identical.
+
+- 5924aa2: fix: a confirmation is bound to the scope the dialog showed, so no change the person did not see is written (Story 44.3, DW-670)
+  - The confirmation state is `v: 2` and carries a digest of the scope the dialog showed. On the round that carries the person's accept, the scope is worked out again: an equal digest runs the call, a different one asks the person again (once per call) with the new scope, and a second change ends the call with the new refusal `CONFIRMATION_SCOPE_CHANGED` (`{code, action}`; nothing changed; audited `denied` with `confirmation: "accepted"`). Sanction `S-44.3-scope-changed-refusal`.
+  - `iris_env_promote` `execute` binds every Storage drop it found and `iris_doc_edit` `regenerateStorage` every dropped definition (the dialog text cuts both), so a drop the dialog did not show is never written. `iris_message_resend` `resendFiltered` binds the filter and the cap, not the live match count or a `to` that IRIS filled in; an accepted call sends its read-only preview twice. The other gates bind their whole dialog text.
+  - A deciding round whose tool refuses before it asks no longer leaves an `unanswered` audit entry. A client that does not declare form elicitation, and a call whose scope does not change, get today's requests, result and audit entry. `@iris-mcp/shared` exports the `ConfirmationScope` type and `REFUSAL_CODES.CONFIRMATION_SCOPE_CHANGED`.
+
+  No tool, action, input field, governance key, visibility or description changes.
+
+- 9225a0b: fix: the bootstrap names every class that did not compile, from a check that reads no localized text (Story 44.4, DW-685)
+  - After a compile, `bootstrap()` confirms each embedded class with two reads: the class dictionary (a compiled class and no `ClassCompileError`) and IRIS's own up-to-date flag from `docnames`. A failure is reported as `Compile failed: <k> of <n> classes did not compile: <classes>`, with `compiled: false`; an HTTP 200 compile that wrote a class's Storage and failed another class is no longer reported as compiled.
+  - After a failed or unverifiable compile the `unconfigured` branch stops before registering the web application (sanction `S-44.4-unconfigured-stop`, wave-9 decision #145), and a `current` start runs the same check, so the failure is reported again on the next start until the classes compile. A clean result is byte-identical; the check adds one `action/query` and one `docnames` request (plus the HTTP client's CSRF pre-flight `HEAD` before the query's POST).
+  - `@iris-mcp/shared` exports `compileAndVerify()`, `verifyCompiled()` and the type `CompileReport`.
+
+  No tool, action, input field, governance key, visibility or description changes.
+
+- 3d49a06: fix: the launcher's servers can read their password from the keychain, so they start in Copilot-harness sessions (Story 44.6, DW-731)
+  - New opt-in variable `IRIS_CREDENTIAL_NAME` (sanctioned AD-15 change, wave-9 decision #140). Set, with `IRIS_PASSWORD` unset or empty, the `default` profile takes its password from the iris-mcp keychain entry of that name (service `iris-mcp`, then `IRIS_CREDENTIAL_HELPER`), and each `IRIS_PROFILES` entry without a `password` looks up its own name (a miss keeps the inherited password and warns). A non-empty `IRIS_PASSWORD` wins; an exhausted chain fails startup naming the variable and `iris-mcp-credentials set <name>`. Unset, empty or blank: configuration and error texts are byte-identical to before.
+  - `@iris-mcp/shared` exports `resolveStoredCredential` (links 2 and 3 of the credential chain); `resolveCredential` calls it after link 1.
+
+  No tool, action, input field, governance key, visibility or description changes. The VS Code extension has no changeset: its version follows the fixed group, and the vsix is a must-carry artifact of the end-of-epic release.
+
+- ec8ab44: fix: the Epic 44 burn-down (Story 44.7: DW-723, DW-724, DW-725, DW-747, DW-754, DW-755, DW-757, DW-758, DW-759)
+  - `iris_docdb_property`: `create` sends a `path` (default `$.<property>`, new optional input `path`), so a created property is filled and `iris_docdb_find` on it matches; `index` reads an existing property (`indexed: true, created: false`, no write) and creates a missing one (`created: true`) instead of failing with `ERROR #5805`. The `iris_docdb_property` and `iris_docdb_manage` descriptions are corrected (sanctions `S-44.7-docdb-property`, `S-44.7-docdb-manage-text`).
+  - `iris_doc_compile`, `iris_doc_load` (`compile: true`) and `iris_env_promote` (`execute`) check, after a compile IRIS answered with no error listed, that each class (class dictionary and IRIS's up-to-date flag) and each `.mac` routine (up-to-date flag) compiled, so a failure that IRIS answers with HTTP 200 is no longer reported as success. A wildcard with no literal prefix, one in the extension, or one matching more than 1000 documents is not expanded for the check, and the `iris_doc_compile` result names it in `checkNote`. `@iris-mcp/shared` exports `verifyRoutinesCompiled`, and `verifyCompiled` sends its dictionary query in batches of 100 classes.
+  - `iris_database_manage` `delete` also dismounts the database, never for a remote (ECP) entry (the reply gains `dismounted` and `dismountNote`), and keeps `IRIS.DAT` (sanction `S-44.7-database-delete`, which also corrects the `provision-project-environment` rollback note). `BOOTSTRAP_VERSION` moves from `1.1.0+3.3e97060f5bc4` to `1.1.0+5.6cbac260e73f`.
+  - `iris-mcp-clients doctor` tells a user to delete by hand an old-file entry that Claude Code owns in the shared `.mcp.json`, instead of an `apply` that is refused.
+
+  No tool, action, governance key or visibility is added or changed. Every request and result outside the listed ones is byte-identical (pinned).
+
+- 9f95bae: fix: a stored password goes only to a server defined in user settings, in the launcher's Local harness and in the shared Server Manager import (Story 44.8, DW-752 and DW-761; sanctioned AD-15 change, wave-9 decisions #153 and #154)
+  - The shared Server Manager import (`IRIS_SERVER_MANAGER=auto|required`) no longer pairs an OS-keychain or `IRIS_CREDENTIAL_HELPER` password with a definition that comes from a workspace-scope settings file (the folder's `.vscode/settings.json` or a `*.code-workspace` file). Such a server is left out of the roster with a warning that names the file; `required` fails startup naming the server. A workspace definition with its own inline `password` in the same file still uses it, files named by absolute path in `IRIS_SM_SETTINGS_PATHS` count as the operator's own (a relative entry resolves against the working directory and counts as workspace scope), and a server defined in user settings is byte-identical. `ServerManagerProfileResult` gains the optional `workspaceScope` marker.
+  - The VS Code launcher's Local-harness resolve step starts a server only when every server of its plan is defined in user settings alone, and calls none of Server Manager's `getServerSpec`, `getAccount` or `getSession` for one that a workspace, folder or language-specific layer defines or overrides (DW-752). The fix is in the launcher vsix, a must-carry artifact of the release; the extension cannot be named in a changeset, and its version follows the fixed `@iris-mcp/*` group.
+
+  No tool, action, input field, governance key, visibility or description changes.
+
 ## 1.1.0
 
 ## 1.0.0

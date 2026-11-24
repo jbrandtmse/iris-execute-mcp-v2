@@ -1,5 +1,25 @@
 # @iris-mcp/client-config
 
+## 1.2.0
+
+### Patch Changes
+
+- 065f014: fix: `iris-mcp-clients` writes VS Code (Copilot) entries to the files the Copilot harness reads: `~/.copilot/mcp-config.json` (`$COPILOT_HOME/mcp-config.json`) and the workspace `.mcp.json` (Story 44.2, DW-721)
+  - The `vscode` adapter targets the user file `~/.copilot/mcp-config.json` and the workspace-root `.mcp.json`, both keyed `mcpServers` with `${VAR}` references and no `inputs` array. A user entry is `{type, command, args, env, tools}`; a project entry is exactly what `claude-code` writes into the same file. `env-reference` writes `${IRIS_PASSWORD}`, `server-manager` writes no secret, and only `explicit` writes a literal.
+  - A `.mcp.json` shared with Claude Code gives each entry one owner: the client that wrote it. The other client's `apply` (an identical entry included), `disable`, `enable` and `remove` of it exit 1 and write nothing; nothing is adopted. Configuring both clients for one project means picking one client per server (to switch, `remove` the entry with its owner, then `apply` it with the other). An iris-mcp entry that no record names for the file belongs to Claude Code. A `restore` whose backup would change an entry the other client owns is refused the same way. The owner's `disable` and `remove` say that the other client reads the file. `detect`, `status` and `doctor` list and check it once (`sharedWith`). Ownership and stash records now carry the config file they were written to (an additive optional `path`), and only a record of the same file counts, so a record from another project never blocks a write; a stash is enabled only in the project where it was disabled (after a project folder moves, run `apply` again; in the shared `.mcp.json` a moved VS Code entry belongs to Claude Code, so `remove` it with Claude Code first). A record or stash written before this change has no file and keeps matching in every project until the client that wrote it replaces or drops it in a project (the CHANGELOG says which commands do). Only the Claude Code and VS Code project scopes share a file, whatever the working directory.
+  - Entries the manager wrote into VS Code's old `mcp.json` files are reported (`status` `legacy`, `doctor` `vscode-local-harness-entries`) and moved out by the next `apply`, through the write protocol, with foreign bytes intact.
+  - Deprecated the exports `ensureInputs`, `presentInputIds`, `VscodeInput` and `VSCODE_PASSWORD_INPUT_ID` (still exported; removed in the next major): no adapter uses native inputs any more, so `ensureInputs` refuses for every client. The `inputsMerged` field of the `apply` envelope stays, always `[]`. Adapter data is `2026-11-22.1`.
+
+  The end-of-epic release must carry `@iris-mcp/client-config` (the CLI the MCP Clients view runs). Nothing is published by this change.
+
+- ec8ab44: fix: the Epic 44 burn-down (Story 44.7: DW-723, DW-724, DW-725, DW-747, DW-754, DW-755, DW-757, DW-758, DW-759)
+  - `iris_docdb_property`: `create` sends a `path` (default `$.<property>`, new optional input `path`), so a created property is filled and `iris_docdb_find` on it matches; `index` reads an existing property (`indexed: true, created: false`, no write) and creates a missing one (`created: true`) instead of failing with `ERROR #5805`. The `iris_docdb_property` and `iris_docdb_manage` descriptions are corrected (sanctions `S-44.7-docdb-property`, `S-44.7-docdb-manage-text`).
+  - `iris_doc_compile`, `iris_doc_load` (`compile: true`) and `iris_env_promote` (`execute`) check, after a compile IRIS answered with no error listed, that each class (class dictionary and IRIS's up-to-date flag) and each `.mac` routine (up-to-date flag) compiled, so a failure that IRIS answers with HTTP 200 is no longer reported as success. A wildcard with no literal prefix, one in the extension, or one matching more than 1000 documents is not expanded for the check, and the `iris_doc_compile` result names it in `checkNote`. `@iris-mcp/shared` exports `verifyRoutinesCompiled`, and `verifyCompiled` sends its dictionary query in batches of 100 classes.
+  - `iris_database_manage` `delete` also dismounts the database, never for a remote (ECP) entry (the reply gains `dismounted` and `dismountNote`), and keeps `IRIS.DAT` (sanction `S-44.7-database-delete`, which also corrects the `provision-project-environment` rollback note). `BOOTSTRAP_VERSION` moves from `1.1.0+3.3e97060f5bc4` to `1.1.0+5.6cbac260e73f`.
+  - `iris-mcp-clients doctor` tells a user to delete by hand an old-file entry that Claude Code owns in the shared `.mcp.json`, instead of an `apply` that is refused.
+
+  No tool, action, governance key or visibility is added or changed. Every request and result outside the listed ones is byte-identical (pinned).
+
 ## 1.1.0
 
 ### Minor Changes

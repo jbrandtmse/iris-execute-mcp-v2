@@ -1,6 +1,6 @@
 {
   "name": "iris-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "displayName": "IRIS MCP Server Suite",
   "description": "Five MCP servers for InterSystems IRIS (development, administration, data, interoperability and operations) and the IRIS MCP skills pack. This is an independent community project. It is not made, endorsed or supported by InterSystems.",
   "author": {

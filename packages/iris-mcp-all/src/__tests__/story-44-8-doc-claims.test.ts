@@ -23,11 +23,13 @@ const squash = (text: string): string => text.replace(/\s+/g, " ");
 describe("Story 44.8: the changelogs", () => {
   const rootChangelog = read("CHANGELOG.md");
   const blocks = rootChangelog.split(/^(?=## \[)/m);
-  const block = blocks.find((section) => section.startsWith("## [Unreleased] — Story 44.8")) ?? "";
+  // The version step renames "## [Unreleased] — Story …" to "## [<version> detail] — Story …"; either heading form passes.
+  const storyBlock = (story: string): RegExp => new RegExp(`^## \\[(?:Unreleased|\\d+\\.\\d+\\.\\d+ detail)\\] — Story ${story.replace(".", "\\.")}`);
+  const block = blocks.find((section) => storyBlock("44.8").test(section)) ?? "";
 
   it("the root CHANGELOG has the Story 44.8 block, newest first, naming both defects and the sanctioned AD-15 change", () => {
     expect(block).not.toBe("");
-    const story446Index = blocks.findIndex((section) => section.startsWith("## [Unreleased] — Story 44.6"));
+    const story446Index = blocks.findIndex((section) => storyBlock("44.6").test(section));
     expect(story446Index).toBeGreaterThan(-1);
     expect(blocks.indexOf(block), "newer than the Story 44.6 block").toBeLessThan(story446Index);
     const flat = squash(block);
@@ -38,7 +40,7 @@ describe("Story 44.8: the changelogs", () => {
   });
 
   it("the Story 44.6 block no longer claims the Local harness env is unconditionally unchanged", () => {
-    const story446 = squash(blocks.find((section) => section.startsWith("## [Unreleased] — Story 44.6")) ?? "");
+    const story446 = squash(blocks.find((section) => storyBlock("44.6").test(section)) ?? "");
     expect(story446).not.toContain("the resolve step still runs and returns exactly the env it returned before.");
     expect(story446).toContain("for a server defined in user settings alone");
     expect(story446).toContain("Story 44.8");

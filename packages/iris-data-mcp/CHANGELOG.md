@@ -1,5 +1,33 @@
 # @iris-mcp/data
 
+## 1.2.0
+
+### Patch Changes
+
+- 3d7e878: fix: `iris_docdb_manage` `create` registers the database's `Security.DocDBs` record, so the database is usable at once (Story 44.1, DW-688)
+  - IRIS denies every DocDB call other than `list` on a database without a `Security.DocDBs` record (`ERROR #822: Access Denied`), and the DocDB REST API never writes one. After the DocDB create, `create` now registers the record through the new ExecuteMCPv2 route `POST /api/executemcp/v2/security/docdb` (IRIS's own `$$Create^%SYS.DOCDB`; no Resource). The result is the DocDB definition plus `registered: true`. `create` on a database that exists without a record (made by `1.1.0` or earlier) registers it and returns `{database, namespace, created: false, registered: true}`; with the record present it returns the unchanged "already defined" error. A registration failure is an error naming what was created, the real text and the two fixes.
+  - A document, find, property or drop call that answers `#822` with `%Service_DocDB` enabled now checks the record (`GET /api/executemcp/v2/security/docdb`) and names a missing record or database. The disabled-service message and the pass-through of any other `#822` are unchanged.
+  - The `iris_docdb_manage` description gains one appended sentence (sanction `S-44.1-docdb-manage-text`). `BOOTSTRAP_VERSION` moves from `1.1.0+2.244fe8623c76` to `1.1.0+3.3e97060f5bc4`.
+
+  No tool, action, input field, governance key or visibility is added or changed, and the requests of `list`, `drop` and the other DocDB tools are byte-identical.
+
+- ec8ab44: fix: the Epic 44 burn-down (Story 44.7: DW-723, DW-724, DW-725, DW-747, DW-754, DW-755, DW-757, DW-758, DW-759)
+  - `iris_docdb_property`: `create` sends a `path` (default `$.<property>`, new optional input `path`), so a created property is filled and `iris_docdb_find` on it matches; `index` reads an existing property (`indexed: true, created: false`, no write) and creates a missing one (`created: true`) instead of failing with `ERROR #5805`. The `iris_docdb_property` and `iris_docdb_manage` descriptions are corrected (sanctions `S-44.7-docdb-property`, `S-44.7-docdb-manage-text`).
+  - `iris_doc_compile`, `iris_doc_load` (`compile: true`) and `iris_env_promote` (`execute`) check, after a compile IRIS answered with no error listed, that each class (class dictionary and IRIS's up-to-date flag) and each `.mac` routine (up-to-date flag) compiled, so a failure that IRIS answers with HTTP 200 is no longer reported as success. A wildcard with no literal prefix, one in the extension, or one matching more than 1000 documents is not expanded for the check, and the `iris_doc_compile` result names it in `checkNote`. `@iris-mcp/shared` exports `verifyRoutinesCompiled`, and `verifyCompiled` sends its dictionary query in batches of 100 classes.
+  - `iris_database_manage` `delete` also dismounts the database, never for a remote (ECP) entry (the reply gains `dismounted` and `dismountNote`), and keeps `IRIS.DAT` (sanction `S-44.7-database-delete`, which also corrects the `provision-project-environment` rollback note). `BOOTSTRAP_VERSION` moves from `1.1.0+3.3e97060f5bc4` to `1.1.0+5.6cbac260e73f`.
+  - `iris-mcp-clients doctor` tells a user to delete by hand an old-file entry that Claude Code owns in the shared `.mcp.json`, instead of an `apply` that is refused.
+
+  No tool, action, governance key or visibility is added or changed. Every request and result outside the listed ones is byte-identical (pinned).
+
+- Updated dependencies [20b7762]
+- Updated dependencies [3d7e878]
+- Updated dependencies [5924aa2]
+- Updated dependencies [9225a0b]
+- Updated dependencies [3d49a06]
+- Updated dependencies [ec8ab44]
+- Updated dependencies [9f95bae]
+  - @iris-mcp/shared@1.2.0
+
 ## 1.1.0
 
 ### Patch Changes

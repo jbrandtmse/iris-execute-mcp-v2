@@ -221,3 +221,4 @@
 2026-11-24T00:10:35Z	Epic 44	epic_status_done	stories=8/8_done(44.1-44.8) ci_tip=45290816532_green(epic-done_armed_run_of_the_tip) re-close_after_44.8
 2026-11-24T00:10:35Z	Epic 44	model_tier_checkpoint	armed=false metric=first_cr_unresolved_high_med_per_story_mean=0.25(8_stories) threshold=2 result=no_change(recheck_after_44.8)
 2026-11-24T00:10:35Z	Epic 44	epic_merge	plan=epic44->feature/feature-wave-9-bug-fixes(--no-ff)_then_delete_epic44(local+remote) ledger=open0,routed0,decision_pending3(DW-719,720,722_owner_items)
+2026-11-24T02:50:29Z	Epic 44	release_version_step	version=1.2.0(minor,owner-approved_2026-11-23) branch=release/1.2.0_from_origin/main_1dd4087 decision=156 BOOTSTRAP_VERSION=1.1.0+5.6cbac260e73f->1.2.0+5.6cbac260e73f ipm_tree=37_files(6_written) listings=6 extension=1.2.0 root_CHANGELOG=[1.2.0]_summary+8_[1.2.0_detail] checks=gen:ipm:check,gen:bootstrap_unchanged,governance,tools-list,epics-sync,live-guards,lint,typecheck_ok no_tag no_publish
