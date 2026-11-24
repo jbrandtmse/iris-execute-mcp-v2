@@ -15,12 +15,15 @@ import path from "node:path";
 import { resolveScopePath } from "./paths.js";
 import type { AdapterPlatform, ClientAdapter, HostContext } from "./types.js";
 
+/** The comparison key of a path of the simulated platform: normalized, and lower-cased on darwin and win32. */
+export function pathKey(platform: AdapterPlatform, value: string): string {
+  const normalized = (platform === "win32" ? path.win32 : path.posix).normalize(value);
+  return platform === "linux" ? normalized : normalized.toLowerCase();
+}
+
 /** Compare two paths of the simulated platform: case-insensitive on darwin and win32. */
 export function samePath(platform: AdapterPlatform, a: string, b: string): boolean {
-  const p = platform === "win32" ? path.win32 : path.posix;
-  const left = p.normalize(a);
-  const right = p.normalize(b);
-  return platform === "linux" ? left === right : left.toLowerCase() === right.toLowerCase();
+  return pathKey(platform, a) === pathKey(platform, b);
 }
 
 /**

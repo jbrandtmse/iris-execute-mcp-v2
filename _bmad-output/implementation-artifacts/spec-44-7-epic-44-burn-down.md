@@ -1,0 +1,497 @@
+---
+title: 'Story 44.7: Epic 44 Burn-down'
+type: 'bugfix'
+created: '2026-11-23'
+status: 'done'
+baseline_revision: 'ad2b17e7862fc44f368248f4f7adbc0f7f36b41b'
+baseline_commit: 'ad2b17e7862fc44f368248f4f7adbc0f7f36b41b'
+review_loop_iteration: 0
+followup_review_recommended: false
+context:
+  - '{project-root}/.claude/rules/project-rules.md'
+  - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
+  - '{project-root}/.claude/rules/iris-objectscript-basics.md'
+  - '{project-root}/.claude/rules/object-script-testing.md'
+warnings:
+  - multiple-goals
+  - oversized
+deferred: []
+---
+
+<intent-contract>
+
+## Intent
+
+**Problem:** Epic 44 left nine ledger entries with the burn-down owner. Each one needs a terminal disposition: resolved, closed with evidence, or closed by decision. The defects are: three DocDB tool defects (DW-723/724/725), a client-config dead end (DW-747), the Story 44.4 compile-check root cause in three dev tools (DW-754/755/756), a database delete that leaves the database mounted (DW-757), and 12 armed tests that cannot fail (DW-758).
+
+**Approach:** Every entry was probed live on a throwaway on 2026-11-23 (Design Notes). Fix each defect that the probe confirmed, in the tool that has it. Close DW-756 with evidence, because the probe refuted it. Pin everything the entries do not name.
+
+## Boundaries & Constraints
+
+**Always:**
+- Each entry ends with one disposition from the Design Notes table. The tally is counted mechanically (Rule #51).
+- Every "resolved" code fix is proven live on a throwaway or mutation-verified, on the path it guards (Rules #48, #59). Each pinning test gets a `mutation:` line in `## Verification` (Rule 19).
+- Reuse `verifyCompiled` from `@iris-mcp/shared`. Do not copy its SQL or its docnames logic.
+- Every description or schema change is a Frozen goldens entry in `fixtures/sdk-golden-sanctioned-changes.json`, followed by `pnpm gen:tools-list-snapshot`, and is named in `CHANGELOG.md` with its sanction id (AD-15).
+- The `Config.cls` change regenerates the embed with `pnpm run gen:bootstrap`. Record `BOOTSTRAP_VERSION` from `1.1.0+3.3e97060f5bc4` to `1.1.0+4.<hash>` (Rule #24).
+- New or changed armed tests assert their outcome unconditionally and pass `pnpm check:live-guards`. They create and remove their own state.
+- IRIS writes go only to a throwaway (`node scripts/throwaway-iris.mjs … --host-port 52792`), using disposable `ExecuteMCPv2.Temp.*` classes, DocDB names without underscores, and the `P747`/`QaStory447` prefixes.
+
+**Never:**
+- Add a new tool, action, governance key or refusal code. Tool, action and key counts stay the same. `GOVERNANCE_BASELINE` is checked with `:check` only.
+- Make a refused client-config verb write anything. AD-30 says a refused verb writes nothing, legacy files included.
+- Delete a database's `IRIS.DAT` or directory from `iris_database_manage`.
+- Touch the shared IRIS (localhost:52773), run `gen:ipm`, run the bare governance generator, run `pnpm run version`, or publish.
+- Edit the frozen golden JSONs, `bootstrap-classes.ts` by hand, `.claude/rules/*`, `irislib/` or `irissys/`.
+
+## I/O & Edge-Case Matrix
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|----------|--------------|---------------------------|----------------|
+| docdb create, no path | `iris_docdb_property create` with `property: "category"` | `POST …/prop/<db>/category?type=<enc>&path=%24.category`. A document saved afterwards matches `find category = …` | IRIS errors as today |
+| docdb create, path given | `path: "$.address.city"` | `&path=` carries `encodeURIComponent(path)` | -- |
+| docdb index, existing | `index` on an existing property | One `GET …/prop/<db>/<p>`, no write. Result is the definition plus `indexed: true` and `created: false` | -- |
+| docdb index, missing | `index` on a property that does not exist (GET answers #25541) | `POST …/prop/<db>/<p>?path=<enc>` with body `{ index: true }`. Result is the definition plus `indexed: true` and `created: true` | -- |
+| docdb index, system name | `property` starts with `%` | isError: DocDB REST cannot index a system property. No request is sent | -- |
+| docdb index, other GET error | the GET fails, e.g. with 822 | The same catch path as today, so the 822 translation still applies | unchanged |
+| doc compile, partial failure | `[Bad.cls, Persistent.cls]`; HTTP 200 with no status error | `success: false`. `errors` names Bad, `document: "Bad.cls"`. Persistent is not named | -- |
+| doc compile, wildcard | `doc: "Pkg.P*.cls"` | The pattern is expanded through `docnames` and the matches are checked | no match: nothing checked |
+| doc compile, check fails | the check's own request throws | `success: false`, error `{document:"*", error:"the check that every class compiled could not run: …"}` | isError stays false |
+| doc compile, clean / async / status error | -- | Result unchanged. The clean path adds the 2 check requests. Async sends no check. A status error still throws | unchanged |
+| doc load compile | a load with a Storage-written partial failure | `compilationResult.success: false`, and `errors` names the failed class | -- |
+| env-promote execute | the batch compile has a Storage-written partial failure | The first unconfirmed class step is `failed` with `compile error: …`, and later steps are `skipped` | check fails: the first step fails, the rest are skipped |
+| database delete | an unused database | Config entry removed, the directory dismounted, `IRIS.DAT` kept. Reply `{"action":"deleted","name":…,"dismounted":true}` | -- |
+| database delete, shared directory | another config entry names the same directory | Config entry removed, no dismount. Reply has `dismounted: false` and `dismountNote` | -- |
+| database delete, in use / missing | in use by a namespace (#429), or no such name | Today's error envelope, byte-identical. Nothing changes | unchanged |
+| doctor check 7 | a vscode project legacy entry whose shared `.mcp.json` entry Claude Code owns | The finding names a by-hand delete of the entry from the old file. The servers Claude Code does not own keep today's `apply` finding | unchanged otherwise |
+
+</intent-contract>
+
+## Code Map
+
+- `packages/iris-data-mcp/src/tools/docdb.ts` -- `docdbManageTool` description `:393-402`. DW-725: the false clause is at `:396`. `docdbPropertyTool` is at `:835-950`: the schema at `:846-860`, `create` at `:883-912`, and `index` at `:915-918`, which POSTs `{ index: true }` and so re-creates the property. Reuse `hasErrorCode` (`:189`), `extractResult`/`toStructured` (`:132`, `:149`), `translateDocDbAccessDenied` (`:243`), and the existing `IRIS_ERROR_CODE_*` constants (`:171-177`). Add `25541` next to them.
+- `irislib/%DocDB/Database.cls:384-478` -- `%CreateProperty`. A non-empty expression makes the property `SqlComputed` from `%Doc`; with none, the property is never populated. Every created property gets an index named after it (`findKey`/`createIndex`). `irislib/%Api/DocDB/v1.cls:355-374` -- `httpPostProperty` reads `type`, `path` and `unique` from the query. There is no route that only adds an index.
+- `packages/iris-data-mcp/src/__tests__/docdb-register.test.ts:68-125` -- the AC 44.1.7 request-list pins. The `iris_docdb_property` create and index rows change, as sanctioned. Every other row stays.
+- `packages/iris-data-mcp/src/__tests__/docdb.test.ts` (around `:530-630`, `:1100-1170`) -- the property unit tests to update.
+- `packages/iris-data-mcp/src/__tests__/data.integration.test.ts:133-157, 232-245` -- the armed lifecycle. Step 3 indexes the missing `label`. Step 7's find asserts no match.
+- `packages/iris-dev-mcp/src/tools/compile.ts:79-186` -- sync result parsing. It reads `result.content[].errors`, which IRIS never sends.
+- `packages/iris-dev-mcp/src/tools/load.ts:596-641` -- `compilationResult`.
+- `packages/iris-dev-mcp/src/tools/env-promote.ts:973-1009` -- `runDocumentsBatch` compile and the step verdicts.
+- `packages/iris-dev-mcp/src/tools/format.ts:262-330` -- XML import with compile. No change (DW-756 is closed with evidence).
+- `packages/shared/src/bootstrap.ts:496-536` -- `verifyCompiled(http, namespace, version, names)`. It takes `.cls` names only and throws on any other name. It returns the unconfirmed names in input order. It is exported from `packages/shared/src/index.ts:126`.
+- `packages/iris-dev-mcp/src/__tests__/storage-guard-write-paths-live-gate.test.ts:420-470` -- the pattern for driving `iris_env_promote` live with two clients of one instance (`promoteCtx`, `documentsDiff`, `execute`).
+- `packages/iris-dev-mcp/src/__tests__/live-doc-helpers.ts` -- `compileDocs`, plus the disposable-class helpers the dev live gates use.
+- `packages/iris-dev-mcp/scripts/prepublish-gate.mjs:79-120` -- `gateTestFiles`, the roster that a new dev live gate joins.
+- `packages/iris-dev-mcp/src/__tests__/custom-rest.integration.test.ts:325-338` -- the `it.each` roster of IRIS-side test classes, with their counts.
+- `src/ExecuteMCPv2/REST/Config.cls:436-443` -- the `delete` branch, which only calls `Config.Databases.Delete`. `create` (`:330-385`) builds `IRIS.DAT` with `SYS.Database.CreateDatabase`. `Monitor.cls:828` shows `SYS.Database.DismountDatabase` in use.
+- `packages/iris-admin-mcp/src/tools/database.ts:20-30` -- the `iris_database_manage` description.
+- `packages/iris-admin-mcp/src/__tests__/admin.integration.test.ts:175-184` -- `testDatabaseDirectory`, a fixed `mcpadmintestdata` directory. Weak tests are at `:488-505` and `:529-540`.
+- `packages/iris-interop-mcp/src/__tests__/interop.integration.test.ts:176-182, 230-305, 450-476` -- the weak tests, plus the config-item test at `:230`.
+- `packages/client-config/src/cli/clients.ts:1840-1880` -- doctor check 7. The `fix` text names `apply` unconditionally.
+- `packages/client-config/src/engine.ts:248-302` -- `notOwnerRefusal` and `sharedWriteVerdict`. This is the one place that decides ownership. `shared-files.ts:120-142` is `fileOwner`. `status.ts:54-72` is `LegacyFileStatus`.
+- `packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json` -- the templates are the `42.11/storage-guard-schema/*` entries (schema `properties` replace) and `44.1/docdb-manage-text/*`. `fixtures/tools-list-snapshot.json` is generated by `pnpm gen:tools-list-snapshot`.
+- `scripts/check-live-guards.mjs` -- the Story 44.5 guard check.
+
+## Tasks & Acceptance
+
+**Execution (suggested order, one story):**
+1. `packages/iris-interop-mcp/src/__tests__/interop.integration.test.ts`, `packages/iris-admin-mcp/src/__tests__/admin.integration.test.ts` -- DW-758. Make each of the 13 tests assert the probed outcome (Design Notes, DW-758 table): `isError` falsy plus a structured field, or the documented error. The auto-start test reads the original value, sets it to the test production, checks the change, restores the original, and checks the restore.
+2. `packages/iris-data-mcp/src/tools/docdb.ts` -- DW-723/724/725:
+   - add an optional `path` (string, min 1) to the `iris_docdb_property` schema;
+   - `create` sends `&path=<encodeURIComponent(path ?? "$."+property)>`;
+   - `index` works as the matrix says;
+   - correct both descriptions (exact claims in the Design Notes).
+   Update `docdb.test.ts` and the AC 44.1.7 pins in `docdb-register.test.ts`. Change only the property create and index rows.
+3. `packages/iris-data-mcp/src/__tests__/data.integration.test.ts` -- step 3 indexes the existing `category` and asserts `created: false`, `indexed: true`. Add a leg that indexes a missing property and asserts `created: true`, then reads it back with a GET. Step 7's find asserts that the inserted document matches `category = test`.
+4. `packages/iris-dev-mcp/src/tools/compile.ts`, `load.ts`, `env-promote.ts` -- DW-754/755:
+   - after a sync compile that IRIS answered without a status error, call `verifyCompiled` on the class documents;
+   - in `compile.ts`, first expand wildcard names (`*`, `?`) through `docnames` (Design Notes);
+   - map each unconfirmed class to the failure each tool already uses;
+   - add unit tests whose fakes return the captured shapes (Rule #54).
+5. `packages/iris-dev-mcp/src/__tests__/compile-check-live-gate.test.ts` (new; add it to `gateTestFiles`) -- the legs are:
+   - `iris_doc_compile` with a partial failure, and with a wildcard;
+   - a clean compile, which is unchanged;
+   - `iris_doc_load` with `compile: true`;
+   - `iris_env_promote` execute;
+   - the DW-756 evidence pin: an XML import with `compile: true` whose per-file status names the failing class.
+   It writes only `ExecuteMCPv2.Temp.QaStory447*` and removes them before and after the run.
+6. `src/ExecuteMCPv2/REST/Config.cls` -- DW-757. In `delete`:
+   - read the directory (`Config.Databases.Get`) before `Delete`;
+   - on success, dismount it with `SYS.Database.DismountDatabase` unless another `Config.Databases` entry names the same normalized directory;
+   - add `dismounted` and, when it applies, `dismountNote` to the reply;
+   - keep every error path byte-identical.
+   Put the logic in a class method that a test can call. Then run `pnpm run gen:bootstrap` and record the version.
+7. `src/ExecuteMCPv2/Tests/DatabaseDeleteTest.cls` (new, not bootstrapped) -- uses a disposable `P747DBT` database. The tests:
+   - after delete, the directory is dismounted (`SYS.Database` `Mounted = 0`) and `IRIS.DAT` still exists;
+   - a shared directory is not dismounted;
+   - an in-use delete changes nothing.
+   Cleanup uses `SYS.Database.DeleteDatabase`. Add the class and its count to the `custom-rest.integration.test.ts` roster.
+8. `packages/iris-admin-mcp/src/tools/database.ts` and `src/__tests__/database.test.ts` -- correct the description, and pin that the additive reply fields pass through. In `admin.integration.test.ts`, assert that delete answers `dismounted: true`, and give `testDatabaseDirectory` a per-run unique leaf so that a second run on the same instance can create.
+9. `packages/client-config/src/cli/clients.ts` -- DW-747. Check 7 splits each project-scope legacy file's servers by the engine's shared-file verdict (`sharedWriteVerdict`, or a name-only variant in `engine.ts` that reuses `notOwnerRefusal`):
+   - refused servers get a by-hand-delete finding;
+   - the others keep today's `apply` finding, byte-identical.
+   Add tests to `vscode-copilot-targets.test.ts`.
+10. `packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json`, `fixtures/tools-list-snapshot.json` -- add the sanctioned entries for every golden row that holds a changed description or `iris_docdb_property` `properties` (sanctions `S-44.7-docdb-property`, `S-44.7-docdb-manage-text`, `S-44.7-database-delete`). Then run `pnpm gen:tools-list-snapshot`.
+11. Docs and release notes:
+   - update `packages/iris-data-mcp/README.md` (`:145-148`, the property examples `:352-385`), `packages/iris-admin-mcp/README.md` (`:141`, `:311` section), `packages/iris-dev-mcp/README.md` (`:150`, `:163`) and `packages/client-config/README.md` (`:93`);
+   - add the `CHANGELOG.md` section "Story 44.7: Epic 44 Burn-down", naming the three sanction ids;
+   - add `.changeset/story-44-7-epic-44-burn-down.md` (patch: data, dev, admin, shared, client-config);
+   - update any test that pins the changed README text (search `iris-mcp-all` for it, e.g. `story-44-1-doc-claims.test.ts`).
+
+**Acceptance Criteria:**
+- AC 44.7.1: Given the nine chartered entries, when the story closes, then the Design Notes disposition table gives each one exactly one terminal disposition, and the stated tally equals the mechanical count of the table's Disposition column (the command is in Verification). After the lead mirrors the table into the ledger, `LEDGER slice 44-7-epic-44-burn-down` reads empty.
+- AC 44.7.2: Given the pre-story behaviour, when the default suite runs, then these pins hold with `toEqual` assertions against pre-story captures, and each fails on drift:
+  - every DocDB request list and result other than `iris_docdb_property` create/index;
+  - `iris_doc_compile` async mode (no check request) and the status-error throw;
+  - `iris_doc_load` with `compile: false`, plus the clean `compilationResult`;
+  - the clean `iris_env_promote` execute result;
+  - the whole `iris_doc_xml_export` import request and result;
+  - `iris_database_manage` create, modify and every delete error;
+  - doctor check 7 when no server is refused;
+  - client-config `apply`/`remove` refusals.
+  `pnpm gen:governance-baseline:check` passes, and the tool, action and key counts are unchanged.
+- AC DW-723: Given a DocDB database on a throwaway where `category` exists, when the armed lifecycle calls `iris_docdb_property index` for `category`, then the reply is not an error, carries `indexed: true, created: false`, and the tool made no POST. Given a missing property, `index` creates it and the reply carries `created: true`.
+- AC DW-724: Given a property created by `iris_docdb_property create` without `path`, when a document is inserted and `iris_docdb_find` filters on that property, then the document is returned (live, armed lifecycle).
+- AC DW-725: Given `tools/list`, when the data server lists `iris_docdb_manage`, then its description no longer claims `create` takes property definitions. The tools-list snapshot and the golden-ledger tests are green.
+- AC DW-754: Given a throwaway, when `iris_doc_compile` compiles a class that fails together with a persistent class whose Storage the compile writes, then `success` is `false` and `errors` names exactly the failing class. The same holds when the list is a wildcard that matches both.
+- AC DW-755: Given the same pair, when `iris_doc_load` loads them with `compile: true`, then `compilationResult.success` is `false` and names the failing class. When `iris_env_promote` executes them, the failing class's step is `failed` and no later step is `completed`.
+- AC DW-756: Given an XML import with `compile: true` of a failing class plus a Storage-written class, when the live gate runs it, then the reply carries a "Per-file status" block that names the failing class (the evidence for closing the entry).
+- AC DW-757: Given a disposable database on a throwaway, when `iris_database_manage delete` removes it, then `DatabaseDeleteTest` observes the directory dismounted with `IRIS.DAT` kept, and the reply carries `dismounted: true`. A database in use by a namespace is refused unchanged.
+- AC DW-747: Given a project whose shared `.mcp.json` entry `iris-dev-mcp` Claude Code owns and whose `.vscode/mcp.json` still holds `iris-dev-mcp`, when `doctor` runs, then the `vscode-local-harness-entries` finding for that server names deleting the entry from the old file by hand, and it does not name `apply --client vscode`. No refused verb writes any file.
+- AC DW-758: Given the armed admin and interop suites on a CI-image throwaway, when they run, then each of the 13 tests asserts `isError` and a structured outcome or the documented error. The weak-assertion scan (Verification) reports `hits=0`.
+
+- DW-759 *(lead, spec gate, decision #151; was this plan's `deferred:` item)*: a failed routine in a compile that also writes a class's Storage reads as success in `iris_doc_compile`, `iris_doc_load` and `iris_env_promote`. Probe on the throwaway (a broken `ExecuteMCPv2.Temp` routine compiled together with a Storage-writing class) for an oracle that reads no console text (Rule #13). Candidates: the routine's `.obj`/`.int` generation state through an existing Atelier read, or `%Library.RoutineMgr`. If one exists and needs no new route or bootstrapped method, resolve it through the same shared check path, pinned by a mutation. Otherwise close it by decision: state the limit in `packages/iris-dev-mcp/README.md` (the compile tools' section) and in the CHANGELOG, and record the probe capture. Either way the disposition is terminal and counts in the AC 44.7.1 tally (now 10 entries).
+
+### Review Findings
+
+Code review 2026-11-23 (full mode; frozen diff `ad2b17e7..58baaef8`, 6036 lines). All four layers delivered (Blind Hunter 10, Edge Case Hunter 14, Verification Gap 3 gap blocks plus other findings, Acceptance Auditor 6). Review outcome NORMAL, not degraded. Mutation lines and probe captures: `## Verification`, "Code review (2026-11-23)".
+
+- [x] [Review][Patch] (high) One check query of about 400 class names fails inside IRIS with `<STACK>`, so a clean compile, load or promote of that many classes read as "the check could not run" [packages/shared/src/bootstrap.ts `verifyCompiled`] — probe: 375 answered, 400 failed; now batched per 100 (`COMPILE_CHECK_BATCH`), and 400/1000/5000 answer live. (EC)
+- [x] [Review][Patch] (medium) Decision #152 item 1: the `provision-project-environment` rollback leads to `#78` on a retry at the same directory [packages/iris-admin-mcp/src/prompts/provisionProjectEnvironment.ts:46-47] — rollback note corrected, skills regenerated (`pnpm gen:skills`, `pnpm gen:pack`), wire golden carried by the sanctioned entry `44.7/database-delete-prompt/...` under the existing `S-44.7-database-delete` (no new sanction id), prompt hash pins re-captured. (AA+BH+VG)
+- [x] [Review][Patch] (medium) Decision #152 item 2: an unprefixed wildcard lists the whole namespace into one check (Rule #38) [packages/iris-dev-mcp/src/tools/compile.ts `documentsCovered`] — never listed now, expansion capped at 1000 documents, the result names unexpanded patterns in `checkNote`, named documents always checked. (AA+BH+EC+VG)
+- [x] [Review][Patch] (medium) Decision #152 item 3: `DeleteDatabaseEntry` ignored `Config.Databases` `Server`, so a remote (ECP) entry could dismount a local path or count as sharing it [src/ExecuteMCPv2/REST/Config.cls] — new `ShouldDismount` judges local entries only; `DatabaseDeleteTest.TestRemoteEntriesNeverDismountOrShare` (7 tests); `BOOTSTRAP_VERSION` `1.1.0+5.6cbac260e73f`. (AA+BH+EC+VG)
+- [x] [Review][Patch] (low) Decision #152 item 4: `flags` without `c` — probed: IRIS compiles anyway (`k`, `-c`), so the check stays; pinned in `compile.test.ts` and recorded in the dev README and CHANGELOG [packages/iris-dev-mcp/src/tools/compile.ts]. EC's harm claim (nothing compiled, false failures) is refuted by the probe. (AA+BH+EC+VG)
+- [x] [Review][Patch] (low) A wildcard in the extension (`Pkg.*`) skipped the check silently [packages/iris-dev-mcp/src/tools/compile.ts] — now an unexpanded pattern named in `checkNote`; changeset claim corrected. (EC)
+- [x] [Review][Patch] (low) `iris_doc_load` dropped the compile's console output when the check could not run [packages/iris-dev-mcp/src/tools/load.ts] — the entry is recorded in place, console kept, pinned. (EC)
+- [x] [Review][Patch] (low) Doctor check 7's "another client" wording was unreachable (Rule #54, QA note) [packages/client-config/src/cli/clients.ts] — old files list canonical names only and a canonical shared entry always has an owner (`fileOwner`), so the branch is removed, not pinned with an impossible fake. (BH)
+- [x] [Review][Patch] (low) Request-count claims wrong in the dev README, CHANGELOG and `compile-check.ts` [packages/iris-dev-mcp/README.md, packages/iris-dev-mcp/src/tools/compile-check.ts] — corrected for batches, package roots and wildcards. (BH+EC)
+- [x] [Review][Patch] (low) Rule 19 mutation lines missing for AC 44.7.1, DW-756 live, DW-723 live, and AC 44.7.2's claim that the `sharedWriteVerdictByName` mutation covers the `apply`/`remove` refusals (it reaches neither) — all run and recorded; 12 of 13 DW-758 tests stay a named residual. (VG)
+
+Rejected:
+- AA5/BH6 spec self-contradictions (`deferred: []` vs the Auto Run Result, frontmatter `status` vs the tracker, the stale "Wildcard expansion" bullet) — low; the fix edits the spec under review (for the lead).
+- AA6 AD-14 records the class check but not the `.mac` check or the `.inc`/`.int` limit — low; a spine edit (Rule 20, lead bookkeeping).
+- BH5 the earlier Review Triage Log tally — low; the fix edits the spec. Mechanical count of its 44 entries: high 0, medium 2, low 34, false 3, maybe-false 5 (it says low 33, maybe-false 6).
+- BH7 ledger dispositions not mirrored — false: AC 44.7.1 has the lead mirror the table after review.
+- BH8 `index` of a missing property ignores `type` — low, by design: the Design Notes fix `index` creates a `%String`, and the description says so.
+- EC3 a mapping-only or library database could now be dismounted — false: probe (4), `Config.Databases.Delete` refuses them (#429/#427) before any dismount.
+- EC6 wildcard expansion judging `%` or mapped library classes gives false failures — false: probe (5), all confirmed.
+- EC9 case-insensitive expansion vs IRIS matching — maybe-false, low if true (a matched class IRIS did not compile is still confirmed when it is compiled).
+- EC11 a check that cannot run fails the first promote step — false: the I/O matrix requires it.
+- VG2 interop filter loops pass on an empty list — low, by design: the DW-758 table sets those assertions.
+- VG3 the ordered armed lifecycle suites are not order-independent — low; the fix is a spec reword.
+
+## Spec Change Log
+
+- 2026-11-23 (lead, post-review): the review's AA5/BH6 spec self-contradictions are fixed. `deferred: []` is correct: the build's five items were disposed by decision #152 (DW-760 closed by decision; four patched in-story by the review), so the Auto Run Result's mention of `deferred` items refers to that pre-triage list. The stale Design Notes wildcard bullet now carries the as-built note. The ledger mirrors the disposition table: one trailer per entry, 9 `resolved-by` and DW-756 `resolved-by` with CLOSED-WITH-EVIDENCE. The spine gets the review's AD-14/AD-15 additions.
+
+- 2026-11-23 (lead, dev_complete triage, decision #152): the build's five `deferred:` items. (1) The `.inc`/`.int` remainder of DW-759 (no oracle: `upd` says nothing about whether they compiled) is harvested as DW-760 and closed by decision at once. The limit is documented in the dev README and the CHANGELOG, and DW-759 counts as resolved for `.mac`, the only routine type IRIS gives an oracle for. (2)-(5) The other four are consequences of this story's own new code or behaviour, so they are in-story items for the code review, not ledger entries: the `provision-project-environment` rollback text (delete now keeps `IRIS.DAT`, so re-provisioning at the same directory fails #78; fix the prompt source and regenerate the skill with its parity tests); an unprefixed wildcard (`*.cls`) expanding the whole namespace into one check query (Rule #38: bound it, or batch it, or check only the explicitly named documents, and pin it); `DeleteDatabaseEntry` ignoring the `Config.Databases` `Server` column (a remote/ECP entry must never dismount a local path or count as sharing it: restrict both to local entries, and prove it by source read plus a unit or IRIS-side test, since a live ECP probe is out of reach); and compile `flags` without `c` still running the check (probe on a throwaway, then skip the check when nothing was compiled, or record that IRIS compiles anyway). Anything the review cannot close goes on the epic-close decision sheet.
+
+- 2026-11-23 (lead, spec gate, decision #151): the plan's `deferred:` routines item is harvested as DW-759 and taken into this story (cap 12; Rule 17: `burndown` ownership does not survive the gate), with a terminal disposition required. The spine was amended at the gate: AD-15 gets the three `S-44.7-*` sanctions, and AD-14 "on failure" gets the compile check in the three dev tools.
+
+- 2026-11-23 (implementation): (1) the weak-assertion scan reports 14 hits before the story, not 13: `data.integration.test.ts` "handles MDX query on nonexistent cube gracefully" held a redundant `expect(text).toBeDefined()` before its real assertion, and the scan counts it. The redundant line was dropped, so `hits=0`. (2) DW-759 resolved for `.mac` routines (probe: `docnames/RTN` `upd`), and the check now covers `.mac` as well as `.cls` in the three tools; `.inc` and `.int` have no oracle and are carried in `deferred:` and stated as a limit in the README and CHANGELOG. This extended `@iris-mcp/shared` with `verifyRoutinesCompiled` (a TypeScript function, no new route, no bootstrapped class). (3) The Design Notes disposition table gained the DW-759 row; the tally is 9 resolved and 1 closed-with-evidence.
+
+## Review Triage Log
+
+### 2026-11-23 — Review pass
+- verdicts: 44 findings — high 0, medium 2, low 33, false 3, maybe-false 6
+- findings (BH = Blind Hunter, EC = Edge Case Hunter, VG = Verification Gap, IA = Intent Alignment):
+  - `[low]` `reject` BH1 changeset omits the create wire change and marks the new shared export patch — the changeset does list `create` sends a path; patch for every package is the spec's own instruction.
+  - `[low]` `patch` BH2 CHANGELOG "14 tests" miscounts the data test — reworded to 13 weak tests plus a redundant line dropped.
+  - `[low]` `patch` BH3 "two more Atelier reads" understated — CHANGELOG and dev README reworded to one query plus one listing per package root.
+  - `[maybe-false]` `defer` BH4 no scope guard on the unfiltered wildcard listing (`*.cls`) — medium if true (unverified); settle with a throwaway wildcard compile over a large namespace. README now states the listing.
+  - `[low]` `reject` BH5 `checkCouldNotRunText` says "class" for a routine-only failure — the I/O matrix pins this text; wording only.
+  - `[low]` `reject` BH6 upper-case `.CLS`/`.MAC` skipped — Atelier returns lower-case extensions; no reachable input shown.
+  - `[low]` `reject` BH7 doctor text for an owner-less refusal — the refusal exists only when the shared entry is not this client's, so the text holds; wording only.
+  - `[maybe-false]` `defer` BH8 `DeleteDatabaseEntry` ignores remote/ECP entries — medium if true (unverified); settle by deleting a remote entry on a throwaway.
+  - `[low]` `reject` BH9 case-sensitive directory compare on macOS — IRIS on macOS dev hosts only; theoretical.
+  - `[low]` `reject` BH10 admin test leaves `IRIS.DAT` per run — by design (the tool keeps the file, documented); `wontfix-accepted`, reopen_if the instance disk fills.
+  - `[medium]` `defer` BH11 skill/prompt `provision-project-environment` rollback now leaves `IRIS.DAT` — real doc inaccuracy, but the skill is generated from `prompts/provisionProjectEnvironment.ts` with parity tests, a wider surface than a fix-pack item.
+  - `[low]` `reject` BH12 `path` has no format validation — IRIS rejects or ignores a bad path; no demonstrated harm.
+  - `[false]` `reject` BH13 `index` asserts `indexed: true` from a GET — DocDB indexes every property it creates (probe `%Dictionary.CompiledIndex`, Design Notes); a decision of the spec.
+  - `[maybe-false]` `defer` EC1 the wildcard expansion can hand a very large list to one `action/query` — same root as BH4 (appended there).
+  - `[low]` `reject` EC2 extensionless exclusion (`'Pkg.Test.*`) is skipped — IRIS exclusions in the compile list are by document name with extension.
+  - `[low]` `reject` EC3 upper-case extension — same as BH6.
+  - `[maybe-false]` `defer` EC4 flags without `c` still run the check — medium if true (unverified); settle by compiling with `flags: "k"` on a throwaway.
+  - `[low]` `reject` EC5 non-array `docnames` content is read as empty — the shared client throws on a non-200, so only a malformed 200 reaches it.
+  - `[maybe-false]` `defer` EC6 remote entry blocks/targets dismount — same root as BH8.
+  - `[low]` `reject` EC7 relative database directory — `Config.Databases` stores the full path.
+  - `[low]` `reject` EC8 dismounting a system database — `Config.Databases.Delete` refuses a database in use by a namespace (#429), probed.
+  - `[low]` `reject` EC9 Catch-after-delete branch builds a note from an OK status — described as unreachable by the reviewer itself.
+  - `[low]` `reject` EC10 doctor with an empty server list — the finding is emitted only per file with servers to move.
+  - `[low]` `reject` EC11 property names with `.` or `-` in the default path — a DocDB property name is a plain identifier.
+  - `[false]` `reject` EC12 index of an existing property reported on a GET alone — same as BH13.
+  - `[low]` `reject` EC13 unit-test fakes lack the envelope — the fakes are captured shapes (Rule #54) and the live leg covers the envelope.
+  - `[false]` `reject` EC14 a check that cannot run after a written compile fails the first step — the I/O matrix requires exactly this.
+  - `[low]` `reject` EC15 claim: wildcard errors name more than the failing class — the check names every unconfirmed matched class by design.
+  - `[low]` `reject` EC16 claim: doctor split ignores scope — user-scope legacy files have no shared-file owner, so nothing is refused.
+  - `[medium]` `patch` VG1 `.mac` failure in `iris_env_promote` has no default-suite pin — added a test in `env-promote-execute.test.ts`; mutation: `.mac` names filtered out of the check input -> that test red; reverted, tree byte-identical.
+  - `[low]` `reject` VG2 partial-failure branches of `DeleteDatabaseEntry` untested — rare branch; `wontfix-accepted`, reopen_if a delete reports an error after the entry was removed.
+  - `[low]` `reject` VG3 interop log/trace loops can pass on zero entries — spec-bound: the DW-758 table asks for the probed assertions; `by-design`.
+  - `[low]` `reject` VG4 delete-error byte identity not pinned at the producer — `wontfix-accepted`; the TS pin and the in-use assertion exist, reopen_if a delete error text changes.
+  - `[low]` `reject` VG5 mutation lines missing for AC 44.7.1, DW-756 (live), DW-723 (live) and 12 of 13 DW-758 tests — these are armed or tally checks needing a throwaway; recorded as a residual risk, not re-run.
+  - `[low]` `reject` VG6 admin test leaves a directory — same as BH10.
+  - `[low]` `reject` VG7 admin tests 11 and 12 depend on instance policy — they pin the CI image's probed outcome, as the spec states.
+  - `[low]` `reject` VG8 clients not destroyed in `finally`, data step 3 guard — armed tests, failure paths only; cosmetic.
+  - `[low]` `reject` VG9 spec text still says non-class names are unchecked — the Spec Change Log records the DW-759 widening.
+  - `[low]` `reject` VG10 unfiltered wildcard — same as BH4 (deferred).
+  - `[low]` `reject` IA1 DW-757 behaviour is asserted at the class method, the route only via the admin live reply — the admin live leg drives the route; accepted.
+  - `[low]` `reject` IA2 DW-759 wording differs across artifacts — resolved for `.mac`, the `.inc`/`.int` residue is stated as a limit and deferred.
+  - `[low]` `reject` IA3 `.mac` checked beyond "classes" — the lead's DW-759 AC asks for it.
+  - `[low]` `reject` IA4 DW-747 applies to any owner — the engine's verdict decides, as the spec says.
+  - `[low]` `reject` IA5 the weak-assertion scan lives in the scratchpad — the spec's Verification names it; a repository check is a separate story.
+
+## Design Notes
+
+**Disposition table (AC 44.7.1; the lead mirrors one trailer line per row, Rule 17).**
+
+| Entry | Disposition | Why |
+|---|---|---|
+| DW-723 | resolved | Probe: `index` on an existing property gives #5805. DocDB indexes every property when it creates it, and its REST API has no index-only route, so `index` reads and never re-creates. |
+| DW-724 | resolved | Probe: a property with no path is never populated, while `path=cat2`, `$.cat3` and `$.nested.k` all match. The default `$.<property>` fixes it. IRIS does not backfill documents saved before the property existed: by design, stated in the description. |
+| DW-725 | resolved | A text correction (recorded-correction replace) through the Frozen goldens. |
+| DW-747 | resolved | The doctor now names a path that works: a by-hand delete of the unused old-file copy, because Copilot reads the shared `.mcp.json` entry. Refused verbs keep writing nothing (AD-30), so the CLI write is closed by design. |
+| DW-754 | resolved | Probe A/E: `success: true` while `verifyCompiled` names the failing class. Fixed with `verifyCompiled`. |
+| DW-755 | resolved | Probe F: the load reports success the same way. `env-promote.ts:980-1001` reads the same field. Fixed with `verifyCompiled`. |
+| DW-756 | closed-with-evidence | Probes G and H: the XML load's per-file status carries `ERROR #5475` naming the failing class whether or not Storage was written, so the failure never reads as success. With two failures it names only the first, but `iris_doc_compile` (DW-754) names them all. |
+| DW-757 | resolved | Probe: delete leaves the directory mounted with no config entry; a second create fails #60. Delete now dismounts it. `IRIS.DAT` is kept by design: deleting it is irreversible data loss, and the tool has no confirmation gate. A create at the same directory then fails #78 until the file is removed. The description says so. |
+| DW-758 | resolved | All 13 tests assert the probed outcome. Thirteen, not twelve: the scan also found `gets config item settings` (`interop:230`), which asserts only a precondition plus `toBeDefined` (Rule #56). The implementation scan reported a 14th hit, `data.integration.test.ts` "handles MDX query on nonexistent cube gracefully", which already asserted its outcome after a redundant `toBeDefined()`; that line is gone (Spec Change Log). |
+| DW-759 | resolved | Probe 2026-11-23: `[bad.mac, ok.mac, Pers.cls]` answers success:true; `docnames/RTN` lists `bad.mac` `upd:false` and `ok.mac` `upd:true`, with no console text. `.mac` routines are checked through the same shared path (`verifyRoutinesCompiled`). Limit, stated in the dev README and the CHANGELOG: `.inc` (flag true whether or not anything compiled) and `.int` (flag true after a failed compile) have no oracle. |
+
+Tally: 9 resolved, 1 closed-with-evidence, 0 closed-by-decision (10 entries). Ledger mapping: resolved becomes `status=resolved-by:44-7-epic-44-burn-down`. Closed-with-evidence becomes `status=dropped note=closed-with-evidence: probe 2026-11-23 xml/load per-file status names the failure`. DW-758 gets the note "13 tests incl. config-item (interop:230); plus data MDX-error test cleaned (14th hit of the scan)". DW-759 gets the note "`.mac` checked via docnames/RTN upd; `.inc` and `.int` have no oracle (limit documented)".
+
+**Probe captures** (2026-11-23, `irishealth-community:2026.2@sha256:462de1fb…`, HSCUSTOM, port 52792, seeded with `ci-seed-throwaway.mjs`, removed afterwards; raw output in the scratchpad: `p758.out`, `pdocdb.out`, `pdocdb2.out`, `pcompile.out`, `pxml2.out`).
+- **DocDB.**
+  - A property created without `path` gives `find category=test` → `[]`.
+  - `path=cat2`, `path=%24.cat3` (`encodeURIComponent("$.cat3")`; IRIS decodes it) and `path=%24.nested.k` all match. A literal `$.c` also works.
+  - A document inserted before the property is not returned until it is re-saved.
+  - `GET …/prop/<db>/missingprop` gives HTTP 400 `ERROR #25541: DocDB Property 'missingprop' does not exist`. `find` on an unknown property gives 400 #25541.
+  - POSTing the existing `cat3` with `{index:true}` gives 400 `ERROR #5805: ID key not unique for extent '%Dictionary.PropertyDefinition'`.
+  - `%Dictionary.CompiledIndex` holds `IDKEY` (`%DocumentId`), one index per created property (`a`, `b`), and a `_Unique` index for `unique=1`. `%Doc` has none.
+  - `GET …/db/<db>` answers `{"content":{"Name","Class":"ISC.DM.<db>","properties":[…]}}`.
+- **Compile.**
+  - (A) `[X fails, P persistent]` gives HTTP 200 and tool `success: true`; `verifyCompiled` gives `["…P747X.cls"]`.
+  - (B) X alone gives `IrisApiError` 200 #5475, which the tool throws.
+  - (C) A clean compile gives `success: true`, `verifyCompiled` → `[]`.
+  - (D) `"ExecuteMCPv2.Temp.P747*.cls"` is accepted by `action/compile` and expanded by IRIS.
+  - (E) `[X, P2, OK]` gives `success: true`.
+  - (F) `iris_doc_load` compile gives `compilationResult.success: true`; `verifyCompiled` gives `["…P747LX.cls"]`.
+  - (G) XML import `[XX fails, XP Storage]` gives per-file `status` "ERROR #5475 … P747XX". (H) XX alone gives the same.
+  - With two failing classes plus a Storage class, the status names only XA, while `verifyCompiled` gives `[XA, XB]`.
+- **Database.**
+  - After create then delete: `config=0 sysdb=1 mounted=1 irisdat=1`. A second create gives `ERROR #60: the database must be dismounted`.
+  - After `DismountDatabase`: `mounted=0`. A create at the same directory gives `ERROR #78: File already exists`.
+  - `SYS.Database.DeleteDatabase` after the config delete leaves `sysdb=0 irisdat=0` and keeps the directory, and a re-create then succeeds.
+  - `Config.Databases.Delete("USER")` gives `ERROR #429: Cannot delete database USER, in use by the following namespaces: USER`.
+- **DW-759** (implementation probe, 2026-11-23, throwaway `irishealth-community:2026.2@sha256:462de1fb…`, HSCUSTOM, port 52792; raw output in the scratchpad: `p759.out`, `p759b.out`).
+  - `iris_doc_compile` of `[P759Bad.mac, P759Ok.mac, P759Pers.cls]` (Pers has no Storage yet) answers `success: true`; the console names the failed routine (`ERROR: ...P759Bad.mac(1) : MPP5610 : Referenced macro not defined`) and the class (`Compiling table ExecuteMCPv2_Temp.P759Pers`).
+  - `GET docnames/RTN?filter=ExecuteMCPv2.Temp.P759`: `P759Bad.mac` `upd: false`, `P759Ok.mac` `upd: true`. Before any compile an uncompiled `.mac` is `upd: false`.
+  - Probe 2, `.int` and `.inc`: a failing `.int` (`Write ((`) is `upd: true` after the compile although the console reports its error; `.inc` documents are `upd: true` before and after, failing or not. A second compile of the clean three keeps their flags true.
+  - Not oracles: `GET doc/<routine>.obj` answers HTTP 400; the `%Library.RoutineMgr_*` SQL functions do not exist (`SQLCODE -359`); the generated `.int` exists for both the failing and the clean routine.
+  - Oracle chosen: the `.mac` `upd` flag, the same Atelier read as the class check's `docnames`, no new route and no bootstrapped method.
+- **DW-758 outcomes** (the tool replies on the CI image):
+
+| # | Test (file:line) | Reply | Assert |
+|---|---|---|---|
+| 1 | interop:176 status after create | `{name:"",state:"Stopped",stateCode:2}` | isError falsy; `state` is a string |
+| 2 | interop:247 autostart get | `{action:"get",autoStart:"",enabled:false}` | isError falsy; `autoStart` string, `enabled` boolean |
+| 3 | interop:256 autostart set | set gives `{autoStart:<prod>,enabled:true}`; the test's `enabled:false` is not a tool field | set to the test production, check it, restore the original, check the restore |
+| 4-5 | interop:278/288 logs | `{entries:[{type:4,…}]}` | isError falsy; `entries` array; with `type:"Info"` every `type === 4` |
+| 6 | interop:301 queues | `{queues:[…],count:3}` | isError falsy; `count === queues.length` |
+| 7 | interop:450 rules | `{rules:[],count:0,total:0}` | isError falsy; `rules` array |
+| 8 | interop:457 transforms | `{transforms:[…]}` | isError falsy; `transforms` array |
+| 9 | interop:468 trace sessionId 1 | `{messages:[{sessionId:1,…}],count:1}` | isError falsy; every message has `sessionId === 1` |
+| 10 | admin:488 validate | `{valid:true,policy:{…}}` | isError falsy; `valid === true` |
+| 11 | admin:497 weak `a` | `{valid:false,message:"ERROR #845: …"}` | isError falsy; `valid === false`; message contains `845` |
+| 12 | admin:529 `_SYSTEM` `%DB_USER` R | `{granted:true,reason:"target holds %All super-role"}` | isError falsy; `granted === true` |
+| 13 | interop:230 config item `NonExistentItem` | isError true, text "… ERROR #5001: Config item 'NonExistentItem' not found" | `isError === true`; text contains `NonExistentItem` |
+
+**Decisions.**
+- *DocDB `index`.* It never creates on an existing property, so #5805 cannot happen. For a missing property it keeps today's behaviour (create plus the implicit index) and adds the path, which leaves the entry's unnamed path unchanged. A `%`-prefixed name is refused because its index state varies (`%DocumentId` has IDKEY, `%Doc` has none), so `indexed: true` would be false for some of them. `path` is ignored by `drop`, and by `index` on an existing property.
+- *Description claims* (wording is the implementer's; these claims are required):
+  - `iris_docdb_property`: `create` populates the property from `path` (default `$.<property>`, the top-level field of the same name); documents saved before the property exists are not populated until they are saved again; DocDB indexes every property it creates; `index` reports an existing property without writing and creates a missing one (`%String`, at `path`).
+  - `iris_docdb_manage`: drop "with optional property definitions"; say `create` makes an empty database whose properties are defined with `iris_docdb_property`.
+  - `iris_database_manage`: `delete` removes the configuration entry and dismounts the database (unless another configured database uses that directory); its `IRIS.DAT` and directory stay on disk, so a create at the same directory fails until the file is removed. Keep the existing background-work note.
+- *Compile check mapping.* Only a sync compile that IRIS answered without a status error is checked; status-error and async paths are untouched.
+  - Case-insensitive matching against unconfirmed names (as `verifyCompiled` does).
+  - `compile.ts`: `success: false`; one `errors` entry per unconfirmed class, `{document, error: "<doc> did not compile: the class dictionary and IRIS's up-to-date flag do not confirm it (IRIS answered the compile without a status error; see console)"}`; summary "Compilation failed …"; `isError` false (the tool's existing contract).
+  - `load.ts`: the same entries go into `compilationResult.errors` with `success: false`.
+  - `env-promote.ts`: an unconfirmed class makes its step `failed` with `compile error: <same text>`, and the existing first-failure, rest-skipped loop applies.
+  - A check that throws makes the compile a failure, never a pass.
+- *Wildcard expansion* (`compile.ts` only; the other two tools pass concrete names). For each `.cls` name containing `*` or `?`:
+  - `GET docnames/CLS?filter=<literal prefix before the first metacharacter>`, then keep the entries whose `name` matches the pattern as an anchored, case-insensitive regex (`*` is any run, `?` is one character, everything else escaped), skipping `gen: true`;
+  - a name with a leading `'` is an exclusion, and its matches are removed;
+  - non-class names (`.mac`/`.int`/`.inc`) are not checked (see `deferred`).
+  - *(Superseded by the review, `0369423f`; lead note 2026-11-23.)* As built: a wildcard with no literal prefix is not listed, an extension wildcard (`Pkg.*`) is not expanded, expansion stops at 1000 documents, and anything left unchecked is reported in `checkNote`. `.mac` routines are checked (`verifyRoutinesCompiled`), and `.inc`/`.int` are a documented limit (DW-760). The check query is batched at 100 names (`<STACK>` at about 400).
+- *DW-757 dismount*:
+  - Normalize both directories with `##class(%Library.File).NormalizeDirectory` before comparing them with every other `Config.Databases` entry (`Config.Databases:List` or `Get` per name).
+  - Dismount only after `Delete` returned OK. A missing name still gets `Delete`'s own error: run `Get` only to read the directory, and fall through to `Delete` on failure.
+  - A failed dismount is reported as `dismounted: false` with `dismountNote` (the `SanitizeError` text). The delete itself succeeded, so it is not an error.
+  - The handler pattern is AD-12/AD-13 (save and restore `$NAMESPACE`, no `New $NAMESPACE`).
+- *DW-747*: the finding is per legacy file. When no server is refused, it is byte-identical to today's. Otherwise the refused servers get their own finding with `entry` set, e.g. "`iris-dev-mcp` is still in `<old path>`; the workspace `.mcp.json` entry belongs to Claude Code (claude-code), which Copilot sessions also read, so this copy is unused. Delete the "iris-dev-mcp" entry from `<old path>` by hand: the CLI never changes an entry another client owns in the shared file." The by-hand wording follows check 6's home-directory precedent.
+
+**Governing ADs (Rule 6).**
+- AD-15: sanctions `S-44.7-docdb-property` (recorded correction plus an additive `path` field plus the create-default change), `S-44.7-docdb-manage-text` (recorded correction) and `S-44.7-database-delete` (recorded correction, additive reply fields, dismount); the clean paths are pinned.
+- AD-14 / Rule #24: the embed is regenerated; there is no new bootstrapped class.
+- AD-12 and AD-13: thin handler, explicit namespace save and restore.
+- AD-11: one error envelope.
+- AD-30: refused verbs write nothing; the fix is in the doctor.
+- AD-2: the dev package imports `verifyCompiled` from shared; the IRIS-side test runs from the dev suite.
+- AD-4/AD-5: no new key.
+- No AC contradicts an AD.
+
+**For the lead (Rule 20, at the story's bookkeeping commit).** Add the three sanction ids to AD-15's sanctioned list. Add to AD-14 "on failure": the compile check now also runs in `iris_doc_compile`, `iris_doc_load` and `iris_env_promote`. The `deferred` item (routines) is for harvest.
+
+**Scope and order.** All of this fits one story, but it is wide: 5 packages, 1 IRIS class and its embed, goldens and docs. Build in the order of the Execution list. Steps 1-3, 4-5, 6-8 and 9 are independent, and step 10-11 closes them. If a pass runs out, checkpoint after a complete step. Never leave a description changed without its golden entry.
+
+**Integration ACs, Consumes and Consumed-by (Rules 1 and 2).**
+- No new service.
+- Consumes: `verifyCompiled` (44.4), consumed by `iris_doc_compile`, `iris_doc_load` and `iris_env_promote`. The Integration ACs are DW-754/755, live on a throwaway.
+- Consumed-by: none. This is the epic's last story.
+- Extend, don't copy:
+  - the three tools call `verifyCompiled` and keep their own compile POST, so the request bytes stay the same;
+  - the wildcard helper lives in `compile.ts`, its only consumer;
+  - doctor reuses the engine's ownership verdict;
+  - the live gate reuses `storage-guard-write-paths-live-gate.test.ts`'s two-client promote pattern and `live-doc-helpers.ts`.
+
+**Ledger.** The inbox is the nine chartered entries (`owned_ledger=9`), all addressed above. No entry was declined.
+
+## Verification
+
+**Commands:**
+- `pnpm --filter @iris-mcp/data exec vitest run src/__tests__/docdb.test.ts src/__tests__/docdb-register.test.ts src/__tests__/docdb-register-qa.test.ts` (timeout 600000) -- expected: green.
+- `pnpm --filter @iris-mcp/dev exec vitest run src/__tests__/compile.test.ts src/__tests__/load.test.ts src/__tests__/env-promote.test.ts src/__tests__/env-promote-qa.test.ts` (timeout 600000) -- expected: green.
+- `pnpm --filter @iris-mcp/admin exec vitest run src/__tests__/database.test.ts` and `pnpm --filter @iris-mcp/client-config exec vitest run src/__tests__/vscode-copilot-targets.test.ts` -- expected: green.
+- `pnpm run gen:bootstrap` then `pnpm --filter @iris-mcp/shared exec vitest run src/__tests__/bootstrap.test.ts` -- expected: green. A second `gen:bootstrap` reports "Unchanged".
+- `pnpm gen:tools-list-snapshot` then `pnpm --filter @iris-mcp/all exec vitest run src/__tests__/tools-list-snapshot.test.ts src/__tests__/story-43-1-sdk-wire-golden.test.ts src/__tests__/epic43-capstone-gate.test.ts` -- expected: green.
+- `pnpm check:live-guards`, `pnpm gen:governance-baseline:check`, `pnpm gen:ipm:check`, `pnpm turbo run build`, lint, type-check -- expected: OK. Then the default suite, one package per call.
+- Live, on one `up` throwaway (`node scripts/throwaway-iris.mjs up --image intersystems/irishealth-community:2026.2@sha256:462de1fb3597272fde0e03afad006af1b18b59c90f1c1fb5566c79b027a7af0a --namespace HSCUSTOM --host-port 52792 --state <scratch>/tw.json`; seed with `ci-seed-throwaway.mjs`; enable DocDB with `scripts/ci-enable-docdb-service.script`; `down` afterwards):
+  - run `ci-live-suite.mjs` for `integration-admin`, `integration-interop`, `integration-data`, `integration-dev` and `prepublish-dev`, one per call;
+  - run `integration-admin` twice on the same container (DW-757's second-run case);
+  - expected: green, with no skip outside the allowlists.
+- Weak-assertion scan (DW-758): for every file in `coveredTestFiles()` (`scripts/lib/ci-checks.mjs`), find each `it(` block whose `expect(` lines that mention a result or text are all `.text).toBeDefined()`. This is the planning scan, `scratchpad/scan-weak.mjs`; a copy can go in the spec's QA notes. Expected: `hits=0`.
+- Tally (AC 44.7.1): `awk -F'|' '/^\| DW-/ {gsub(/ /,"",$3); n[$3]++} END {for (k in n) print k, n[k]}' _bmad-output/implementation-artifacts/spec-44-7-epic-44-burn-down.md` -- expected: `resolved 9`, `closed-with-evidence 1` (DW-759 joined the table at implementation).
+
+**Shared surfaces:**
+- the tools-list snapshot and the wire golden (3 descriptions, 1 schema);
+- the AC 44.1.7 request lists;
+- `gateTestFiles` and the live-gate roster test;
+- the `custom-rest.integration.test.ts` IRIS-class roster;
+- the `BOOTSTRAP_VERSION` embed;
+- README text pinned by `iris-mcp-all` doc-claim tests;
+- doctor findings pinned in client-config tests.
+
+Every test added or changed must pass on a fresh environment, in either order.
+
+**Mutations to apply and record** (one per AC; observe red, revert, confirm `git status --short` and `git diff --stat` are unchanged):
+- DW-723: `index` POSTs unconditionally.
+- DW-724: drop the default path.
+- DW-725: revert the text.
+- DW-754: skip `verifyCompiled` in `compile.ts`, and separately disable the wildcard expansion.
+- DW-755: skip it in `load.ts`, and separately in `env-promote.ts`.
+- DW-757: remove the dismount call.
+- DW-747: always emit the `apply` fix.
+- DW-758: make one probed tool answer `isError`, and its test goes red.
+- AC 44.7.2: change one pinned byte per pin group.
+- DW-759: skip the routine check.
+
+**Recorded results (implementation, 2026-11-23).** Each mutation was applied, observed red, reverted; `(git status --short; git diff) | shasum -a 256` was `7d8556bdcb15d5a131c4eea675795bb5620f5be96fe7037a54b34fbb7e166c9f` before the first mutation and again after the last one. After the mutation runs, packages whose sources had been touched were rebuilt from a deleted `dist/` (the build-freshness guard compares mtimes, so a reverted edit leaves a stale-looking dist).
+
+- mutation: DW-723, `docdb.ts` `index` POSTs unconditionally (`if (true || missing)`) -> `docdb.test.ts` and the AC 44.1.7 request-list pin red (3 tests: "index on an existing property reads it and writes nothing", "index ignores a path on an existing property", the `iris_docdb_property` request list).
+- mutation: DW-724, `docdb.ts` default path dropped (`path ?? ""`) -> unit red (3: the default-path create test, the missing-property index test, the request-list pin) and, on the path the fix guards, the live DocDB lifecycle on the throwaway red ("DocDB lifecycle integration > finds documents with filter": the find returns no row).
+- mutation: DW-725, `docdb.ts` `iris_docdb_manage` text reverted to "with optional property definitions" (dist rebuilt) -> `tools-list-snapshot.test.ts` red (3) and `story-43-1-sdk-wire-golden.test.ts` red for `iris-data-mcp` tools-list (2).
+- mutation: DW-754, `compile.ts` check skipped (`allErrors.length === 0 && false`) -> `compile.test.ts` red (12) and the live gate `compile-check-live-gate.test.ts` red on the throwaway (legs 1, 2, 3 and 7). Separately, wildcard expansion disabled (`true || !hasWildcard(name)`) -> `compile.test.ts` red (5) and live leg 2 red.
+- mutation: DW-755, `load.ts` check skipped -> `load.test.ts` red (4) and live leg 4 red. Separately `env-promote.ts` check skipped -> `env-promote-execute.test.ts` red (4) and live legs 5 and 8 red.
+- mutation: DW-757, the `DismountDatabase` call replaced by `$$$OK` in a copy of `Config.cls` deployed to the throwaway only (`scratchpad/m757.mjs`; the repository file was never edited) -> `ExecuteMCPv2.Tests.DatabaseDeleteTest` red (total 6, passed 4, failed 2: "TestDeleteDismountsAndKeepsTheFile" and "TestSecondCreateIsNotBlockedByAMountedDatabase"), so the `integration-dev` roster entry fails; the real source redeployed and the class passes 6 of 6. A first attempt had a typo in the replacement (`$$` is special in `String.replace`), produced `<NOLINE>` and was discarded, not counted.
+- mutation: DW-747, `clients.ts` refused servers always empty (always the `apply` advice) -> `vscode-copilot-targets.test.ts` red (2). Separately `sharedWriteVerdictByName` returning `none` always -> 5 red across `vscode-copilot-targets.test.ts` (the refusal pins of the Story 44.2 section included).
+- mutation: DW-758, `iris_production_queues` made to answer `isError: true` -> the live `integration-interop` suite red ("production queues > queries queue status").
+- mutation: DW-759, `compile-check.ts` routine check skipped -> `compile.test.ts` and `load.test.ts` red (4) and live legs 7 and 8 red.
+- mutation: DW-759 on `iris_env_promote` (review pass), `.mac` names filtered out of the check input in `env-promote.ts` -> `env-promote-execute.test.ts` "a .mac routine the check does not confirm" red; reverted, `git diff` hash identical.
+- mutation: AC 44.7.2 pin groups, one byte each, all red and reverted: DocDB request lists (`drop` path + `x`: the AC 44.1.7 pin); `iris_doc_compile` async (`mode: "Async"`: 2 tests, incl. the new "no check request" pin); `iris_doc_load` `compile: false` (compile ran for `uploaded.length > 0`: 4 tests); clean `iris_env_promote` result (an extra `detail` member: the full-result pin); `iris_doc_xml_export` import (`Per-file status (...)` without the colon: 2 tests); `iris_database_manage` delete error (colon removed: the every-delete-error pin); doctor check 7 with no refused server (`Move them  `: 2 tests); client-config `apply`/`remove` refusals (covered by the `sharedWriteVerdictByName` mutation above).
+- BOOTSTRAP_VERSION: `1.1.0+3.3e97060f5bc4` -> `1.1.0+4.08228306009d` (`scripts/bootstrap-sequence.json` 3 -> 4); a second `pnpm run gen:bootstrap` reports "Unchanged ... (not rewritten)". `pnpm gen:ipm:check` is OK (the IPM tree is the last release's, untouched).
+- Live (one throwaway `iris-mcp-throwaway-75a46f4d2b64`, port 52792, seeded by `ci-seed-throwaway.mjs` from the rebuilt embed, so the changed `Config.cls` came through the bootstrap path; `%Service_DocDB` enabled after the prepublish suite): `integration-admin` 30/30 twice on the same container (the second run created its database in a fresh per-run directory), `integration-interop` 21/21, `prepublish-dev` 328/328 (the new gate's 8 legs included), `integration-data` 13/13, `integration-dev` 34/34 (`DatabaseDeleteTest` 6/6 through `iris_execute_tests`). No test skipped.
+- Weak-assertion scan (`scratchpad/scan-weak.mjs`): `files=73 hits=0` before the new gate joined the roster (74 armed files, `pnpm check:live-guards` 0 findings after it did).
+- Default suites, one package per call: shared 2659 passed, dev 1528 passed (327 skipped), data 212 passed (2 skipped), admin 511 passed (8 skipped), interop 754 passed, client-config 1460 passed. `pnpm turbo run build lint type-check` OK; `pnpm gen:governance-baseline:check`, `pnpm gen:tools-list-snapshot:check` and `pnpm gen:ipm:check` OK.
+- `@iris-mcp/all` default suite (about 25 minutes): the first full run had 4 failing files, all about this story's own surfaces: `ci-seed-throwaway.test.ts` (the seed now deploys 65 test and fixture classes, 100 PUTs; the new `DatabaseDeleteTest`), `story-42-10-snapshot-ledger-parity.test.ts` (the `iris_docdb_manage` description is now a second chain of two), `story-44-1-doc-claims.test.ts` (the data README row keeps its "`create` also registers" sentence) and `story-42-1-qa-changeset-readers.test.ts` (it runs the others in a child process). All four were fixed and re-run green; the rest of the package (236 files) passed in the full run. The wire golden, tools-list snapshot, sanctioned-ledger (`story-43-4-*`), `epic43-capstone-gate` and `live-gate-roster` tests pass.
+- Throwaway: `down` run, `docker ps -a --filter label=iris-mcp.owner=throwaway` is empty. The shared IRIS (`iris-community-edition`, 52773) and every other container were never touched.
+
+### QA
+
+Gap-filling tests added by the QA pass (2026-11-23). Production code was not changed. Each mutation was applied, observed red on the path the test guards, and reverted with `git checkout -- <file>` (`git diff --quiet <file>` held afterwards). Packages whose sources were touched by a mutation were rebuilt from a deleted `dist/` and `tsconfig.tsbuildinfo` (the build-freshness guard compares mtimes).
+
+New files (66 tests): `packages/iris-dev-mcp/src/__tests__/story-44-7-qa-compile-check.test.ts` (14), `story-44-7-qa-load-check.test.ts` (7), `story-44-7-qa-promote-check.test.ts` (5), `packages/iris-data-mcp/src/__tests__/story-44-7-qa-docdb.test.ts` (19), `packages/iris-admin-mcp/src/__tests__/story-44-7-qa-database-delete.test.ts` (7), `packages/client-config/src/__tests__/story-44-7-qa-doctor.test.ts` (5), `packages/iris-mcp-all/src/__tests__/story-44-7-qa-doc-claims.test.ts` (9, reads the built dist).
+
+A first version of the three order tests could not fail: the broken class came before the broken routine in the input, so a result that lists classes first looked right (mutation 1 stayed green). The inputs were reordered (routine first) and the mutation went red.
+
+- mutation: `compile-check.ts` `unconfirmedDocuments` returns `[...notConfirmed]` (classes first) instead of input order -> 3 red (the helper's interleaved-order test, `iris_doc_compile` and `iris_doc_load` "class and routine both unconfirmed").
+- mutation: `compile.ts` dedupe dropped (`seen.has(key)` removed) -> "a wildcard that overlaps a concrete name checks that class once" red.
+- mutation: `compile.ts` `wildcardRegex` no longer escapes `.` -> "the dot of a pattern is a dot" red. Separately the regex loses its `i` flag -> the same test red (it pins both).
+- mutation: `compile.ts` check requests sent to `"USER"` instead of `ns` -> "the namespace override reaches every check request" red.
+- mutation: `compile.ts` catch no longer records the "could not run" entry -> "an expansion that cannot be read is a check that cannot run" red.
+- mutation: `compile-check.ts` `isCheckableRoutine` also accepts `.inc` -> 5 red across `iris_doc_compile` (`.inc` wildcard, helper boundaries, no-request helper tests) and `iris_env_promote` ("include files and .int routines are promoted without a check request").
+- mutation: `load.ts` check input is `[...uploaded, ...failed names]` -> "only the uploaded documents are compiled and checked" red (`[['Kept','Lost']]`). Separately the check's namespace fixed to `"USER"` -> "flags reach only the compile request, and the namespace override reaches every check request" red. Separately `shouldCompile &&` removed -> "compile: false sends no compile and no check read" red. Separately the "could not run" wrapper removed (`throw checkError`) -> the routine-listing exact-text test red.
+- mutation: `env-promote.ts` check namespace fixed to `"HSCUSTOM"` -> "the check reads the target client, its namespace and its Atelier version" red. Separately the skip-after-first-failure block removed -> "a class and a routine both unconfirmed: the first step fails, the other is skipped" red. Separately the "could not run" wrapper removed -> "a routine-only check that cannot run" red. The "only the allowlisted steps are checked" test is a back-compat pin with no separate mutation: the check input is already the allowlisted `putOk` list.
+- mutation: `docdb.ts` `encodeURIComponent` dropped from the path -> 3 red (default path, explicit path and space in the name, namespace-override index create). Separately `hasErrorCode` matches any entry containing the code text -> "text that says #25541 without the numeric code" red. Separately `startsWith("%")` narrowed to `"%D"` -> "a system name is refused" red. Separately `{created, indexed}` key order swapped -> "an existing property: the text is the definition, then indexed, then created" red. Separately `drop` sends `?path=` -> "drop sends one DELETE with no query" red. Separately `path` loses `.min(1)` -> "is optional, and a path must have at least one character" red. Separately the index create swallows its error (`.catch(() => ({}))`) -> 2 red (the failing-create and the 822-after-create tests). Separately the `iris_docdb_manage` text restored to "with optional property definitions" -> "no longer claims create takes property definitions" red.
+- mutation: `database.ts` delete adds `dismount: true` to the body -> "the request carries exactly the fields the caller gave" red. Separately the description loses "and a 'dismountNote'" -> "the description names the two reply members" red. Separately the handler drops `dismountNote` from the reply -> 2 red (the reply-shape test and the three-notes test).
+- mutation: `clients.ts` doctor asks the verdict for scope `"project"` whatever the file's scope -> "the user-scope old file is never refused" red. Separately the refused finding loses its `entry` member -> 3 red (whole-finding shape, user-scope, hand-written shared entry). Separately the apply advice lists `file.servers` instead of the movable ones -> 3 red (incl. the plain-text report). Separately the doctor writes the old file when a server is refused -> "a refused entry changes neither the files nor the exit code" red.
+- mutation: `packages/iris-dev-mcp/README.md` "it is never a pass" replaced -> the dev README claim test red; `packages/iris-admin-mcp/README.md` "by hand" removed from the `#78` sentence -> the admin README claim test red; `.changeset/story-44-7-epic-44-burn-down.md` `shared` made `minor` -> the changeset test red; `docdb.ts` schema key `path` renamed `jsonPath` with `iris-data-mcp` rebuilt -> "iris_docdb_property gains only path" red (the dist then rebuilt from a deleted `dist/`).
+- Not mutated: the IRIS-side `DatabaseDeleteTest` (no change, no throwaway used); the CHANGELOG sanction-id test and the data and client-config README claims (same mechanism as the READMEs above, one mutation per mechanism).
+
+Runs: the new files and the story's changed test files, shuffled with `--sequence.seed=44`: dev 264 passed (8 skipped), data 132, admin 30, client-config 42, `@iris-mcp/all` claims 9, all green. Full suites on a closed port (`IRIS_HOST=127.0.0.1 IRIS_PORT=1`, `IRIS_REQUIRE_LIVE` unset): dev 1555 passed (327 skipped), data 231 passed (2 skipped), admin 518 passed (8 skipped), client-config 1465 passed. `pnpm check:live-guards`: 74 armed files, 0 findings. A first client-config run failed one test ("render --check runs against a dist that is not older than src") because the mutation reverts had made `src` newer than `dist`; after a rebuild it passed 1465 of 1465. The full `@iris-mcp/all` suite on the closed port: the first run had 1 failing file of 241 (`story-42-1-qa-changeset-readers.test.ts`): the new claims test read the changeset unconditionally, and that suite hides `.changeset` in a child run. The changeset test now skips when the file is absent (as `story-44-1-doc-claims.test.ts` does); the two files re-run green (15 of 15). The other 240 files passed (6491 tests, 732 skipped).
+
+### Code review (2026-11-23)
+
+The four decision #152 items, the review's own patches, and the Rule 19 mutation lines the review layers found missing. Each mutation was applied, observed red on the path the test guards, and reverted. The working tree hash (`git diff | shasum -a 256`) was the same before and after each group, and packages whose sources a mutation touched were rebuilt from a deleted `dist/`. Live legs ran on two throwaways (`irishealth-community:2026.2@sha256:462de1fb…`, HSCUSTOM, port 52792, seeded by `ci-seed-throwaway.mjs` from the rebuilt embed), both taken down.
+
+- Probes. (1) `action/compile?flags=k` and `?flags=-c` compiled a class that had never been compiled (`verifyCompiled` named it before and `[]` after, console "Compiling class …"), and a broken class still answered #5475: IRIS compiles whatever the flags say (`$SYSTEM.OBJ.CompileList`, `irislib/%SYSTEM/OBJ.cls:220-241`, has no compile gate), so the check stays and is pinned. (2) One `verifyCompiled` query of 375 class names answered and one of 400 failed with `ERROR #5002: ObjectScript error: <STACK>Query+40^%Api.Atelier.v6.1`, so a clean compile, load or promote of about 400 classes read as "the check could not run". `verifyCompiled` now sends its query per 100 names (`COMPILE_CHECK_BATCH`); after the fix 400, 1000 and 5000 names answered. (3) `Config.Databases` documents an empty `Server` as a local database (`irissys/Config/Databases.cls:109-112`) and the `List` query returns `Server` (`:322`). (4) `Config.Databases.Delete` refuses before any dismount can run: a database used only by a global mapping (`P747MAP` mapped into HSCUSTOM through `Config.MapGlobals`) gives `ERROR #429 … in use by the following namespaces: HSCUSTOM` through `DeleteDatabaseEntry`, entry kept and still mounted; ENSLIB, HSLIB, HSSYS and HSCUSTOM give #429; IRISLIB, IRISSYS and IRISTEMP give `#427: Cannot delete system database`. (5) The check confirms mapped library classes: `docnames/CLS` lists `HS.Util.*` (90, db HSLIB), `Ens.Util.*` (61, ENSLIB) and `%Library.Str*` (3, IRISLIB) all `upd: true`, and `verifyCompiled` names none of them.
+- mutation: item 1, the `provision-project-environment` rollback sentence dropped from step 2 (admin dist rebuilt) -> `story-43-1-sdk-wire-golden.test.ts` red (2: the raw line and the v2 client view of `prompts-get:with-arguments`) and `story-41-2-qa-prompts-stdio-wire.test.ts` red (1). The sanctioned entry `44.7/database-delete-prompt/provision-project-environment@admin-main` (S-44.7-database-delete) carries the change; the three prompt hash pins were re-captured from the built dist and `pnpm gen:skills`.
+- mutation: item 2, the no-prefix skip removed from `documentsCovered` -> `compile.test.ts` "a wildcard with no literal prefix is never listed" red. Separately the 1000-document cap disabled (`if (false)`) -> "a pattern whose matches would pass 1000 expanded documents is not expanded" red. Separately the extension-wildcard branch disabled -> "a wildcard in the extension (Pkg.*) is not expanded" red.
+- mutation: the check-query batch, `COMPILE_CHECK_BATCH = 1000000` -> `verify-routines-compiled.test.ts` red (2: the 250-name three-batch test and the 100-name one-query test). Live, before the fix: 400 names failed with `<STACK>` (probe 2).
+- mutation: item 3, on the throwaway only (`scratchpad/mremote.mjs` deployed a mutated `ExecuteMCPv2.REST.Config`; the repository file was only read): the remote-row skip removed from `ShouldDismount` -> `DatabaseDeleteTest` total 7, passed 6 (`TestRemoteEntriesNeverDismountOrShare` red), so the `integration-dev` roster entry failed; separately the `pServer` guard removed -> the same red. The real source redeployed: 7 of 7, `integration-dev` 34/34.
+- mutation: item 4, the check skipped when `flags` lack `c` -> `compile.test.ts` "flags without 'c' still run the check: IRIS compiles anyway" red.
+- mutation: `iris_doc_load` keeps the console when the check cannot run; the old `throw` restored -> `load.test.ts` "a check that cannot run keeps the compile's console output" red.
+- mutation: AC 44.7.1, the DW-756 Disposition cell changed to `resolved` -> the Verification `awk` tally printed `resolved 10` instead of `resolved 9` / `closed-with-evidence 1`; reverted.
+- mutation: AC 44.7.2 client-config refusals, corrected: the `sharedWriteVerdictByName` mutation does not reach `remove` or the engine's `apply`. `engine.ts` `remove` not-owner refusal bypassed -> 2 red (AC 44.2.3 "a refusal names the owner in `sharedWith` through the engine for every verb", "each client is refused the disable and the remove of the other's entry"); separately the engine `apply` refusal (`engine.ts:540`) bypassed -> 3 red (the same every-verb test, "conflict through the engine names the other owner", "enable into a shared file … then refuses the other client").
+- mutation: DW-723 live, `index` POSTs unconditionally (data dist rebuilt) -> `integration-data` red on the throwaway ("DocDB lifecycle integration > reports the created property as indexed and writes nothing"); reverted, 13/13.
+- mutation: DW-756 live, the "Per-file status" block dropped from `format.ts` (dev dist rebuilt) -> `prepublish-dev` red on the throwaway (leg 6 of `compile-check-live-gate.test.ts`); reverted and rebuilt.
+- Not mutated (residual, named): 12 of the 13 DW-758 armed tests (only `iris_production_queues` has a recorded mutation).
+- Live, review tree: `prepublish-dev` 328/328, `integration-admin` 30/30, `integration-dev` 34/34 (`DatabaseDeleteTest` 7 of 7, Rule #35: 7 `Test*` methods), `integration-data` 13/13.
+- `BOOTSTRAP_VERSION` `1.1.0+4.08228306009d` -> `1.1.0+5.6cbac260e73f` (`scripts/bootstrap-sequence.json` 4 -> 5; the sequence never falls); a second `pnpm run gen:bootstrap` reports "Unchanged".
+- Final sweeps on the review tree (closed port, `IRIS_REQUIRE_LIVE` unset): `@iris-mcp/all` 241 of 241 files in 4 shards (6492 passed, 732 skipped); shared 2661; dev 1561 (327 skipped); admin 518 (8 skipped); data 231 (2 skipped); client-config 1465; interop 754; ops 350. The review's changed test files also ran shuffled (`--sequence.seed=152`), green. `pnpm turbo run lint type-check`, `pnpm check:live-guards` (74 files, 0 findings), `pnpm gen:governance-baseline:check`, `pnpm gen:ipm:check`, `pnpm gen:tools-list-snapshot:check`, `pnpm gen:skills:check`, `pnpm gen:pack:check`, `pnpm gen:listings:check` and `node scripts/check-epics-sync.mjs` OK. The shared IRIS and every other container were never touched.
+
+## Auto Run Result
+
+Status: done
+Blocking condition: none
+
+**Dispositions (mechanical tally, AC 44.7.1):** 9 resolved (DW-723, 724, 725, 747, 754, 755, 757, 758, 759), 1 closed-with-evidence (DW-756), 0 closed-by-decision. DW-759 is resolved for `.mac` routines through `verifyRoutinesCompiled` (`docnames/RTN` `upd` flag); `.inc` and `.int` have no oracle and are a stated limit (dev README, CHANGELOG) plus a `deferred:` item. DW-758 covers 13 weak tests.
+
+**Implemented change.**
+- DocDB: `iris_docdb_property` `create` sends a default path `$.<property>` (new optional `path`); `index` reads an existing property without writing and creates a missing one; `%` names are refused; two descriptions corrected (sanctions `S-44.7-docdb-property`, `S-44.7-docdb-manage-text`).
+- Compile check: `iris_doc_compile`, `iris_doc_load` and `iris_env_promote` check classes (`verifyCompiled`) and `.mac` routines after a sync compile with no error listed; `iris_doc_compile` expands wildcards via `docnames`; a check that cannot run fails the result.
+- `Config.cls` `DeleteDatabaseEntry` dismounts a deleted database unless its directory is shared, and keeps `IRIS.DAT` (sanction `S-44.7-database-delete`); `BOOTSTRAP_VERSION` `1.1.0+3.3e97060f5bc4` -> `1.1.0+4.08228306009d`; new `DatabaseDeleteTest` (6 tests).
+- Doctor check 7 names a by-hand delete for entries Claude Code owns in the shared `.mcp.json`.
+- 13 armed admin/interop tests assert probed outcomes; new live gate `compile-check-live-gate.test.ts` (8 legs, in `gateTestFiles`).
+
+**Files changed:** see `git show --stat` of the story commit. Main sources: `packages/iris-data-mcp/src/tools/docdb.ts`, `packages/iris-dev-mcp/src/tools/{compile,compile-check,load,env-promote}.ts`, `packages/shared/src/bootstrap.ts`, `src/ExecuteMCPv2/REST/Config.cls`, `packages/client-config/src/{cli/clients,engine}.ts`, `packages/iris-admin-mcp/src/tools/database.ts`.
+
+**Review (4 layers, all delivered):** 44 findings: 0 high, 2 medium, 33 low, 3 false, 6 maybe-false. Patches applied: VG1 (new default-suite pin for the `.mac` path of `iris_env_promote`, mutation recorded), BH2 and BH3 (CHANGELOG and dev README wording). Deferred (frontmatter `deferred:`): the skill/prompt rollback note (medium), the unfiltered wildcard check (medium, unverified), remote/ECP database entries (medium, unverified), and compile `flags` without `c` (low, unverified). Every rejected finding carries its reason in the Review Triage Log.
+
+**Follow-up review recommended:** false (one medium patched, no high).
+
+**Verification performed.** Live proofs on one throwaway (recorded under `## Verification`): admin suite twice on one container, interop, data, dev and `prepublish-dev` (328) green; `DatabaseDeleteTest` 6/6. Final sweeps on this tree: `lint`, `type-check`, `check:live-guards` (74 files, 0 findings), `gen:governance-baseline:check`, `gen:ipm:check`, `gen:tools-list-snapshot:check` and `check-epics-sync` OK; a second `gen:bootstrap` is "Unchanged". Default suites: shared 2659, dev 1529 (+327 skipped), data 212, admin 511, client-config 1460 passed; the full `@iris-mcp/all` suite on a closed port (IRIS_PORT=1, run in 4 shards of 60 files) passed 240 of 240 files. The throwaway is down and `docker ps -a --filter label=iris-mcp.owner=throwaway` is empty; the shared IRIS was not touched.
+
+**Residual risks.**
+- Mutation lines were not re-run for armed-only ACs: DW-756 live leg, DW-723 live leg, 12 of the 13 DW-758 tests, and the AC 44.7.1 tally.
+- The admin live test leaves one `mcpadmintestdata<id>` directory per run (delete keeps `IRIS.DAT` by design).
+- The implementation pass rewrote `compile.test.ts` through a python heredoc (Rule #55 breach); the file was verified as text with the diff landed.
+- Lead bookkeeping (Rule 20): add the three `S-44.7-*` sanctions to AD-15 and the compile check in the three dev tools to AD-14 "on failure"; mirror the disposition table into the ledger.

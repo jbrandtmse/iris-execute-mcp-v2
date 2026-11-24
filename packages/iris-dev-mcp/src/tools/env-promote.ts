@@ -77,6 +77,7 @@ import {
   BASELINE_ACTION_CLASSIFICATIONS,
 } from "@iris-mcp/shared";
 import { z } from "zod";
+import { checkCouldNotRunText, notConfirmedText, unconfirmedDocuments } from "./compile-check.js";
 import { currentClassLines, storageDropsNote } from "./doc.js";
 import {
   fetchMappings,
@@ -984,6 +985,20 @@ async function runDocumentsBatch(
         errorsByName.set(docResult.name, docResult.errors.map((e) => e.error).join("; "));
       }
     }
+    // Story 44.7 (DW-755, AD-14): an HTTP 200 with no error listed is not proof that every class compiled (IRIS answers so
+    // when one class fails in a compile that also writes a persistent class's Storage). Only a compile that listed no error
+    // is checked, through the class dictionary and IRIS's up-to-date flag (`verifyCompiled`, no localized text). The check
+    // runs before any step is recorded, so one that cannot run fails the first step through the catch below and skips the
+    // rest, never a pass.
+    if (errorsByName.size === 0) {
+      let unconfirmed: string[];
+      try {
+        unconfirmed = await unconfirmedDocuments(targetClient, targetNs, targetAtelierVersion, putOk.map((s) => s.subject));
+      } catch (checkError: unknown) {
+        throw new Error(checkCouldNotRunText(checkError));
+      }
+      for (const document of unconfirmed) errorsByName.set(document, notConfirmedText(document));
+    }
     let sawFailure = false;
     for (const step of putOk) {
       if (sawFailure) {
@@ -1343,7 +1358,8 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
   const outcome = await ctx.confirm?.({
     operation: "promote changes to another server",
     target: `server '${input.target}', namespace ${targetNs}`,
-    scope: promotionScope(input.source, orderedAllowed, planned),
+    // The dialog text cuts the drop list; the binding is every drop, so a drop the text hides still changes the answer.
+    scope: { text: promotionScope(input.source, orderedAllowed, planned), binding: planned },
   });
   if (outcome !== undefined && !outcome.proceed) return outcome.result;
 

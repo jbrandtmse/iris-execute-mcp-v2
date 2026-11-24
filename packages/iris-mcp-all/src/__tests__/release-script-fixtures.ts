@@ -437,6 +437,7 @@ export const ROOT_SCRIPTS: Record<string, string> = {
   "gen:listings:check": "node scripts/gen-listings.mjs --check",
   "gen:tools-list-snapshot:check": "node scripts/gen-tools-list-snapshot.mjs --check",
   "format:check": "prettier --check .",
+  "check:live-guards": "node scripts/check-live-guards.mjs",
   "check:provenance": "node scripts/check-provenance.mjs",
   "validate:prompts": "node scripts/validate-prompts.mjs",
   version: "node scripts/release-version.mjs",

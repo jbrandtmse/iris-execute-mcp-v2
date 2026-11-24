@@ -321,6 +321,24 @@ describe.skipIf(!IRIS_OK || !CUSTOM_REST_OK)(
           expect(text).toMatch(/pass|success|total/i);
         }
       });
+
+      // Story 44.5 (DW-726): the IRIS-side DocDB tests run here, because nothing else ran them. They are in the dev suite because
+      // data must not import dev's tools (AD-2). Each asserts the counts, so a class that ran fewer methods than it has fails (Rule #35).
+      it.each([
+        ["ExecuteMCPv2.Tests.DocDbRegisterTest", 5],
+        ["ExecuteMCPv2.Tests.DocDbRegisterNamespaceTest", 3],
+        // Story 44.7 (DW-757): `iris_database_manage delete` dismounts the local database it removes, never for a remote
+        // (ECP) entry (7 Test methods).
+        ["ExecuteMCPv2.Tests.DatabaseDeleteTest", 7],
+      ] as const)("iris_execute_tests runs %s: all %i tests pass", async (target, expectedTotal) => {
+        const result = await executeTestsTool.handler({ target, level: "class" }, ctx);
+        expect(result.isError, result.content[0]?.text).toBeUndefined();
+        const data = result.structuredContent as { total: number; passed: number; failed: number; status: string };
+        expect(data.status).toBe("completed");
+        expect(data.total).toBe(expectedTotal);
+        expect(data.passed).toBe(expectedTotal);
+        expect(data.failed).toBe(0);
+      });
     });
   },
 );

@@ -127,6 +127,24 @@ export interface ServerManagerApi {
 }
 
 /**
+ * The per-scope layers of Server Manager's `intersystems.servers` setting, as
+ * `vscode.workspace.getConfiguration("intersystems", scope).inspect("servers")`
+ * returns them (`vscode.d.ts` `WorkspaceConfiguration.inspect`: every member is
+ * optional, and each value is that layer's whole `servers` object). Server
+ * Manager's `getServerSpec` reads the MERGED view of these layers.
+ */
+export interface ServerManagerServersInspection {
+  defaultValue?: unknown;
+  globalValue?: unknown;
+  workspaceValue?: unknown;
+  workspaceFolderValue?: unknown;
+  defaultLanguageValue?: unknown;
+  globalLanguageValue?: unknown;
+  workspaceLanguageValue?: unknown;
+  workspaceFolderLanguageValue?: unknown;
+}
+
+/**
  * WHY `getServerManagerApi()` returned `undefined` on its most recent call
  * (32-3-R3, Story 32.4): lets a downstream "Server Manager is not available"
  * warning distinguish a genuinely missing/inactive dependency from a

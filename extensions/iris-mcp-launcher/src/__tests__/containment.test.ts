@@ -36,6 +36,7 @@ import { describe, expect, it } from "vitest";
 import { buildStatusBarState, selectServers, type SelectServersDeps } from "../selectServers.js";
 import { LauncherProvider, type ProviderDeps } from "../serverDefinitionProvider.js";
 import { stripComments } from "./sourceGrep.js";
+import { userScopeServers } from "./serverManagerInspection.js";
 import type { AuthApi, LauncherSettings, ServerManagerApi, ServerName, ServerSpec } from "../types.js";
 
 // __dirname (not import.meta.url) so this file type-checks cleanly under the
@@ -233,6 +234,7 @@ describe("credential containment — behavioral (secret never reaches a log/warn
       authApi,
       getSettings: () => settings(),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -278,6 +280,7 @@ describe("credential containment — behavioral (secret never reaches a log/warn
       authApi,
       getSettings: () => settings(),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -287,6 +290,71 @@ describe("credential containment — behavioral (secret never reaches a log/warn
     expect(env?.IRIS_PASSWORD).toBe(SECRET);
     for (const message of warnings) {
       expect(message).not.toContain(SECRET);
+    }
+  });
+});
+
+describe("credential containment — Story 44.6: a PROVIDED definition never carries a secret (VS Code persists it)", () => {
+  const INLINE_SECRET = "DO-NOT-LEAK-PROVIDED-5c2a8e1f";
+  const SESSION_SECRET = "DO-NOT-LEAK-SESSION-7b3d9a04";
+
+  it("an inline password and a session token appear nowhere in the provided definitions or the warnings, while the resolve path still carries the password (not vacuous)", async () => {
+    const warnings: string[] = [];
+    const sessions: unknown[] = [];
+    const accounts: unknown[] = [];
+    const spec: ServerSpec = {
+      name: "a",
+      webServer: { host: "a.example.com", port: 52773, scheme: "http" },
+      username: "_SYSTEM",
+      password: INLINE_SECRET,
+    };
+    const api: ServerManagerApi = {
+      getServerNames: () => [{ name: "a", description: "", detail: "" }],
+      getServerSpec: async () => spec,
+      getAccount: () => {
+        accounts.push(true);
+        return { id: "acct-1", label: "Account One" };
+      },
+    };
+    const authApi: AuthApi = {
+      getSession: async (...args) => {
+        sessions.push(args);
+        return { id: "s1", accessToken: SESSION_SECRET, account: { id: "acct-1", label: "Account One" }, scopes: ["a", "_SYSTEM"] };
+      },
+    };
+    const provider = new LauncherProvider({
+      getServerManagerApi: async () => api,
+      authApi,
+      getSettings: () => settings({ servers: ["a"] }),
+      showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
+    });
+
+    const planned = await provider.providePlannedDefinitions();
+
+    const persisted = JSON.stringify(planned);
+    expect(persisted).not.toContain(INLINE_SECRET);
+    expect(persisted).not.toContain(SESSION_SECRET);
+    expect(planned[0]!.env["IRIS_CREDENTIAL_NAME"]).toBe("a");
+    expect(sessions).toEqual([]);
+    expect(accounts).toEqual([]);
+    expect(warnings).toEqual([]);
+
+    // The secret DID flow through the resolve path, so the checks above are not vacuous.
+    const env = await provider.resolveEnvForLabel(planned[0]!.label);
+    expect(env?.IRIS_PASSWORD).toBe(INLINE_SECRET);
+  });
+
+  it("the provide path's source (providedEnvFor, lookUpProvidedConnection) never names a password, an account or a session", () => {
+    const code = stripComments(readFileSync(path.join(SRC_DIR, "serverDefinitionProvider.ts"), "utf8"));
+    const start = code.indexOf("private async providedEnvFor(");
+    const end = code.indexOf("private async resolveSpawnTargets(");
+    expect(start, "providedEnvFor exists").toBeGreaterThan(-1);
+    expect(end, "resolveSpawnTargets follows lookUpProvidedConnection").toBeGreaterThan(start);
+    const provideSection = code.slice(start, end);
+    expect(provideSection).toContain("lookUpProvidedConnection");
+    for (const forbidden of [/password/i, /getAccount/, /getSession/, /accessToken/, /createIfNone/, /showWarning/]) {
+      expect(provideSection, String(forbidden)).not.toMatch(forbidden);
     }
   });
 });
@@ -326,6 +394,7 @@ describe("credential containment — a resolved secret must not leak across a LA
       authApi,
       getSettings: () => settings({ packages: ["dev"], servers: ["leaky", "cancelme"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["leaky", "cancelme"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -379,6 +448,7 @@ describe("credential containment — a resolved secret must not leak across a LA
       authApi,
       getSettings: () => settings({ packages: ["dev"], servers: ["leaky", "removed"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["leaky", "removed"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -423,6 +493,7 @@ describe("credential containment — a resolved secret must not leak across a LA
       authApi,
       getSettings: () => settings({ packages: ["dev"], servers: ["leaky"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["leaky"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -483,6 +554,7 @@ describe("credential containment — a REJECTED credential prompt must not carry
       authApi,
       getSettings: () => settings({ packages: ["dev"], servers: ["leaky", "rejects"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["leaky", "rejects"]),
     });
 
     const planned = await provider.providePlannedDefinitions();
@@ -528,6 +600,7 @@ describe("cancellation must not storm: repeated resolves of the same cancelled d
       authApi,
       getSettings: () => settings({ packages: ["dev"], servers: ["a"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -539,6 +612,68 @@ describe("cancellation must not storm: repeated resolves of the same cancelled d
       expect(warnings).toHaveLength(call); // linear growth: one new warning per call, never a burst
       expect(sessionCallCount).toBe(call * 2); // silent + createIfNone, no extra retries
     }
+  });
+});
+
+describe("credential containment — Story 44.8: a refused Local resolve carries no stored password", () => {
+  const STORED_SECRET = "DO-NOT-LEAK-STORED-44-8-c3d1a9e5";
+  const user = { webServer: { scheme: "https", host: "user-iris.corp.example", port: 443 }, username: "svc44" };
+
+  /** The real provider over a store holding `STORED_SECRET` for `dev1/svc44`; `inspection` is what the dependency returns. */
+  async function run(inspect: ProviderDeps["inspectServerManagerServers"]) {
+    const warnings: string[] = [];
+    const diagnostics: string[] = [];
+    const sessionCalls: unknown[] = [];
+    const specCalls: string[] = [];
+    const api: ServerManagerApi = {
+      getServerNames: () => [{ name: "dev1", description: "", detail: "" }],
+      getServerSpec: async (name: string) => {
+        specCalls.push(name);
+        return { name, ...user };
+      },
+      getAccount: () => ({ id: "acct-1", label: "Account One" }),
+    };
+    const authApi: AuthApi = {
+      getSession: async (_providerId, scopes) => {
+        sessionCalls.push(scopes);
+        return { id: "s1", accessToken: STORED_SECRET, account: { id: "acct-1", label: "Account One" }, scopes: ["dev1", "svc44"] };
+      },
+    };
+    const provider = new LauncherProvider({
+      getServerManagerApi: async () => api,
+      authApi,
+      getSettings: () => settings({ servers: ["dev1"] }),
+      showWarning: (message: string) => warnings.push(message),
+      logDiagnostic: (message: string) => diagnostics.push(message),
+      ...(inspect === undefined ? {} : { inspectServerManagerServers: inspect }),
+    });
+    const [planned] = await provider.providePlannedDefinitions();
+    warnings.length = 0;
+    const env = await provider.resolveEnvForLabel(planned!.label);
+    return { env, warnings, diagnostics, sessionCalls, specCalls };
+  }
+
+  it("control (not vacuous): a user-only server resolves the stored password into the env, and no warning carries it", async () => {
+    const { env, warnings, diagnostics } = await run(() => ({ globalValue: { dev1: user } }));
+    expect(env?.IRIS_PASSWORD).toBe(STORED_SECRET);
+    expect(JSON.stringify([warnings, diagnostics])).not.toContain(STORED_SECRET);
+  });
+
+  it.each([
+    // The secret is also in the layers the guard reads, so this row fails on its own if a warning ever echoes them.
+    ["not-user (a workspace layer overrides the host)", () => ({ globalValue: { dev1: { ...user, password: STORED_SECRET } }, workspaceValue: { dev1: { webServer: { host: "127.0.0.1" }, description: STORED_SECRET } } })],
+    ["uninspectable (the inspection throws)", () => { throw new Error(`inspection failed near ${STORED_SECRET}`); }],
+    ["uninspectable (the dependency is absent)", undefined],
+  ] as const)("%s: undefined, one warning, no session or spec call, and the stored password appears in no warning and no diagnostic", async (_name, inspect) => {
+    const { env, warnings, diagnostics, sessionCalls, specCalls } = await run(inspect as ProviderDeps["inspectServerManagerServers"]);
+
+    expect(env).toBeUndefined();
+    expect(warnings).toHaveLength(1);
+    expect(sessionCalls).toEqual([]);
+    expect(specCalls).toEqual([]);
+    expect(JSON.stringify([warnings, diagnostics])).not.toContain(STORED_SECRET);
+    // Even a hostile error text from the inspection never reaches a user surface.
+    expect(warnings[0]).not.toContain("inspection failed");
   });
 });
 

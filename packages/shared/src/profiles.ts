@@ -31,13 +31,13 @@
  */
 
 import type { IrisConnectionConfig } from "./config.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, readCredentialName } from "./config.js";
 import { parseDataPolicyValue, type DataPolicy } from "./data-policy.js";
 import { IrisHttpClient } from "./http-client.js";
 import { logger } from "./logger.js";
 import { parseServerManagerMode, resolveServerManagerProfiles } from "./server-manager-source.js";
 import type { CredentialChainOptions } from "./credential-chain.js";
-import { resolveServerManagerCredentials } from "./credential-chain.js";
+import { resolveServerManagerCredentials, resolveStoredCredential } from "./credential-chain.js";
 
 /** Reserved profile name synthesized from the existing `IRIS_*` env vars. */
 export const DEFAULT_PROFILE_NAME = "default";
@@ -97,8 +97,8 @@ export interface IrisProfile extends IrisConnectionConfig {
    * reviewed trade-off (code review 2026-07-25): a basename would be useless —
    * every candidate is literally named `settings.json`, so the directory IS
    * the information — and the disclosure is non-credential. Operators who do
-   * not want local paths disclosed should define connections at workspace
-   * scope (`IRIS_SM_WORKSPACE`) or leave `IRIS_SERVER_MANAGER` off. Documented
+   * not want local paths disclosed should leave `IRIS_SERVER_MANAGER` off
+   * (a workspace-scope definition gets no stored password, DW-761). Documented
    * for users in the README's Server Manager connections section.
    */
   sourceFile?: string;
@@ -547,6 +547,13 @@ export function buildProfileRegistry(
  *   entries, and (when opted in) any credential-chain-completed Server-Manager
  *   profiles.
  * @throws {Error} from {@link loadConfig} (naming `IRIS_PORT`/`IRIS_TIMEOUT`/`IRIS_USERNAME`/`IRIS_PASSWORD`).
+ * @throws {Error} (naming `IRIS_CREDENTIAL_NAME`) when it is set, `IRIS_PASSWORD` is empty and the keychain / credential-helper chain has no password for that name.
+ *
+ * **`IRIS_CREDENTIAL_NAME` (opt-in).** When set (non-blank): a `default` password that `loadConfig` left
+ * empty is looked up under that name (links 2-3 of the chain; never link 1), and each `IRIS_PROFILES`
+ * member without a `password` key looks up its own member name (a miss keeps the inherited password and
+ * logs one warning). Both lookups run only when `IRIS_PASSWORD` is empty: a non-empty `IRIS_PASSWORD` wins
+ * and no lookup runs. Unset, empty or blank `IRIS_CREDENTIAL_NAME`: no lookup of any kind runs.
  * @throws {Error} (naming `IRIS_PROFILES`) on malformed/invalid `IRIS_PROFILES`.
  * @throws {Error} (naming `IRIS_SERVER_MANAGER`) on an unrecognized mode, or (in `required` mode) zero definitions found, or zero definitions surviving `IRIS_SM_SERVERS`.
  * @throws {Error} (naming `IRIS_SERVER_MANAGER=required`) when at least one Server-Manager profile's credential chain is exhausted (Story 31.1, AC 31.1.1 — a check deliberately distinct from the zero-definitions-found one above).
@@ -556,8 +563,50 @@ export async function loadProfileRegistry(
   platform: NodeJS.Platform = process.platform,
   credentialChainDeps?: Pick<CredentialChainOptions, "getKeychainPassword" | "runCredentialHelper">,
 ): Promise<ProfileRegistry> {
-  const defaultConfig = loadConfig(env);
+  let defaultConfig = loadConfig(env);
+
+  // IRIS_CREDENTIAL_NAME (opt-in; AD-9): a `default` password left empty by
+  // `loadConfig` is completed from the keychain / credential-helper chain
+  // (links 2-3 only), or startup fails fast. Unset: nothing here runs and no
+  // seam is called.
+  const credentialName = readCredentialName(env);
+  // A non-empty `IRIS_PASSWORD` wins for the whole feature: the chain runs
+  // only when `loadConfig` left the `default` password empty.
+  const chainActive = credentialName !== undefined && defaultConfig.password === "";
+  if (credentialName !== undefined && chainActive) {
+    const stored = await resolveStoredCredential(credentialName, { env, ...credentialChainDeps });
+    if (stored === undefined) {
+      throw new Error(
+        `IRIS_CREDENTIAL_NAME is set to "${credentialName}" but no stored password was found for it ` +
+          `(OS keychain service "iris-mcp", account "${credentialName}"; IRIS_CREDENTIAL_HELPER ` +
+          `was not set or returned nothing). Store one with ` +
+          `"iris-mcp-credentials set ${credentialName}", point IRIS_CREDENTIAL_HELPER at a helper ` +
+          `that prints it, or set IRIS_PASSWORD.`,
+      );
+    }
+    defaultConfig = { ...defaultConfig, password: stored.password };
+  }
+
   const registry = buildProfileRegistry(defaultConfig, env);
+
+  // Each `IRIS_PROFILES` member (other than `default`) without its own
+  // `password` key looks up its own name; a miss keeps the inherited password.
+  if (chainActive) {
+    for (const memberName of passwordlessProfileNames(env)) {
+      const member = registry.get(memberName);
+      if (member === undefined) continue;
+      const stored = await resolveStoredCredential(memberName, { env, ...credentialChainDeps });
+      if (stored === undefined) {
+        logger.warn(
+          `IRIS_CREDENTIAL_NAME: no stored password found for IRIS_PROFILES member "${memberName}"; ` +
+            `it keeps the default profile's password. Store one with ` +
+            `"iris-mcp-credentials set ${memberName}".`,
+        );
+        continue;
+      }
+      registry.set(memberName, { ...member, password: stored.password });
+    }
+  }
 
   const mode = parseServerManagerMode(env);
   // AC 31.3.1: collisions are COLLECTED here (never logged per-entry) so a
@@ -644,6 +693,20 @@ export async function loadProfileRegistry(
   }
 
   return registry;
+}
+
+/**
+ * Names of the `IRIS_PROFILES` members (never `default`) whose entry carries no
+ * `password` key. Called only after {@link buildProfileRegistry} accepted the
+ * same value, so the JSON is known to parse to an object of objects.
+ */
+function passwordlessProfileNames(env: Record<string, string | undefined>): string[] {
+  const raw = env.IRIS_PROFILES;
+  if (raw === undefined || raw === "") return [];
+  const parsed = JSON.parse(raw) as Record<string, Record<string, unknown>>;
+  return Object.entries(parsed)
+    .filter(([name, entry]) => name !== DEFAULT_PROFILE_NAME && !("password" in entry))
+    .map(([name]) => name);
 }
 
 /**

@@ -2,7 +2,7 @@
  * Story 42.3 (AC 42.3.2) -- `scripts/ci-seed-throwaway.mjs`, which prepares a throwaway IRIS for Health container for CI's armed suites:
  * the real `bootstrap()`, a check that `Ens.Director` is visible, and the test and fixture classes.
  *
- *  - THE LIST. `seedDocuments` holds exactly the 62 files of `src/ExecuteMCPv2/Tests/**` and `QAFixtures/*`, and none of the
+ *  - THE LIST. `seedDocuments` holds exactly the 65 files of `src/ExecuteMCPv2/Tests/**` and `QAFixtures/*`, and none of the
  *    35 bootstrapped classes (a bootstrapped class loaded from `src/` carries the `dev` marker, AD-14). The disjointness
  *    guard is also run over a synthetic repository that violates it.
  *  - THE REFUSALS. An environment that is not a throwaway target is refused before the shared dist is loaded or a request is made.
@@ -30,7 +30,7 @@ import {
 import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
 import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION } from "../../../shared/src/bootstrap-classes.js";
 import { scrubbedEnv } from "./live-gate-child-run.js";
-import { startStatefulFakeAtelier, summarizeRequests } from "./stateful-fake-atelier";
+import { COMPILE_CONSOLE_DE, COMPILE_CONSOLE_JA, startStatefulFakeAtelier, summarizeRequests } from "./stateful-fake-atelier";
 
 const FAKE_THROWAWAY = "iris-mcp-throwaway-0123456789ab";
 const SCRIPT = path.join(REPO_ROOT, "scripts", "ci-seed-throwaway.mjs");
@@ -57,19 +57,19 @@ const throwawayEnv = (port: number | string, namespace = "HSCUSTOM"): Record<str
 describe("seedDocuments: the classes the seed deploys", () => {
   const documents = seedDocuments(REPO_ROOT);
 
-  it("holds exactly the 62 files of src/ExecuteMCPv2/Tests and QAFixtures, as documents of the same name", () => {
+  it("holds exactly the 65 files of src/ExecuteMCPv2/Tests and QAFixtures, as documents of the same name", () => {
     const onDisk = [
       ...filesUnder(path.join(REPO_ROOT, "src", "ExecuteMCPv2", "Tests"), path.join(REPO_ROOT, "src")),
       ...filesUnder(path.join(REPO_ROOT, "src", "ExecuteMCPv2", "QAFixtures"), path.join(REPO_ROOT, "src")),
     ].sort();
 
-    expect(onDisk.length).toBe(62);
-    expect(documents.length).toBe(62);
+    expect(onDisk.length).toBe(65);
+    expect(documents.length).toBe(65);
     expect(documents.map((document: { path: string }) => document.path)).toEqual(onDisk.map((file) => `src/${file}`));
     expect(documents.every((document: { name: string }) => /^ExecuteMCPv2\.(Tests|QAFixtures)\.[A-Za-z0-9]+\.cls$/.test(document.name))).toBe(true);
     expect(documents.map((document: { name: string }) => document.name)).toContain("ExecuteMCPv2.QAFixtures.LongRunningTest.cls");
     expect(documents.map((document: { name: string }) => document.name)).toContain("ExecuteMCPv2.Tests.UtilsTest.cls");
-    expect(new Set(documents.map((document: { name: string }) => document.name)).size).toBe(62);
+    expect(new Set(documents.map((document: { name: string }) => document.name)).size).toBe(65);
   });
 
   it("holds none of the bootstrapped classes, by the embed and by the roster of gen-bootstrap.mjs", () => {
@@ -162,25 +162,32 @@ describe("what makes a bootstrap or a compile a problem", () => {
     expect(bootstrapProblems(result).join("\n")).toMatch(expected);
   });
 
-  it("accepts a console that reports the compilation finished successfully and prints no error line", () => {
-    expect(compileProblems({ console: ["Compilation started on 10/21/2026", "Compiling class A", "Compilation finished successfully in 0.123s."] })).toEqual([]);
+  it("accepts a report in which every class compiled, whatever its envelope's console says", () => {
+    expect(compileProblems({ notCompiled: [], irisErrors: [] })).toEqual([]);
+    // A localized console is never read: this report is clean, and an envelope full of error lines does not change that.
+    expect(compileProblems({ notCompiled: [], irisErrors: [], envelope: { status: { errors: [] }, console: [...COMPILE_CONSOLE_DE], result: { content: [] } } })).toEqual([]);
   });
 
-  it.each([
-    ["an error line and no success line", ["ERROR #5030: An error occurred while compiling class 'A'", "Detected 1 errors during compilation in 0.1s."], 2],
-    ["an error line that is not at the start of the line", ["Class A : ERROR #5001: bad", "Compilation finished successfully."], 1],
-    ["no success line", ["Compilation started", "Compiling class A"], 1],
-    ["an empty console", [], 1],
-  ])("finds %s", (_label, lines, count) => {
-    const problems = compileProblems({ status: { errors: [], summary: "" }, console: lines, result: { content: [] } });
-
-    expect(problems).toHaveLength(count);
-    expect(problems.join("\n")).toMatch(lines.some((line) => /ERROR\s*#/.test(line)) ? /console: .*ERROR #\d+/ : /did not report that it finished successfully/);
+  it("names each class the check did not confirm, once, in the report's order, and each text IRIS reported as context", () => {
+    expect(compileProblems({ notCompiled: ["Pkg.A.cls", "Pkg.B.cls"], irisErrors: [] })).toEqual(["did not compile: Pkg.A.cls", "did not compile: Pkg.B.cls"]);
+    expect(compileProblems({ notCompiled: ["Pkg.A.cls"], irisErrors: ["ERROR #5373: Class 'X', used by 'Pkg.A:superclass', does not exist"] })).toEqual([
+      "did not compile: Pkg.A.cls",
+      "IRIS reported: ERROR #5373: Class 'X', used by 'Pkg.A:superclass', does not exist",
+    ]);
   });
 
-  it("finds a response with no console, and no response at all, as a compile that did not finish", () => {
-    expect(compileProblems({})).toHaveLength(1);
-    expect(compileProblems(undefined)).toHaveLength(1);
+  it("finds an IRIS status error even when the check confirmed every class, and makes the context one line of at most 300 characters", () => {
+    const problems = compileProblems({ notCompiled: [], irisErrors: [`line one\r\nline two ${"x".repeat(400)}`] });
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/^IRIS reported: line one line two x+\.\.\.$/);
+    expect((problems[0] as string).length).toBeLessThanOrEqual("IRIS reported: ".length + 300 + 3);
+  });
+
+  it("counts something that is not a report as one problem: no evidence is never a clean compile", () => {
+    for (const notAReport of [undefined, {}, { notCompiled: [] }, { irisErrors: [] }, { notCompiled: "Pkg.A.cls", irisErrors: [] }]) {
+      expect(compileProblems(notAReport), JSON.stringify(notAReport)).toEqual(["the compile check returned no report."]);
+    }
   });
 });
 
@@ -242,7 +249,7 @@ describe("seeding the stateful fake Atelier with the real shared dist", () => {
   };
   const fixtureNames = (seedDocuments(REPO_ROOT) as Array<{ name: string }>).map((document) => document.name);
 
-  it("runs the real bootstrap, checks Ens.Director, then deploys and compiles only the 62 test and fixture classes", async () => {
+  it("runs the real bootstrap, checks Ens.Director, then deploys and compiles only the 65 test and fixture classes", async () => {
     await withFake({}, async (fake) => {
       const { code, logs } = await seed(fake);
 
@@ -250,7 +257,7 @@ describe("seeding the stateful fake Atelier with the real shared dist", () => {
       const summary = summarizeRequests(fake.requests);
       expect(summary.puts.slice(0, 35)).toEqual([...BOOTSTRAP_CLASSES.keys()]);
       expect(summary.puts.slice(35)).toEqual(fixtureNames);
-      expect(summary.puts.length).toBe(97);
+      expect(summary.puts.length).toBe(100);
       expect(summary.compiles, "one compile for the bootstrap classes, one for the fixtures").toBe(2);
       expect(summary.queries).toContain(INTEROP_QUERY);
       expect([...fake.state.docs.keys()].sort()).toEqual([...BOOTSTRAP_CLASSES.keys(), ...fixtureNames].sort());
@@ -258,7 +265,7 @@ describe("seeding the stateful fake Atelier with the real shared dist", () => {
       expect(compileBodies[0]).toEqual([...BOOTSTRAP_CLASSES.keys()]);
       expect(compileBodies[1]).toEqual(fixtureNames);
       expect(logs).toContain("Ens.Director is visible in HSCUSTOM");
-      expect(logs).toContain("deployed and compiled 62 test and fixture classes");
+      expect(logs).toContain("deployed and compiled 65 test and fixture classes");
     });
   }, 120_000);
 
@@ -298,42 +305,76 @@ describe("seeding the stateful fake Atelier with the real shared dist", () => {
     });
   }, 120_000);
 
-  it("fails on a compile error in the fixtures, naming it, after the bootstrap compiled", async () => {
+  const FIXTURE = "ExecuteMCPv2.Tests.UtilsTest.cls";
+  const isFixtureCompile = (names: string[]): boolean => names.some((name) => name.startsWith("ExecuteMCPv2.Tests."));
+
+  it("fails on a fixture that does not compile (IRIS answers with a status error), naming it from the check, after the bootstrap compiled", async () => {
     await withFake({}, async (fake) => {
-      fake.failCompile = (names) => (names.some((name) => name.startsWith("ExecuteMCPv2.Tests.")) ? ["ERROR #5030: An error occurred while compiling class 'ExecuteMCPv2.Tests.UtilsTest'"] : undefined);
-
-      const { code, logs } = await seed(fake);
-
-      expect(code).toBe(1);
-      expect(logs).toMatch(/ERROR #5030: An error occurred while compiling class 'ExecuteMCPv2\.Tests\.UtilsTest'/);
-      expect(summarizeRequests(fake.requests).compiles).toBe(2);
-    });
-  }, 120_000);
-
-  it("fails on a compile in which IRIS answers HTTP 200 with no status error and the failure only in the console, after the bootstrap compiled", async () => {
-    await withFake({}, async (fake) => {
-      fake.compileConsole = (names) =>
-        names.some((name) => name.startsWith("ExecuteMCPv2.Tests.")) ? ["Compiling class ExecuteMCPv2.Tests.UtilsTest", "ERROR #5030: An error occurred while compiling class 'ExecuteMCPv2.Tests.UtilsTest'", "Detected 1 errors during compilation in 1.2s."] : undefined;
+      fake.compileFailure = (names) => (isFixtureCompile(names) ? { failed: [{ name: FIXTURE, kind: "routine" }], shape: "status-errors" } : undefined);
 
       const { code, logs } = await seed(fake);
 
       expect(code).toBe(1);
       expect(logs).toMatch(/2 compile problem\(s\)/);
-      expect(logs).toMatch(/console: ERROR #5030: An error occurred while compiling class 'ExecuteMCPv2\.Tests\.UtilsTest'/);
-      expect(logs).toMatch(/did not report that it finished successfully/);
+      expect(logs).toContain(`did not compile: ${FIXTURE}`);
+      expect(logs).toMatch(/IRIS reported: ERROR #5475: Error compiling routine: ExecuteMCPv2\.Tests\.UtilsTest\./);
       expect(summarizeRequests(fake.requests).compiles).toBe(2);
     });
   }, 120_000);
 
-  it("fails when the bootstrap cannot compile, and asks nothing about Ens.Director", async () => {
+  it("fails on a compile in which IRIS answers HTTP 200 with no status error and the failure only in the console (Storage written), naming the class", async () => {
     await withFake({}, async (fake) => {
-      fake.failCompile = () => ["ERROR #5001: the classes do not compile"];
+      fake.compileFailure = (names) =>
+        isFixtureCompile(names) ? { failed: [{ name: FIXTURE, kind: "routine" }], shape: "storage-written", console: COMPILE_CONSOLE_DE } : undefined;
+
+      const { code, logs } = await seed(fake);
+
+      expect(code).toBe(1);
+      expect(logs).toMatch(/1 compile problem\(s\)/);
+      expect(logs).toContain(`did not compile: ${FIXTURE}`);
+      expect(logs).not.toContain("IRIS reported");
+      expect(summarizeRequests(fake.requests).compiles).toBe(2);
+    });
+  }, 120_000);
+
+  it.each([
+    ["de-DE", COMPILE_CONSOLE_DE],
+    ["ja-JP", COMPILE_CONSOLE_JA],
+  ] as const)("a clean compile whose console is %s text and carries ERROR lines still seeds: only the check decides", async (_locale, lines) => {
+    await withFake({}, async (fake) => {
+      fake.compileFailure = (names) => (isFixtureCompile(names) ? { failed: [], shape: "storage-written", console: lines } : undefined);
+
+      const { code, logs } = await seed(fake);
+
+      expect(code, logs).toBe(0);
+      expect(logs).toContain("deployed and compiled 65 test and fixture classes");
+    });
+  }, 120_000);
+
+  it("fails when the check of the fixtures cannot run, saying so, rather than passing", async () => {
+    await withFake({}, async (fake) => {
+      // The bootstrap's own check passes first; only the fixtures' check is made to fail.
+      fake.compileFailure = (names) => {
+        if (isFixtureCompile(names)) fake.failCompileCheck = "docnames";
+        return undefined;
+      };
+
+      const { code, logs } = await seed(fake);
+
+      expect(code).toBe(1);
+      expect(logs).toMatch(/the check that every class compiled could not run/);
+    });
+  }, 120_000);
+
+  it("fails when the bootstrap cannot compile, naming the class from the check, and asks nothing about Ens.Director", async () => {
+    await withFake({}, async (fake) => {
+      fake.compileFailure = () => ({ failed: [{ name: "ExecuteMCPv2.REST.Health.cls", kind: "class" }], shape: "status-errors" });
 
       const { code, logs } = await seed(fake);
 
       expect(code).toBe(1);
       expect(logs).toMatch(/the bootstrap of HSCUSTOM failed/);
-      expect(logs).toMatch(/Compile failed/);
+      expect(logs).toMatch(/Compile failed: 1 of 35 classes did not compile: ExecuteMCPv2\.REST\.Health\./);
       expect(summarizeRequests(fake.requests).queries).not.toContain(INTEROP_QUERY);
     });
   }, 120_000);
@@ -351,26 +392,39 @@ describe("seeding the stateful fake Atelier with the real shared dist", () => {
     });
   }, 120_000);
 
+  /** Run the seed script as a process with `env`. */
+  const run = (env: Record<string, string>): Promise<{ status: number | null; stderr: string }> =>
+    new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [SCRIPT], { cwd: REPO_ROOT, env: { ...scrubbedEnv(), ...env } });
+      let stderr = "";
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      child.once("error", reject);
+      child.once("close", (status) => resolve({ status, stderr }));
+    });
+
   it("run as a process, the script seeds the fake and exits 0, and refuses a non-throwaway environment with exit 2", async () => {
     await withFake({}, async (fake) => {
-      const run = (env: Record<string, string>): Promise<{ status: number | null; stderr: string }> =>
-        new Promise((resolve, reject) => {
-          const child = spawn(process.execPath, [SCRIPT], { cwd: REPO_ROOT, env: { ...scrubbedEnv(), ...env } });
-          let stderr = "";
-          child.stderr.on("data", (chunk: Buffer) => {
-            stderr += chunk.toString("utf8");
-          });
-          child.once("error", reject);
-          child.once("close", (status) => resolve({ status, stderr }));
-        });
-
       const refused = await run({ ...throwawayEnv(fake.port), IRIS_REQUIRE_LIVE: "0" });
       expect(refused.status).toBe(2);
       expect(fake.requests.length, "a refusal made no request").toBe(0);
 
       const seeded = await run(throwawayEnv(fake.port));
       expect(seeded.status, seeded.stderr.slice(-2000)).toBe(0);
-      expect(summarizeRequests(fake.requests).puts.length).toBe(97);
+      expect(summarizeRequests(fake.requests).puts.length).toBe(100);
+    });
+  }, 180_000);
+
+  it("run as a process against a fake that answers HTTP 200 with the failure only in a de-DE console, the script exits 1 and its log names the class from the check", async () => {
+    await withFake({}, async (fake) => {
+      fake.compileFailure = (names) =>
+        isFixtureCompile(names) ? { failed: [{ name: FIXTURE, kind: "routine" }], shape: "storage-written", console: COMPILE_CONSOLE_DE } : undefined;
+
+      const seeded = await run(throwawayEnv(fake.port));
+
+      expect(seeded.status, seeded.stderr.slice(-2000)).toBe(1);
+      expect(seeded.stderr).toContain(`did not compile: ${FIXTURE}`);
     });
   }, 180_000);
 });

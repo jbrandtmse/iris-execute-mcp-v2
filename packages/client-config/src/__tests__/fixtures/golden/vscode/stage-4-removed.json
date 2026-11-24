@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev@1"],
+      "env": {
+        "IRIS_SERVER_MANAGER": "auto"
+      },
+      "tools": ["*"]
+    },
+    "microsoft-learn": {
+      "command": "npx",
+      "args": ["-y", "@microsoft/learn-mcp"],
+      "env": {
+        "API_KEY": "BSA_foreignKeyABC"
+      },
+      "tools": ["*"]
+    }
+  }
+}

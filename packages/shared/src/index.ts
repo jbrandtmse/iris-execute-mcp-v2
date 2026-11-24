@@ -99,6 +99,7 @@ export type { StorageDroppedDetail, StorageDrop } from "./storage-guard.js";
 export type {
   ConfirmationOutcome,
   ConfirmationRequest,
+  ConfirmationScope,
   ToolAnnotations,
   ToolDefinition,
   ToolContext,
@@ -121,12 +122,15 @@ export {
   probeCustomRest,
   deployClasses,
   compileClasses,
+  compileAndVerify,
+  verifyCompiled,
+  verifyRoutinesCompiled,
   configureWebApp,
   configurePackageMapping,
   ensureUnitTestRoot,
   MANUAL_INSTRUCTIONS,
 } from "./bootstrap.js";
-export type { BootstrapResult } from "./bootstrap.js";
+export type { BootstrapResult, CompileReport } from "./bootstrap.js";
 export { classifyDeployedMarker, parseBootstrapMarker } from "./bootstrap-version.js";
 export type { DeployedMarkerClassification, ParsedBootstrapMarker } from "./bootstrap-version.js";
 export { BOOTSTRAP_CLASSES, getBootstrapClasses } from "./bootstrap-classes.js";
@@ -209,6 +213,7 @@ export {
   CREDENTIAL_CHAIN_KEYCHAIN_SERVICE,
   CREDENTIAL_HELPER_TIMEOUT_MS,
   resolveCredential,
+  resolveStoredCredential,
   resolveServerManagerCredentials,
 } from "./credential-chain.js";
 export type {

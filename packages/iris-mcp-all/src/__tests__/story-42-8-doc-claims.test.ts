@@ -191,6 +191,8 @@ describe("the plugin in the documents (AC 42.8.2)", () => {
 describe("the CHANGELOG and the changeset (Rule #43)", () => {
   it("the CHANGELOG has this story's section directly below Story 42.9's and above 42.7's, and the amendment's (decision #122) above both, under the release's [1.1.0] section", () => {
     const headings = CHANGELOG.split("\n").filter((line) => line.startsWith("## "));
+    // Pending `## [Unreleased]` sections (later stories' entries before their release) sit above the release's section.
+    while (headings[0]?.startsWith("## [Unreleased]")) headings.shift();
     expect(headings[0]).toMatch(/^## \[1\.1\.0\] \u2014 \d{4}-\d{2}-\d{2}$/);
     expect(headings[1]).toBe("## [1.1.0 detail] \u2014 Story 42.8 amendment (decision #122): IPM Publishes From the Main Repository");
     expect(headings[2]).toBe("## [1.1.0 detail] \u2014 Story 42.9: Install Docs and Client Re-Certification");

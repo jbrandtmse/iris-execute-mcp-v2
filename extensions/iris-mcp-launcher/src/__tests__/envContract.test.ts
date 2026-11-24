@@ -30,7 +30,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import { onCi } from "./builtDist.js";
-import { synthesizeIrisEnv } from "../env.js";
+import {
+  EMPTY_MEANS_UNSET_VARS,
+  synthesizeIrisEnv,
+  synthesizeProvidedEnv,
+  withOwnedVarsEmptied,
+} from "../env.js";
 import { readSettings } from "../settings.js";
 import type { ResolvedConnectionProfile } from "../types.js";
 
@@ -187,6 +192,73 @@ describe.skipIf(!ORACLE_AVAILABLE)(
       expect(() => buildProfileRegistry(loadConfig(stringified), stringified)).toThrow(/boolean/i);
 
       expect(() => buildProfileRegistry(loadConfig(env), env)).not.toThrow();
+    });
+  },
+);
+
+describe.skipIf(!ORACLE_AVAILABLE)(
+  "Story 44.6 — the PROVIDED env, parsed by the suite's REAL loadConfig and loadProfileRegistry",
+  () => {
+    type LoadProfileRegistry = (
+      env: Record<string, string | undefined>,
+      platform?: NodeJS.Platform,
+      deps?: { getKeychainPassword?: (name: string) => Promise<string | undefined> },
+    ) => Promise<Map<string, { host: string; port: number; username: string; password: string; namespace: string; source: string }>>;
+    let loadProfileRegistry: LoadProfileRegistry;
+
+    beforeAll(async () => {
+      if (!ORACLE_AVAILABLE) return;
+      const profiles = (await import(pathToFileURL(PROFILES_JS).href)) as { loadProfileRegistry: LoadProfileRegistry };
+      loadProfileRegistry = profiles.loadProfileRegistry;
+    });
+
+    /** What the Copilot harness hands the child: the Agent Host drops `null` entries and stringifies the rest. */
+    function agentHostEnv(provided: Record<string, string | null>): Record<string, string> {
+      return Object.fromEntries(
+        Object.entries(provided)
+          .filter(([, value]) => value !== null)
+          .map(([key, value]) => [key, String(value)]),
+      );
+    }
+
+    const connection = { host: "dev1.example.com", port: 52773, https: false, username: "svc", namespace: "APP" };
+
+    it("the provided env alone is a complete configuration once the keychain entry exists: the real chain supplies the password", async () => {
+      const env = agentHostEnv(withOwnedVarsEmptied(synthesizeProvidedEnv(connection, "HSCUSTOM", "dev1")));
+
+      const registry = await loadProfileRegistry(env, undefined, {
+        getKeychainPassword: async (name) => (name === "dev1" ? "stored-pw" : undefined),
+      });
+
+      expect(registry.get("default")).toMatchObject({
+        host: "dev1.example.com",
+        port: 52773,
+        username: "svc",
+        password: "stored-pw",
+        namespace: "APP",
+        source: "env",
+      });
+      expect([...registry.keys()]).toEqual(["default"]);
+    });
+
+    it("with no stored entry the real server refuses to start, naming IRIS_CREDENTIAL_NAME and the remedy (the empty IRIS_PASSWORD override is not an error)", async () => {
+      const env = agentHostEnv(withOwnedVarsEmptied(synthesizeProvidedEnv(connection, "HSCUSTOM", "dev1")));
+      expect(env.IRIS_PASSWORD).toBe("");
+
+      await expect(
+        loadProfileRegistry(env, undefined, { getKeychainPassword: async () => undefined }),
+      ).rejects.toThrow(/IRIS_CREDENTIAL_NAME.*dev1.*iris-mcp-credentials set dev1/s);
+    });
+
+    it("the empty-string overrides are read as unset by the real profile loader: only the default profile is registered", async () => {
+      const env = agentHostEnv(withOwnedVarsEmptied(synthesizeProvidedEnv(connection, "HSCUSTOM", "dev1")));
+      // Every `""` the provided env carries must be a value the suite treats as "not configured".
+      const alwaysSet = ["IRIS_HOST", "IRIS_PORT", "IRIS_HTTPS", "IRIS_USERNAME", "IRIS_NAMESPACE"];
+      expect(Object.entries(env).filter(([, value]) => value === "").map(([key]) => key).sort()).toEqual(
+        [...EMPTY_MEANS_UNSET_VARS].filter((name) => !alwaysSet.includes(name)).sort(),
+      );
+      const registry = await loadProfileRegistry(env, undefined, { getKeychainPassword: async () => "pw" });
+      expect([...registry.keys()]).toEqual(["default"]);
     });
   },
 );

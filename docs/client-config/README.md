@@ -28,7 +28,7 @@ Every guide has one install path: `npx -y -p @iris-mcp/client-config@1 iris-mcp-
 
 ### 1. The six base variables are always required
 
-`IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD`, `IRIS_NAMESPACE`, `IRIS_HTTPS` configure the reserved `default` profile, which is built **before** any Server Manager import or profile merge.
+`IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD`, `IRIS_NAMESPACE`, `IRIS_HTTPS` configure the reserved `default` profile, which is built **before** any Server Manager import or profile merge. (`IRIS_PASSWORD` may be left unset or empty when `IRIS_CREDENTIAL_NAME` is set; see caveat 2.)
 
 Setting `IRIS_SERVER_MANAGER=auto` **does not let you omit them.** Omitting `IRIS_USERNAME` fails at startup with:
 
@@ -40,19 +40,19 @@ Note the difference between a **missing** setting and an **unreachable** instanc
 
 Server Manager import is **additive** — it adds *extra* addressable profiles alongside `default`. It is not a replacement for your primary connection.
 
-### 2. The OS keychain covers Server-Manager profiles only — not `IRIS_PASSWORD`
+### 2. The OS keychain covers Server-Manager profiles, and the base credentials only with `IRIS_CREDENTIAL_NAME`
 
 `iris-mcp-credentials set <name>` stores a password the credential chain uses for an **imported** Server Manager definition that has none.
 
-It is **not** consulted for the base credentials. Storing an entry named `default` has no effect: `loadConfig` reads `IRIS_PASSWORD` from the environment and never calls the chain. Verified — a `default` keychain entry still fails with `IRIS_PASSWORD environment variable is required`.
+It is **not** consulted for the base credentials unless you opt in with `IRIS_CREDENTIAL_NAME=<name>` (Story 44.6) and leave `IRIS_PASSWORD` unset or empty: the `default` profile then takes its password from the entry stored under `<name>` (OS keychain, then `IRIS_CREDENTIAL_HELPER`), and a missing entry fails startup naming the variable. Without that variable, storing an entry named `default` has no effect: `loadConfig` reads `IRIS_PASSWORD` from the environment and a `default` keychain entry still fails with `IRIS_PASSWORD environment variable is required`.
 
-**So the keychain reduces plaintext for your additional servers; it cannot remove `IRIS_PASSWORD` from your client config.**
+**So the keychain reduces plaintext for your additional servers, and with `IRIS_CREDENTIAL_NAME` it can remove `IRIS_PASSWORD` from your client config too.** This page's `client-config` writer does not set `IRIS_CREDENTIAL_NAME` for you; add it to the environment your client passes to the server.
 
 Worked example, verified end to end — four profiles resolving at once:
 
 | Profile | Source | Credential from |
 |---|---|---|
-| `default` | env | `IRIS_PASSWORD` (required, plaintext) |
+| `default` | env | `IRIS_PASSWORD` (plaintext; or the keychain entry `IRIS_CREDENTIAL_NAME` names) |
 | `sademo` | `IRIS_PROFILES` | inherits base credentials |
 | `local` | Server Manager | inline `password` in `intersystems.servers` (deprecated) |
 | `localhost2` | Server Manager | **OS keychain** via `iris-mcp-credentials set localhost2` |
@@ -77,7 +77,7 @@ golden round-trips proven; the real client's config surface not yet hands-verifi
 | ✅ Claude Code | JSON | `mcpServers` | `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set (prefer `claude mcp add`) | `.mcp.json` | stash |
 | ✅ Cline | JSON | `mcpServers` | `<VS Code globalStorage>/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | — | native `disabled` |
 | ✅ Kimi Code | JSON | `mcpServers` | `~/.kimi-code/mcp.json` (or `$KIMI_CODE_HOME`) | `.kimi-code/mcp.json` | stash |
-| ✅ VS Code (Copilot) | JSONC | `servers` (+`inputs`) | user `mcp.json` — *MCP: Open User Configuration* | `.vscode/mcp.json` | native UI |
+| ✅ VS Code (Copilot) | JSON | `mcpServers` | `~/.copilot/mcp-config.json` (Windows `%USERPROFILE%\.copilot\mcp-config.json`; `$COPILOT_HOME/mcp-config.json` when that is set) | `.mcp.json` (shared with Claude Code) | stash |
 | ⚠️ Claude Desktop | JSON | `mcpServers` | Win `%APPDATA%\Claude\claude_desktop_config.json`; mac `~/Library/Application Support/Claude/…` | — | stash |
 | ⚠️ Cursor | JSON | `mcpServers` | `~/.cursor/mcp.json` | `.cursor/mcp.json` | stash |
 | ⚠️ Codex CLI | **TOML** | `[mcp_servers.<name>]` | `~/.codex/config.toml` | `.codex/config.toml` | native `enabled` flag (docs-verified) |
@@ -158,31 +158,40 @@ Or edit `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that variabl
 
 Restart Claude Code to pick up changes. Verify with `claude mcp list`.
 
+The project `.mcp.json` is also the project file of VS Code (Copilot) in the MCP client manager, and an entry in it belongs to the client that wrote it. When VS Code (Copilot) owns an entry under a server name in this project's `.mcp.json` (a record from another project never counts), an `apply --client claude-code --scope project`, a `disable`, `enable` or `remove` of that server, and a `restore` whose backup would change it are refused (exit 1, nothing written), an identical entry included. To switch the server to Claude Code, `remove` it with VS Code (Copilot) first, then `apply` it with Claude Code; configuring both clients for one project means picking one per server.
+
 ## VS Code (Copilot) ✅
 
-*MCP: Open User Configuration*, or `.vscode/mcp.json` for one workspace. Note the root key is **`servers`**, not `mcpServers`, and `inputs` prompts for secrets instead of storing them:
+The Copilot harness (the default since VS Code 1.143) reads two files itself, and the manager writes exactly those:
+
+- the user file `~/.copilot/mcp-config.json` (on Windows `%USERPROFILE%\.copilot\mcp-config.json`; `$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set and non-empty). It is strict JSON, with no comments and no trailing commas. The GitHub Copilot CLI (`copilot`) reads the same file, so an entry applied, disabled or removed here changes its servers too;
+- the workspace-root `.mcp.json`, the same file Claude Code uses for a project. Each entry in it belongs to the client that wrote it, and the other client is refused (exit 1, nothing written), an identical entry included, so applying VS Code after Claude Code for the same server is refused; to switch a server between the two clients, `remove` it with its owner first, then `apply` it with the other. An iris-mcp entry that no record names for the file belongs to Claude Code. A `restore` whose backup would change an entry the other client owns is refused the same way. Ownership is kept per project file: a record or a disabled entry from another project never counts here, and after a project folder is moved or renamed, `enable` finds nothing to enable there and VS Code's entries there belong to Claude Code: `remove` them with `claude-code`, then `apply` with `vscode`.
+
+Both use the root key **`mcpServers`**, expand `${VAR}` from the environment VS Code was launched with, and have **no `inputs` prompt**: the Copilot harness cannot forward a password prompt. A user entry is shaped like the one VS Code writes itself:
 
 ```jsonc
 {
-  "inputs": [
-    { "id": "iris-password", "type": "promptString", "description": "IRIS password", "password": true }
-  ],
-  "servers": {
-    "iris-dev": {
+  "mcpServers": {
+    "iris-dev-mcp": {
       "type": "stdio",
       "command": "npx",
       "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
-        "IRIS_HOST": "localhost", "IRIS_PORT": "52773", "IRIS_HTTPS": "false",
-        "IRIS_USERNAME": "_SYSTEM", "IRIS_PASSWORD": "${input:iris-password}",
-        "IRIS_NAMESPACE": "USER"
-      }
+        "IRIS_HOST": "${IRIS_HOST}", "IRIS_PORT": "${IRIS_PORT}", "IRIS_HTTPS": "${IRIS_HTTPS}",
+        "IRIS_USERNAME": "${IRIS_USERNAME}", "IRIS_PASSWORD": "${IRIS_PASSWORD}",
+        "IRIS_NAMESPACE": "${IRIS_NAMESPACE}"
+      },
+      "tools": ["*"]
     }
   }
 }
 ```
 
-Copilot users can skip this file entirely and install the **[iris-mcp-launcher extension](../../extensions/iris-mcp-launcher/README.md)**, which registers these servers from your Server Manager connections with credentials from SecretStorage.
+**Credentials.** `${IRIS_*}` resolves from the environment VS Code was started with, so export the variables in a shell and start VS Code (`code .`) from it, and start it again after you change them. The `server-manager` mode writes no secret, only `IRIS_SERVER_MANAGER` and `IRIS_SM_SERVERS`: the server reads the passwords of the Server Manager connections it adds from your OS keychain. It does not replace the base connection: the server's `default` profile still reads the base `IRIS_*` variables, `IRIS_PASSWORD` included, from the same environment (see "The OS keychain covers Server-Manager profiles, and the base credentials only with `IRIS_CREDENTIAL_NAME`" above).
+
+**Moving from the old files.** Earlier versions wrote VS Code's own `mcp.json` files (the profile `mcp.json` and `.vscode/mcp.json`, root key `servers`, with an `inputs` password prompt). Those belong to the Local harness, which VS Code removes in February 2027, and the Copilot harness does not forward their entries. `iris-mcp-clients status` and `doctor` report any iris-mcp entry still in them, and the next `apply --client vscode --scope <user|project>` writes the new file and then removes the entry from the old one, leaving everything else in that file as it was.
+
+Copilot users can also install the **[iris-mcp-launcher extension](../../extensions/iris-mcp-launcher/README.md)**, which registers these servers from your Server Manager connections with credentials from SecretStorage. Under the Copilot harness the servers it registers do not receive those connection settings yet (a known limitation, described in the extension README); the files above are not affected.
 
 ## Cline ✅
 

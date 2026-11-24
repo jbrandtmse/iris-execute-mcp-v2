@@ -138,7 +138,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 |------|-------------|----------------|-------------|
 | `iris_namespace_manage` | Create, modify, or delete a namespace | `action`, `name`, `codeDatabase?`, `dataDatabase?`, `library?`, `tempGlobals?` | destructive |
 | `iris_namespace_list` | List all namespaces with DB associations | `cursor?` | readOnly, idempotent |
-| `iris_database_manage` | Create, modify, or delete a database | `action`, `name`, `directory?`, `size?`, `maxSize?`, `expansionSize?`, `readOnly?`, `resource?` | destructive |
+| `iris_database_manage` | Create, modify, or delete a database; `delete` removes the configuration entry and dismounts the database, and keeps its `IRIS.DAT` and directory | `action`, `name`, `directory?`, `size?`, `maxSize?`, `expansionSize?`, `readOnly?`, `resource?` | destructive |
 | `iris_database_list` | List all databases with size and mount status | `cursor?` | readOnly, idempotent |
 
 ### Namespace Mapping Tools
@@ -339,6 +339,16 @@ Also installable as [Agent Skills](../../README.md#the-skills-pack).
   "name": "MYAPP-DATA"
 }
 ```
+
+**Input (delete) and output:**
+```json
+{ "action": "delete", "name": "MYAPP-DATA" }
+```
+```json
+{ "action": "deleted", "name": "MYAPP-DATA", "dismounted": true }
+```
+
+**What delete does:** it removes the database's configuration entry and dismounts the database (before, the database stayed mounted, and a second `create` at its directory failed with `#60`, the database must be dismounted). Its `IRIS.DAT` and its directory stay on disk, by design: removing them is irreversible data loss, and this action has no confirmation gate. So a `create` at the same directory fails (`#78`, file already exists) until the file is removed by hand. When another configured database names the same directory, nothing is dismounted: the reply has `"dismounted": false` and a `dismountNote` that names it. A remote (ECP) database is never dismounted on this instance, and it never counts as sharing a local directory: its directory is a path on its own server. A dismount that cannot run is reported the same way (`dismounted: false` and a `dismountNote`), not as an error, because the entry is already gone. A database that a namespace uses, or a name that does not exist, is refused with IRIS's own error and nothing changes.
 
 **Config/SYS routing:** Database properties split across two IRIS classes.
 - **Configuration props** (route to `Config.Databases`): `directory`, `resource`, `mountRequired`, `mountAtStartup`, `readOnly`, `globalJournalState`.

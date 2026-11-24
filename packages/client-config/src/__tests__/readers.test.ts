@@ -17,7 +17,7 @@ import {
   readConfigEntries,
   type ClientAdapter,
 } from "../index.js";
-import { ADAPTER_FIXTURES, readFixture, FOREIGN_ENTRY_NAMES } from "./helpers.js";
+import { ADAPTER_FIXTURES, readFixture, FOREIGN_ENTRY_NAMES, VSCODE_LEGACY_FIXTURE, vscodeLegacyAdapter } from "./helpers.js";
 
 /** The iris-mcp-owned entry planted in each fixture (at least one per fixture). */
 const EXPECTED_OWNED: Readonly<Record<string, string[]>> = {
@@ -453,7 +453,7 @@ describe("diagnoseConfigSurface — the config-drift classification (AC 33.4.2)"
     const cases: Array<[string, string, string, string]> = [
       // [adapterId, fixture, expected-fragment, found]
       ["claude-code", "drift/wrong-shape.json", 'root key "mcpServers" holding an object of server entries', "an array (3 item(s))"],
-      ["vscode", "drift/wrong-shape.jsonc", 'root key "servers" holding an object of server entries', "an array (3 item(s))"],
+      ["vscode", "drift/wrong-shape.json", 'root key "mcpServers" holding an object of server entries', "an array (3 item(s))"],
       ["codex", "drift/wrong-shape.toml", 'root key "mcp_servers" holding a table of server entries', "a string"],
       ["goose", "drift/wrong-shape.yaml", 'root key "extensions" holding a mapping of server entries', "an array (2 item(s))"],
     ];
@@ -464,6 +464,23 @@ describe("diagnoseConfigSurface — the config-drift classification (AC 33.4.2)"
         expect(diagnosis.expected, adapterId).toBe(expected);
         expect(diagnosis.found, adapterId).toBe(found);
       }
+    }
+  });
+
+  it("a reader of an old file still parses it: the old Local-harness user fixture reads through the vscode legacy view (AC 44.2.8)", () => {
+    const result = readConfigEntries(vscodeLegacyAdapter(), readFixture(VSCODE_LEGACY_FIXTURE));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Object.keys(result.entries).sort()).toEqual(["iris-dev-mcp", "microsoft-learn"]);
+    expect(diagnoseConfigSurface(vscodeLegacyAdapter(), readFixture(VSCODE_LEGACY_FIXTURE)).status).toBe("root-ok");
+  });
+
+  it("the vscode legacy view (the old Local-harness JSONC files) diagnoses a wrong-shaped `servers` root key", () => {
+    const diagnosis = diagnoseConfigSurface(vscodeLegacyAdapter(), readFixture("drift/wrong-shape.jsonc"));
+    expect(diagnosis.status).toBe("root-wrong-shape");
+    if (diagnosis.status === "root-wrong-shape") {
+      expect(diagnosis.expected).toBe('root key "servers" holding an object of server entries');
+      expect(diagnosis.found).toBe("an array (3 item(s))");
     }
   });
 

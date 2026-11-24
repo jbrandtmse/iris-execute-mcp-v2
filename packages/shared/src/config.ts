@@ -98,6 +98,31 @@ export interface IrisConnectionConfig {
 export const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
 
 /**
+ * Read the opt-in `IRIS_CREDENTIAL_NAME` variable: the name of the iris-mcp
+ * keychain entry (also the `IRIS_CREDENTIAL_HELPER` argument) that supplies
+ * the `default` profile's password. Unset, empty or whitespace-only means the
+ * feature is off and `undefined` is returned. Otherwise the value is returned
+ * as written (the same name `iris-mcp-credentials set <name>` stores under).
+ *
+ * @throws {Error} (naming `IRIS_CREDENTIAL_NAME`) when the value contains a
+ *   control character.
+ */
+export function readCredentialName(
+  env: Record<string, string | undefined>,
+): string | undefined {
+  const raw = env.IRIS_CREDENTIAL_NAME;
+  if (raw === undefined || raw.trim() === "") return undefined;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(raw)) {
+    throw new Error(
+      "IRIS_CREDENTIAL_NAME must not contain control characters (newline, tab, NUL, ...). " +
+        "Set it to the name given to \"iris-mcp-credentials set <name>\".",
+    );
+  }
+  return raw;
+}
+
+/**
  * Load IRIS connection configuration from environment variables.
  *
  * | Variable          | Default      |
@@ -105,7 +130,8 @@ export const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
  * | IRIS_HOST         | localhost    |
  * | IRIS_PORT         | 52773        |
  * | IRIS_USERNAME     | *(required)* |
- * | IRIS_PASSWORD     | *(required)* |
+ * | IRIS_PASSWORD     | *(required unless IRIS_CREDENTIAL_NAME is set)* |
+ * | IRIS_CREDENTIAL_NAME | *(unset: off)*; names the keychain / credential-helper entry that supplies the password |
  * | IRIS_NAMESPACE    | USER         |
  * | IRIS_HTTPS        | false        |
  * | IRIS_TIMEOUT      | 60000        |
@@ -116,7 +142,11 @@ export const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
  * | IRIS_TEST_TIMEOUT | *(unset: `iris_execute_tests` and `iris_test_coverage` keep their 120s default)*, seconds |
  * | IRIS_ACCEPT_LANGUAGE | `en-US,en;q=0.9` |
  *
- * @throws {Error} When IRIS_USERNAME or IRIS_PASSWORD is not set.
+ * @throws {Error} When IRIS_USERNAME is not set, or IRIS_PASSWORD is not set
+ *   and IRIS_CREDENTIAL_NAME is not set either. With IRIS_CREDENTIAL_NAME set
+ *   and no IRIS_PASSWORD the returned `password` is `""`, pending the
+ *   credential chain in `loadProfileRegistry`.
+ * @throws {Error} When IRIS_CREDENTIAL_NAME contains a control character.
  * @throws {Error} When IRIS_ACCEPT_LANGUAGE is set to a value that is not a
  *   valid HTTP header field-value (non-printable-ASCII, CR, or LF).
  * @throws {Error} When IRIS_SQL_MAX_ROWS or IRIS_SQL_TIMEOUT is set to a
@@ -169,7 +199,12 @@ export function loadConfig(
       "IRIS_USERNAME environment variable is required. Set it to a valid IRIS username.",
     );
   }
-  if (!password) {
+  // IRIS_CREDENTIAL_NAME (opt-in): an unset or empty IRIS_PASSWORD is not an
+  // error here; the password is "" until `loadProfileRegistry` completes it
+  // from the keychain / credential-helper chain (and fails fast when that
+  // chain is exhausted). With the variable unset the check below is today's.
+  const credentialName = readCredentialName(env);
+  if (!password && credentialName === undefined) {
     throw new Error(
       "IRIS_PASSWORD environment variable is required. Set it to the password for the IRIS user.",
     );
@@ -302,7 +337,7 @@ export function loadConfig(
     host,
     port,
     username,
-    password,
+    password: password ?? "",
     namespace,
     https,
     baseUrl,

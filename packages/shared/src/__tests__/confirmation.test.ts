@@ -13,6 +13,7 @@ import {
   CONFIRMATION_INPUT_KEY,
   CONFIRMATION_PENDING,
   CONFIRMATION_SCHEMA,
+  CONFIRMATION_SCOPE_REASKS,
   CONFIRMATION_STATE_TTL_SECONDS,
   ConfirmationNonces,
   UNANSWERED_CONFIRMATION_TEXT,
@@ -20,9 +21,12 @@ import {
   classifyConfirmationResponse,
   confirmationDeclinedResult,
   confirmationMessage,
+  confirmationScopeChangedResult,
   contentHash,
   declaresFormElicitation,
   isConfirmationState,
+  scopeDigest,
+  scopeText,
 } from "../confirmation.js";
 
 const SERVER = { profile: "default", host: "localhost", port: 52773 };
@@ -246,24 +250,68 @@ describe("contentHash", () => {
 });
 
 describe("isConfirmationState", () => {
-  const VALID = { v: 1, tool: "iris_audit_manage", hash: "abc", nonce: "n-1" };
+  const VALID = { v: 2, tool: "iris_audit_manage", hash: "abc", digest: "def", reasks: 0, nonce: "n-1" };
 
   it("accepts a state of the minted shape", () => {
     expect(isConfirmationState(VALID)).toBe(true);
+    expect(isConfirmationState({ ...VALID, reasks: 1 })).toBe(true);
   });
 
   it.each([
-    ["another version", { ...VALID, v: 2 }],
-    ["no version", { tool: "t", hash: "h", nonce: "n" }],
+    ["the version of the state before the scope digest", { ...VALID, v: 1 }],
+    ["a later version", { ...VALID, v: 3 }],
+    ["no version", { tool: "t", hash: "h", digest: "d", reasks: 0, nonce: "n" }],
+    ["a v 1 state with no digest and no count", { v: 1, tool: "t", hash: "h", nonce: "n" }],
     ["a tool that is not a string", { ...VALID, tool: 7 }],
     ["a hash that is not a string", { ...VALID, hash: null }],
-    ["a missing nonce", { v: 1, tool: "t", hash: "h" }],
+    ["a missing digest", { v: 2, tool: "t", hash: "h", reasks: 0, nonce: "n" }],
+    ["a digest that is not a string", { ...VALID, digest: 5 }],
+    ["a missing count of re-asks", { v: 2, tool: "t", hash: "h", digest: "d", nonce: "n" }],
+    ["a count of re-asks that is not a number", { ...VALID, reasks: "0" }],
+    ["a negative count of re-asks", { ...VALID, reasks: -1 }],
+    ["a count of re-asks that is not whole", { ...VALID, reasks: 0.5 }],
+    ["a missing nonce", { v: 2, tool: "t", hash: "h", digest: "d", reasks: 0 }],
     ["an empty nonce", { ...VALID, nonce: "" }],
     ["null", null],
     ["a string", "state"],
     ["an array", [VALID]],
   ])("rejects %s", (_label, value) => {
     expect(isConfirmationState(value)).toBe(false);
+  });
+});
+
+describe("the scope of a confirmation", () => {
+  // The hashes are the captures of `contentHash` above (Rule #36): a digest is `contentHash` of the binding value, else of the text.
+  it("allows one re-ask", () => {
+    expect(CONFIRMATION_SCOPE_REASKS).toBe(1);
+  });
+
+  it("digests a text scope as the hash of the whole text", () => {
+    expect(scopeDigest("x")).toBe("ba2df4903a2c14e86dc3bcca58911b44ac1d2514b7227bf6eb08cfb978f55a1b");
+    expect(scopeDigest("x")).toBe(contentHash("x"));
+  });
+
+  it("digests a scope with a binding as the hash of the binding value, whatever its text says", () => {
+    const binding = { a: [1, 2, 3] };
+    expect(scopeDigest({ text: "one text", binding })).toBe("730bc329ebcd24c6c9663ca4bb0e199a090dbf9d9d1058651d8560236abb1095");
+    expect(scopeDigest({ text: "another text", binding })).toBe(scopeDigest({ text: "one text", binding }));
+    expect(scopeDigest({ text: "one text", binding: { a: [3, 2, 1] } })).toBe("1956211cdd1b997e12419186832911195c511ff444db406c7e53fd35b600e21d");
+  });
+
+  it("digests a binding of undefined as its whole text, and leaves a member that is undefined out", () => {
+    expect(scopeDigest({ text: "t", binding: undefined })).toBe(scopeDigest("t"));
+    expect(scopeDigest({ text: "t", binding: undefined })).not.toBe(scopeDigest({ text: "u", binding: undefined }));
+    expect(scopeDigest({ text: "t", binding: { a: 1, b: undefined } })).toBe(scopeDigest({ text: "t", binding: { a: 1 } }));
+  });
+
+  it("digests a binding that is a string as that string, and a text that differs from it as a different scope", () => {
+    expect(scopeDigest({ text: "t", binding: "x" })).toBe(scopeDigest("x"));
+    expect(scopeDigest({ text: "x", binding: "y" })).not.toBe(scopeDigest("x"));
+  });
+
+  it("reads the dialog text of a scope", () => {
+    expect(scopeText("plain")).toBe("plain");
+    expect(scopeText({ text: "shown", binding: { hidden: true } })).toBe("shown");
   });
 });
 
@@ -407,6 +455,23 @@ describe("confirmationDeclinedResult", () => {
         },
       ],
       structuredContent: { code: "CONFIRMATION_DECLINED", action: "resendFiltered", response: "unconfirmed" },
+      isError: true,
+    });
+  });
+});
+
+describe("confirmationScopeChangedResult", () => {
+  it("is the refusal for a scope that changed again, naming the operation and the action", () => {
+    expect(confirmationScopeChangedResult("execute", "promote changes to another server")).toStrictEqual({
+      content: [
+        {
+          type: "text",
+          text:
+            "The scope of promote changes to another server changed again while the person was answering the confirmation dialog, so the call was not run. " +
+            "Nothing was changed. Run the call again once what it covers has stopped changing.",
+        },
+      ],
+      structuredContent: { code: "CONFIRMATION_SCOPE_CHANGED", action: "execute" },
       isError: true,
     });
   });

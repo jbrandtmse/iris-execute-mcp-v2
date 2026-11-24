@@ -99,7 +99,8 @@ const SKILLS: SkillOracle[] = [
     preset: "core",
     description:
       "Provisions a new IRIS project environment in order: a DATA and a CODE database, a namespace over them, a user whose default namespace it is, and a web application, checking each step before the next, rolling back the completed steps when one fails, and naming the manual follow-up a new web application needs. Use when the user wants to set up or create a new IRIS project, namespace or application environment.",
-    sha256: "dd8f6c73a0f16670fd93337c1fb6e2154f26fb9c246b313876b7adccd469498e",
+    // Re-pinned by Story 44.7 (sanction S-44.7-database-delete): the rollback sentence after each database delete; captured from `pnpm gen:skills`.
+    sha256: "b7368265f81fc837a23af2924969b8ef55d603e24ffdfdcb9590caacc3ea0b9b",
   },
   {
     name: "recover-stuck-production",

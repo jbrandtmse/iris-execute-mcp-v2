@@ -2,21 +2,19 @@
 ## Basics  
    - "namespace" = IRIS namespace  
    - "package" prefix = class prefix  
-   - Do not create classes or properties with '%' or '_'  
+   - Do not create classes or properties with '%' (a project convention: `%` names are reserved for InterSystems system code, but the compiler accepts them) or '_'  
    - Class parameter names must not contain underscore ('_') characters - use camel case (e.g., "MyParameter") or all caps without underscores (e.g., "MYPARAM" or "MYPARAMETER") instead
    - Method names must not contain underscore ('_') characters; use camel case (e.g., `TestCoreScenario45UNIT001`) and keep any formal test IDs in comments or assertion messages instead of the method name
    - Compile classes using the compile_objectscript_class or compile_objectscript_package MCP tool.
 
 ## Abstract Methods in ObjectScript
-   - **CRITICAL**: Despite documentation suggesting otherwise, abstract methods MUST have code blocks with curly braces {} - they cannot be truly empty or the class will not compile
-   - **CRITICAL**: Abstract methods must return an appropriate value based on their signature:
-     - Methods returning objects: Use `Quit $$$NULLOREF` or `Quit ""`
-     - Methods returning %Status: Use `Quit $$$OK`
-     - Methods returning %String: Use `Quit ""`
-     - Methods returning %Boolean: Use `Quit 0`
-     - Methods returning %Numeric: Use `Quit 0`
+   - **CRITICAL**: Abstract methods MUST have a code block with curly braces `{}`. The block may be empty: `{ }` compiles for any return type (`As %String`, `As %Status`, ...). A method with no braces at all (e.g. a bare `;`) fails with ERROR #5559. (Verified by live probe, Story 41.2, P13.)
+   - Returning a placeholder value from the body is optional, a readability choice only:
+     - Methods returning objects: `Quit $$$NULLOREF` or `Quit ""`
+     - Methods returning %Status: `Quit $$$OK`
+     - Methods returning %String: `Quit ""`
+     - Methods returning %Boolean or %Numeric: `Quit 0`
    - Abstract methods are marked with `[ Abstract ]` keyword after the method signature
-   - While documentation states abstract methods have no executable code, the compiler requires implementation bodies that return values
    - Subclasses override abstract methods with actual implementations
    - Example pattern:
      ```objectscript
@@ -96,7 +94,7 @@
 ## Comments  
    - Semicolon for single-line comments  
    - Class/Method banners must have HTML & DocBook markup
-   - Use `///` for method-level doc comments in class definitions; avoid `//`, which is not treated as a comment in ObjectScript classes and can break parsing
+   - Use `///` for doc comments on class members (they become the class reference documentation). `//` is a valid ObjectScript line comment inside method code, like `;`; it is just not a doc comment. (Verified by live probe, Story 41.2.)
    - Reserve `/* ... */` block comments for safe top-of-file banners; avoid placing them immediately around method signatures, as mismatched or misplaced blocks can trigger ERROR #5559 parse failures
 
 ## Indentation and Formatting
@@ -115,7 +113,7 @@
 
 ## Namespace Switching in REST Handlers
    - **CRITICAL**: Never use `New $NAMESPACE` in REST dispatch handler classes (classes extending `%Atelier.REST` or called from Dispatch UrlMap routes)
-   - `New $NAMESPACE` + `Set $NAMESPACE = "%SYS"` makes classes from the original namespace (e.g., `ExecuteMCPv2.Utils`) invisible in catch blocks, causing `<CLASS DOES NOT EXIST>` crashes on any error path
+   - `New $NAMESPACE` + `Set $NAMESPACE = "%SYS"` makes any class that `%SYS` cannot see invisible in catch blocks, causing `<CLASS DOES NOT EXIST>` crashes on any error path. Whether `ExecuteMCPv2.*` is one of them depends on the instance: where the `%ALL` package mapping is in place (as on this project's instance) it resolves in `%SYS`, so a probe there can pass while the same code fails elsewhere (e.g. `Ens.*` classes are not visible from `%SYS`). Keep the safe pattern regardless. (Live probe, Story 41.2, P10.)
    - **Safe pattern**: Use explicit save/restore with a local variable:
      ```objectscript
      Set tOrigNS = $NAMESPACE

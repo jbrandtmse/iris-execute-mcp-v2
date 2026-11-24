@@ -3,7 +3,7 @@
  * modes per adapter env-expansion capability (spec §3.3).
  *
  * Proves: (a) the four modes render per capability (claude/shell `${VAR}`,
- * vscode `${env:VAR}` + native `inputs` upgrade, none literal-with-doctor-
+ * vscode `${VAR}` too since Story 44.2 (no `${env:VAR}`, no native `inputs`), none literal-with-doctor-
  * note); (b) `explicit` requires the typed confirmation and marks
  * contains-secret; (c) MECHANICALLY (Rule #51 sweep over every adapter ×
  * every non-explicit mode): no literal IRIS_PASSWORD value is ever rendered
@@ -17,7 +17,6 @@ import {
   CLIENT_ADAPTERS,
   IRIS_MCP_MAJOR,
   PKG_BY_SERVER,
-  VSCODE_PASSWORD_INPUT_ID,
   pinnedSpec,
   synthesizeEntry,
   type ClientAdapter,
@@ -68,7 +67,7 @@ describe("env-reference mode per expansion capability", () => {
     expect(result.entry.env?.["IRIS_PORT"]).toBe("52773");
     expect(result.entry.env?.["IRIS_HTTPS"]).toBe("true");
     expect(result.containsSecret).toBe(false);
-    expect(result.inputs).toBeUndefined();
+    expect(result).not.toHaveProperty("inputs");
   });
 
   it("claude expansion without a profile references every connection var", () => {
@@ -80,28 +79,28 @@ describe("env-reference mode per expansion capability", () => {
     expect(result.entry.env?.["IRIS_PASSWORD"]).toBe("${IRIS_PASSWORD}");
   });
 
-  it("vscode: ${env:VAR} for connection vars + the native inputs upgrade for the password", () => {
+  it("vscode (Copilot, Story 44.2): ${VAR} for every connection var and the password; no ${env:}, no ${input:}, no inputs (AC 44.2.2)", () => {
     const result = expectOk(synthesizeEntry("iris-dev-mcp", "env-reference", { adapter: adapterOf("vscode") }));
-    expect(result.entry.env?.["IRIS_HOST"]).toBe("${env:IRIS_HOST}");
-    expect(result.entry.env?.["IRIS_PASSWORD"]).toBe(`\${input:${VSCODE_PASSWORD_INPUT_ID}}`);
-    expect(result.inputs).toEqual([
-      {
-        id: VSCODE_PASSWORD_INPUT_ID,
-        type: "promptString",
-        description: "IRIS password for iris-dev-mcp",
-        password: true,
-      },
-    ]);
+    expect(result.entry.env).toEqual({
+      IRIS_HOST: "${IRIS_HOST}",
+      IRIS_PORT: "${IRIS_PORT}",
+      IRIS_USERNAME: "${IRIS_USERNAME}",
+      IRIS_NAMESPACE: "${IRIS_NAMESPACE}",
+      IRIS_HTTPS: "${IRIS_HTTPS}",
+      IRIS_PASSWORD: "${IRIS_PASSWORD}",
+    });
+    expect(result).not.toHaveProperty("inputs");
+    expect(JSON.stringify(result.entry)).not.toMatch(/\$\{(env|input|command):/);
     expect(result.containsSecret).toBe(false);
   });
 
-  it("vscode with a profile keeps literals for non-secret fields and the input for the password", () => {
+  it("vscode with a profile keeps literals for non-secret fields and references the password", () => {
     const result = expectOk(
       synthesizeEntry("iris-admin-mcp", "env-reference", { adapter: adapterOf("vscode"), profile: PROFILE }),
     );
     expect(result.entry.env?.["IRIS_HOST"]).toBe("iris.example.com");
-    expect(result.entry.env?.["IRIS_PASSWORD"]).toBe(`\${input:${VSCODE_PASSWORD_INPUT_ID}}`);
-    expect(result.inputs).toHaveLength(1);
+    expect(result.entry.env?.["IRIS_PASSWORD"]).toBe("${IRIS_PASSWORD}");
+    expect(result).not.toHaveProperty("inputs");
   });
 
   it("no-expansion clients (cursor: none): literals, NO password, doctor note", () => {

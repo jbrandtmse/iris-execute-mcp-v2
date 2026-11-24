@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LauncherProvider, type ProviderDeps } from "../serverDefinitionProvider.js";
+import { userScopeServers } from "./serverManagerInspection.js";
 import type {
   AuthApi,
   GetSessionOptions,
   LauncherSettings,
   ServerManagerApi,
+  ServerManagerServersInspection,
   ServerSpec,
 } from "../types.js";
 
@@ -75,6 +77,44 @@ function specFor(name: string, password?: string): ServerSpec {
   };
 }
 
+/**
+ * The env a provided definition carries for a single-server plan over the `makeDeps` fixtures (`specFor(name)`:
+ * `<name>.example.com:52773`, http, user `_SYSTEM`; namespace `HSCUSTOM`): the non-secret connection, the credential
+ * name, `""` for every launcher-owned variable the server reads `""` as unset, and `null` for `IRIS_AUDIT_LOG_MAX_MB`.
+ * `overrides` layers a local-build or governance difference on top.
+ */
+function providedEnv(
+  name: string,
+  overrides: Record<string, string | null> = {},
+): Record<string, string | null> {
+  return {
+    IRIS_HOST: `${name}.example.com`,
+    IRIS_PORT: "52773",
+    IRIS_HTTPS: "false",
+    IRIS_USERNAME: "_SYSTEM",
+    IRIS_NAMESPACE: "HSCUSTOM",
+    IRIS_CREDENTIAL_NAME: name,
+    IRIS_PASSWORD: "",
+    IRIS_PROFILES: "",
+    IRIS_GOVERNANCE: "",
+    IRIS_GOVERNANCE_PRESET: "",
+    IRIS_GOVERNANCE_FILE: "",
+    IRIS_AUDIT_LOG: "",
+    IRIS_AUDIT_LOG_MAX_MB: null,
+    IRIS_AUDIT_LOG_PARAMS: "",
+    IRIS_TOOLS_PRESET: "",
+    IRIS_TOOLS_DISABLE: "",
+    IRIS_TOOLS_ENABLE: "",
+    IRIS_SERVER_MANAGER: "",
+    IRIS_SM_SERVERS: "",
+    IRIS_SM_SETTINGS_PATHS: "",
+    IRIS_SM_WORKSPACE: "",
+    IRIS_CREDENTIAL_HELPER: "",
+    MCP_TRANSPORT: "",
+    ...overrides,
+  };
+}
+
 function makeDeps(opts: {
   serverNames?: string[];
   specs?: Record<string, ServerSpec | undefined>;
@@ -111,6 +151,7 @@ function makeDeps(opts: {
     authApi,
     getSettings: opts.getSettings ?? (() => settings()),
     showWarning: (message: string) => warnings.push(message),
+    inspectServerManagerServers: () => userScopeServers(serverNames),
   };
 
   return { deps, warnings };
@@ -347,6 +388,7 @@ describe("LauncherProvider.resolveEnvForLabel — real cancel semantics (getSess
         authApi,
         getSettings: () => settings({ packages: ["dev"], servers: ["a"] }),
         showWarning: (message: string) => warnings.push(message),
+        inspectServerManagerServers: () => userScopeServers(["a"]),
       },
       warnings,
       sessionCalls: () => sessionCalls,
@@ -391,6 +433,7 @@ describe("LauncherProvider.resolveEnvForLabel — real cancel semantics (getSess
       authApi: { getSession: async () => undefined },
       getSettings: () => settings({ packages: ["dev"], servers: ["a"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
     };
     const provider = new LauncherProvider(deps);
     const [planned] = await provider.providePlannedDefinitions();
@@ -471,17 +514,25 @@ describe("LauncherProvider.providePlannedDefinitions — untrusted input must no
       },
       getAccount: () => undefined,
     };
+    const inspectedIn: unknown[] = [];
     const provider = new LauncherProvider({
       getServerManagerApi: async () => api,
       authApi: { getSession: async () => undefined },
       getSettings: () => settings({ packages: ["dev"], servers: ["a"] }),
       showWarning: () => undefined,
+      inspectServerManagerServers: (scope) => {
+        inspectedIn.push(scope);
+        return userScopeServers(["a"]);
+      },
     });
 
     const [planned] = await provider.providePlannedDefinitions();
+    // The provide path looks the spec up once, in the scope it enumerated the name in, and inspects that same scope.
+    expect(seen).toEqual([scopeToken]);
+    expect(inspectedIn).toEqual([scopeToken]);
     await provider.resolveEnvForLabel(planned!.label);
 
-    expect(seen).toEqual([scopeToken]);
+    expect(seen).toEqual([scopeToken, scopeToken]);
   });
 });
 
@@ -626,7 +677,7 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
     const planned = await provider.providePlannedDefinitions();
 
     expect(planned).toEqual([
-      { label: "IRIS Dev Tools — a", command: "npx", args: ["-y", "@iris-mcp/dev@1"] },
+      { label: "IRIS Dev Tools — a", command: "npx", args: ["-y", "@iris-mcp/dev@1"], env: providedEnv("a") },
     ]);
   });
 
@@ -647,6 +698,7 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
         label: "IRIS Dev Tools — a",
         command: process.execPath,
         args: [path.join(repoDir, "packages", "iris-dev-mcp", "dist", "index.js")],
+        env: providedEnv("a", { ELECTRON_RUN_AS_NODE: "1" }),
       },
     ]);
     expect(warnings).toHaveLength(0);
@@ -718,6 +770,7 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
         label: "IRIS Dev Tools — a",
         command: process.execPath,
         args: [path.join(repoDir, "packages", "iris-dev-mcp", "dist", "index.js")],
+        env: providedEnv("a", { ELECTRON_RUN_AS_NODE: "1" }),
       },
     ]);
     expect(warnings).toHaveLength(1);
@@ -863,6 +916,7 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
           label: "IRIS Admin Tools — a",
           command: process.execPath,
           args: [path.join(repoDir, "packages", "iris-admin-mcp", "dist", "index.js")],
+          env: providedEnv("a", { ELECTRON_RUN_AS_NODE: "1" }),
         },
       ]);
       expect(warnings).toHaveLength(1);
@@ -907,6 +961,7 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
         label: "IRIS Dev Tools — a",
         command: process.execPath,
         args: [path.join(repoDir, "packages", "iris-dev-mcp", "dist", "index.js")],
+        env: providedEnv("a", { ELECTRON_RUN_AS_NODE: "1" }),
       },
     ]);
     expect(warnings).toHaveLength(0);
@@ -1034,11 +1089,13 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
         label: "IRIS Admin Tools (a, b)",
         command: process.execPath,
         args: [path.join(repoDir, "packages", "iris-admin-mcp", "dist", "index.js")],
+        env: {},
       },
       {
         label: "IRIS Dev Tools (a, b)",
         command: process.execPath,
         args: [path.join(repoDir, "packages", "iris-dev-mcp", "dist", "index.js")],
+        env: {},
       },
     ]);
 
@@ -1087,7 +1144,7 @@ describe("LauncherProvider.providePlannedDefinitions — removed 'all' package k
     const planned = await provider.providePlannedDefinitions();
 
     expect(planned).toEqual([
-      { label: "IRIS Dev Tools — a", command: "npx", args: ["-y", "@iris-mcp/dev@1"] },
+      { label: "IRIS Dev Tools — a", command: "npx", args: ["-y", "@iris-mcp/dev@1"], env: providedEnv("a") },
     ]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("all");
@@ -1166,6 +1223,7 @@ describe("Rule #19 whole-object back-compat — developmentRepoPath unset matche
           // the settings() helper's own default ("") is what is under test.
         }),
       showWarning: () => {},
+      inspectServerManagerServers: () => userScopeServers(["prod", "staging"]),
     });
 
     const planned = await provider.providePlannedDefinitions();
@@ -1177,6 +1235,8 @@ describe("Rule #19 whole-object back-compat — developmentRepoPath unset matche
         label: "IRIS Dev Tools (prod, staging)",
         command: "npx",
         args: ["-y", "@iris-mcp/dev@1"],
+        // combineProfiles is Local-only: its provided env is today's empty one.
+        env: {},
       },
     ]);
 
@@ -1260,6 +1320,7 @@ describe("Rule #19 whole-object back-compat — developmentRepoPath unset matche
       authApi: { getSession: vi.fn() as never },
       getSettings: () => settings({ packages: ["dev"], servers: ["solo"] }),
       showWarning: () => {},
+      inspectServerManagerServers: () => userScopeServers(["solo"]),
     });
 
     const [planned] = await provider.providePlannedDefinitions();
@@ -1303,6 +1364,7 @@ describe("Story 32.3 — 31-4-1: concurrent credential resolutions of the SAME s
       getSettings: () =>
         settings({ packages: ["dev", "admin", "data", "interop", "ops"] }),
       showWarning: () => {},
+      inspectServerManagerServers: () => userScopeServers(serverNames),
     };
     const provider = new LauncherProvider(deps);
     const planned = await provider.providePlannedDefinitions();
@@ -1530,6 +1592,7 @@ describe("Story 32.4 — 32-3-R14: coalesced-credential containment + shared-res
       getSettings: () => settings({ servers: ["serverA"] }),
       showWarning: (m) => warnings.push(m),
       logDiagnostic: (m) => diagnostics.push(m),
+      inspectServerManagerServers: () => userScopeServers(["serverA"]),
     };
     const provider = new LauncherProvider(deps);
     const planned = await provider.providePlannedDefinitions();
@@ -1648,5 +1711,405 @@ describe("Story 32.3 — 31-6-3: local-build plans spawn the extension host's ow
     const npxPlanned = await npxProvider.providePlannedDefinitions();
     const npxEnv = await npxProvider.resolveEnvForLabel(npxPlanned[0]!.label);
     expect(npxEnv).not.toHaveProperty("ELECTRON_RUN_AS_NODE");
+  });
+});
+
+/**
+ * Story 44.6 — the provided definition carries a secret-free env (what a Copilot-harness session spawns), and the Local
+ * resolve path stays what it was. `tracked` records every Server Manager and authentication call so "never prompts, never
+ * reads an account or session" is asserted, not assumed.
+ */
+function tracked(
+  specs: Record<string, ServerSpec | (() => Promise<ServerSpec | undefined>) | undefined>,
+  overrides: Partial<LauncherSettings> = {},
+  inspection?: ServerManagerServersInspection,
+) {
+  const calls = { getServerSpec: [] as string[], getAccount: 0, getSession: [] as GetSessionOptions[] };
+  const warnings: string[] = [];
+  const names = Object.keys(specs);
+  const api: ServerManagerApi = {
+    getServerNames: () => names.map((name) => ({ name, description: "", detail: "" })),
+    getServerSpec: async (name: string) => {
+      calls.getServerSpec.push(name);
+      const entry = specs[name];
+      return typeof entry === "function" ? entry() : entry;
+    },
+    getAccount: () => {
+      calls.getAccount += 1;
+      return { id: "acct-1", label: "Account One" };
+    },
+  };
+  const authApi: AuthApi = {
+    getSession: async (_providerId, _scopes, options) => {
+      calls.getSession.push(options);
+      return { id: "s1", accessToken: "SESSION-TOKEN-44.6", account: { id: "acct-1", label: "Account One" }, scopes: ["x", "sessionUser"] };
+    },
+  };
+  const provider = new LauncherProvider({
+    getServerManagerApi: async () => api,
+    authApi,
+    getSettings: () => settings({ servers: names, ...overrides }),
+    showWarning: (message: string) => warnings.push(message),
+    inspectServerManagerServers: () => inspection ?? userScopeServers(names),
+  });
+  return { provider, calls, warnings };
+}
+
+describe("Story 44.6 AC-9: provided definitions carry the non-secret env and never a secret", () => {
+  const inline = { ...specFor("dev1", "INLINE-PASSWORD-44.6"), username: "svc" };
+
+  it("npx plan: the full env is pinned, with the credential name, set governance variables and empty overrides", async () => {
+    const { provider, calls, warnings } = tracked(
+      { dev1: inline },
+      { governance: "off", toolsPreset: "core", auditLogMaxMb: "25" },
+    );
+
+    const planned = await provider.providePlannedDefinitions();
+
+    expect(planned).toEqual([
+      {
+        label: "IRIS Dev Tools — dev1",
+        command: "npx",
+        args: ["-y", "@iris-mcp/dev@1"],
+        env: {
+          IRIS_HOST: "dev1.example.com",
+          IRIS_PORT: "52773",
+          IRIS_HTTPS: "false",
+          IRIS_USERNAME: "svc",
+          IRIS_NAMESPACE: "HSCUSTOM",
+          IRIS_CREDENTIAL_NAME: "dev1",
+          IRIS_GOVERNANCE: "off",
+          IRIS_TOOLS_PRESET: "core",
+          IRIS_AUDIT_LOG_MAX_MB: "25",
+          IRIS_PASSWORD: "",
+          IRIS_PROFILES: "",
+          IRIS_GOVERNANCE_PRESET: "",
+          IRIS_GOVERNANCE_FILE: "",
+          IRIS_AUDIT_LOG: "",
+          IRIS_AUDIT_LOG_PARAMS: "",
+          IRIS_TOOLS_DISABLE: "",
+          IRIS_TOOLS_ENABLE: "",
+          IRIS_SERVER_MANAGER: "",
+          IRIS_SM_SERVERS: "",
+          IRIS_SM_SETTINGS_PATHS: "",
+          IRIS_SM_WORKSPACE: "",
+          IRIS_CREDENTIAL_HELPER: "",
+          MCP_TRANSPORT: "",
+        },
+      },
+    ]);
+    expect(planned[0]!.env).not.toHaveProperty("ELECTRON_RUN_AS_NODE");
+    expect(warnings).toEqual([]);
+    expect(calls.getServerSpec).toEqual(["dev1"]);
+  });
+
+  it("an unset IRIS_AUDIT_LOG_MAX_MB stays null (an empty value parses as 0 in the server), every other unset owned variable is ''", async () => {
+    const { provider } = tracked({ dev1: inline });
+    const [planned] = await provider.providePlannedDefinitions();
+    expect(planned!.env["IRIS_AUDIT_LOG_MAX_MB"]).toBeNull();
+    expect(Object.values(planned!.env).filter((value) => value === null)).toHaveLength(1);
+  });
+
+  it("local-build plan: ELECTRON_RUN_AS_NODE=1 is added", async () => {
+    const repoDir = mkdtempSync(path.join(tmpdir(), "iris-mcp-launcher-44-6-"));
+    try {
+      mkdirSync(path.join(repoDir, "packages", "iris-dev-mcp", "dist"), { recursive: true });
+      writeFileSync(path.join(repoDir, "packages", "iris-dev-mcp", "dist", "index.js"), "// fake entry\n", "utf8");
+      const { provider } = tracked({ dev1: inline }, { developmentRepoPath: repoDir });
+      const [planned] = await provider.providePlannedDefinitions();
+      expect(planned!.command).toBe(process.execPath);
+      expect(planned!.env["ELECTRON_RUN_AS_NODE"]).toBe("1");
+      expect(planned!.env["IRIS_CREDENTIAL_NAME"]).toBe("dev1");
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  it("never reads the inline password, an account or a session: no secret is anywhere in the definitions, nothing prompts, nothing warns", async () => {
+    const { provider, calls, warnings } = tracked({ dev1: inline });
+
+    const planned = await provider.providePlannedDefinitions();
+
+    const everything = JSON.stringify(planned);
+    expect(everything).not.toContain("INLINE-PASSWORD-44.6");
+    expect(everything).not.toContain("SESSION-TOKEN-44.6");
+    expect(planned[0]!.env["IRIS_PASSWORD"]).toBe("");
+    expect(calls.getSession).toEqual([]);
+    expect(calls.getAccount).toBe(0);
+    expect(warnings).toEqual([]);
+  });
+
+  it("looks each distinct server's spec up once per provide, however many packages cover it", async () => {
+    const { provider, calls } = tracked(
+      { a: specFor("a"), b: specFor("b") },
+      { packages: ["dev", "admin", "ops"] },
+    );
+    const planned = await provider.providePlannedDefinitions();
+    expect(planned).toHaveLength(6);
+    expect([...calls.getServerSpec].sort()).toEqual(["a", "b"]);
+    expect(planned.map((definition) => definition.env["IRIS_CREDENTIAL_NAME"]).sort()).toEqual(["a", "a", "a", "b", "b", "b"]);
+  });
+
+  it("hands the spec lookup the scope the name was enumerated in (multi-root), and each package's definition the namespace setting", async () => {
+    const scopeToken = { uri: "file:///workspace/folder-b" };
+    const seen: unknown[] = [];
+    const api: ServerManagerApi = {
+      getServerNames: () => [{ name: "a", description: "", detail: "", scope: scopeToken }],
+      getServerSpec: async (_name, scope) => {
+        seen.push(scope);
+        return specFor("a");
+      },
+      getAccount: () => undefined,
+    };
+    const provider = new LauncherProvider({
+      getServerManagerApi: async () => api,
+      authApi: { getSession: async () => undefined },
+      getSettings: () => settings({ servers: ["a"], namespace: "APPNS" }),
+      showWarning: () => undefined,
+      inspectServerManagerServers: () => userScopeServers(["a"]),
+    });
+    const [planned] = await provider.providePlannedDefinitions();
+    expect(seen).toEqual([scopeToken]);
+    expect(planned!.env["IRIS_NAMESPACE"]).toBe("APPNS");
+  });
+
+  it("several servers across packages: each definition carries the env of the server its label names (never another server's)", async () => {
+    const { provider } = tracked(
+      { a: { ...specFor("a"), username: "user-a" }, b: { ...specFor("b"), username: "user-b" } },
+      { packages: ["dev", "admin"] },
+    );
+    const planned = await provider.providePlannedDefinitions();
+    expect(planned).toHaveLength(4);
+    for (const definition of planned) {
+      const server = definition.label.endsWith("— a") ? "a" : definition.label.endsWith("— b") ? "b" : "?";
+      expect(server, definition.label).not.toBe("?");
+      expect(
+        {
+          name: definition.env["IRIS_CREDENTIAL_NAME"],
+          host: definition.env["IRIS_HOST"],
+          username: definition.env["IRIS_USERNAME"],
+        },
+        definition.label,
+      ).toEqual({ name: server, host: `${server}.example.com`, username: `user-${server}` });
+    }
+  });
+});
+
+describe("DW-749: only a server defined in user settings alone names a stored credential in a provided definition", () => {
+  const dev1 = { ...specFor("dev1"), username: "svc" };
+  // `inspect("servers")` shapes per `vscode.d.ts` WorkspaceConfiguration.inspect: one optional value per layer.
+  const userOnly: ServerManagerServersInspection = { globalValue: { dev1: { webServer: { host: "dev1.example.com" } } } };
+  const cases: Array<[string, ServerManagerServersInspection]> = [
+    ["the workspace overrides the user's dev1", { ...userOnly, workspaceValue: { dev1: { webServer: { host: "evil.example.com" } } } }],
+    ["a workspace folder overrides the user's dev1", { ...userOnly, workspaceFolderValue: { dev1: { webServer: { host: "evil.example.com" } } } }],
+    ["dev1 is defined only in the workspace", { workspaceValue: { dev1: { webServer: { host: "evil.example.com" } } } }],
+    ["dev1 is defined only in a workspace folder", { workspaceFolderValue: { dev1: { webServer: { host: "evil.example.com" } } } }],
+    ["a language-specific workspace layer defines dev1", { ...userOnly, workspaceLanguageValue: { dev1: {} } }],
+    ["a language-specific folder layer defines dev1", { ...userOnly, workspaceFolderLanguageValue: { dev1: {} } }],
+    ["the workspace layer is not an object", { ...userOnly, workspaceValue: "garbage" }],
+    ["no layer defines dev1", { globalValue: { other: {} } }],
+    ["the inspection carries no layer at all", {}],
+  ];
+
+  it.each(cases)("%s: env {}, no spec lookup, no warning, no prompt", async (_label, inspection) => {
+    const { provider, calls, warnings } = tracked({ dev1 }, {}, inspection);
+    const planned = await provider.providePlannedDefinitions();
+    expect(planned).toHaveLength(1);
+    expect(planned[0]!.env).toEqual({});
+    expect(calls.getServerSpec).toEqual([]);
+    expect(calls.getSession).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("a workspace layer that defines OTHER servers only leaves the user's dev1 eligible", async () => {
+    const { provider } = tracked({ dev1 }, {}, { ...userOnly, workspaceValue: { other: {} } });
+    const [planned] = await provider.providePlannedDefinitions();
+    expect(planned!.env["IRIS_CREDENTIAL_NAME"]).toBe("dev1");
+  });
+
+  it("a server defined by Server Manager's own default value (no user, no workspace layer) is eligible", async () => {
+    const { provider } = tracked({ dev1 }, {}, { defaultValue: { dev1: {} } });
+    const [planned] = await provider.providePlannedDefinitions();
+    expect(planned!.env["IRIS_CREDENTIAL_NAME"]).toBe("dev1");
+  });
+
+  it("no inspectServerManagerServers dependency, one returning undefined, or one that throws: env {} (fail safe), provide still resolves", async () => {
+    const api: ServerManagerApi = {
+      getServerNames: () => [{ name: "dev1", description: "", detail: "" }],
+      getServerSpec: async () => dev1,
+      getAccount: () => undefined,
+    };
+    const base = {
+      getServerManagerApi: async () => api,
+      authApi: { getSession: async () => undefined },
+      getSettings: () => settings({ servers: ["dev1"] }),
+      showWarning: () => undefined,
+    };
+    for (const deps of [
+      base,
+      { ...base, inspectServerManagerServers: () => undefined },
+      {
+        ...base,
+        inspectServerManagerServers: () => {
+          throw new Error("configuration unavailable");
+        },
+      },
+    ] as ProviderDeps[]) {
+      const [planned] = await new LauncherProvider(deps).providePlannedDefinitions();
+      expect(planned!.env).toEqual({});
+    }
+  });
+
+  it("Story 44.8 (DW-752): the Local resolve path refuses a workspace-overridden server with one warning and no Server Manager call", async () => {
+    const { provider, calls, warnings } = tracked(
+      { dev1: { ...dev1, password: "SYS" } },
+      {},
+      { ...userOnly, workspaceValue: { dev1: {} } },
+    );
+    const [planned] = await provider.providePlannedDefinitions();
+    expect(planned!.env).toEqual({});
+    warnings.length = 0;
+    expect(await provider.resolveEnvForLabel(planned!.label)).toBeUndefined();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("is defined or overridden in this workspace's settings");
+    expect(calls.getServerSpec).toEqual([]);
+    expect(calls.getSession).toEqual([]);
+  });
+});
+
+describe("Story 44.6 AC-10: a connection that cannot be known without a session keeps today's empty env", () => {
+  it("combineProfiles: every provided definition has env {}, still returned, no warning, no spec lookup", async () => {
+    const { provider, calls, warnings } = tracked(
+      { a: specFor("a"), b: specFor("b") },
+      { combineProfiles: true },
+    );
+    const planned = await provider.providePlannedDefinitions();
+    expect(planned).toHaveLength(1);
+    expect(planned[0]!.env).toEqual({});
+    expect(warnings).toEqual([]);
+    expect(calls.getServerSpec).toEqual([]);
+  });
+
+  const throwingSpec = (): Promise<ServerSpec | undefined> => Promise.reject(new Error("settings unreadable"));
+  const noWebServer = { name: "a", username: "svc" } as unknown as ServerSpec;
+  const hostileSpec = (): Promise<ServerSpec | undefined> =>
+    Promise.resolve(
+      Object.defineProperty({ name: "a", username: "svc" }, "webServer", {
+        get() {
+          throw new Error("hostile getter");
+        },
+      }) as unknown as ServerSpec,
+    );
+
+  it.each([
+    ["getServerSpec rejects", throwingSpec],
+    ["getServerSpec returns undefined", undefined],
+    ["the spec has no webServer", noWebServer],
+    ["the spec cannot be read", hostileSpec],
+    ["the username is empty", { ...specFor("a", "SYS"), username: "" }],
+    ["the username is blank", { ...specFor("a", "SYS"), username: "   " }],
+    ["the username is missing", { name: "a", webServer: { host: "a.example.com", port: 52773, scheme: "http" } }],
+  ])("%s: env is {} and the definition is still provided, with no warning", async (_label, spec) => {
+    const { provider, warnings } = tracked({ a: spec as ServerSpec | (() => Promise<ServerSpec | undefined>) | undefined });
+    const planned = await provider.providePlannedDefinitions();
+    expect(planned).toHaveLength(1);
+    expect(planned[0]!.env).toEqual({});
+    expect(warnings).toEqual([]);
+  });
+
+  it.each([
+    ["a newline", "dev\n1"],
+    ["a carriage return", "dev1\r"],
+    ["a tab", "de\tv"],
+    ["a NUL", "dev\u00001"],
+    ["a DEL", "dev\u007f1"],
+    ["a C1 control (NEL)", "dev\u00851"],
+  ])("a server whose name holds %s is provided with env {} (the credential name would be refused by the server)", async (_label, name) => {
+    const { provider } = tracked({ [name]: specFor("bad") });
+    const [planned] = await provider.providePlannedDefinitions();
+    expect(planned!.env).toEqual({});
+  });
+});
+
+describe("Story 44.6 AC-11: the Local resolve path is exactly today's", () => {
+  // Captured by running the pre-story code (baseline 374477bd, `serverDefinitionProvider.ts` + `env.ts` of that commit)
+  // over this fixture: a single server `a` (a.example.com:52773, http, user _SYSTEM, inline password SYS), default settings.
+  // Capture command: `git archive 374477bd extensions/iris-mcp-launcher | tar -x -C <scratch>`, node_modules symlinked,
+  // then this test's provide-then-resolve over the baseline source.
+  const LOCAL_ENV_CAPTURE = {
+    IRIS_HOST: "a.example.com",
+    IRIS_PORT: "52773",
+    IRIS_HTTPS: "false",
+    IRIS_USERNAME: "_SYSTEM",
+    IRIS_PASSWORD: "SYS",
+    IRIS_NAMESPACE: "HSCUSTOM",
+    IRIS_PROFILES: null,
+    IRIS_GOVERNANCE: null,
+    IRIS_GOVERNANCE_PRESET: null,
+    IRIS_GOVERNANCE_FILE: null,
+    IRIS_AUDIT_LOG: null,
+    IRIS_AUDIT_LOG_MAX_MB: null,
+    IRIS_AUDIT_LOG_PARAMS: null,
+    IRIS_TOOLS_PRESET: null,
+    IRIS_TOOLS_DISABLE: null,
+    IRIS_TOOLS_ENABLE: null,
+    IRIS_SERVER_MANAGER: null,
+    IRIS_SM_SERVERS: null,
+    IRIS_SM_SETTINGS_PATHS: null,
+    IRIS_SM_WORKSPACE: null,
+    IRIS_CREDENTIAL_HELPER: null,
+    MCP_TRANSPORT: null,
+  };
+
+  it("resolving a definition whose provided env is now non-empty returns the captured Local env: null clears, the real password, no credential name", async () => {
+    const { provider, calls } = tracked({ a: specFor("a", "SYS") });
+    const [planned] = await provider.providePlannedDefinitions();
+    expect(Object.keys(planned!.env).length).toBeGreaterThan(0);
+
+    const env = await provider.resolveEnvForLabel(planned!.label);
+
+    expect(env).toEqual(LOCAL_ENV_CAPTURE);
+    expect(calls.getSession).toEqual([]);
+  });
+
+  it("prompts and cancellation are unchanged: provide never prompts, resolve asks silently then with createIfNone, and a refusal yields one warning and no env", async () => {
+    const passwordless: ServerSpec = specFor("a");
+    const { provider, calls, warnings } = tracked({ a: passwordless });
+    const [planned] = await provider.providePlannedDefinitions();
+    expect(calls.getSession).toEqual([]);
+
+    await provider.resolveEnvForLabel(planned!.label);
+    expect(calls.getSession.map((options) => ({ silent: options.silent, createIfNone: options.createIfNone }))).toEqual([
+      { silent: true, createIfNone: undefined },
+    ]);
+
+    // A rejecting prompt is the real cancel path: a first-class outcome, one warning, no env.
+    const refusedAsks: GetSessionOptions[] = [];
+    const refusing = new LauncherProvider({
+      getServerManagerApi: async () => ({
+        getServerNames: () => [{ name: "a", description: "", detail: "" }],
+        getServerSpec: async () => passwordless,
+        getAccount: () => undefined,
+      }),
+      authApi: {
+        getSession: async (_providerId, _scopes, options) => {
+          refusedAsks.push(options);
+          if (options.createIfNone === true) throw new Error("declined");
+          return undefined;
+        },
+      },
+      getSettings: () => settings({ servers: ["a"] }),
+      showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
+    });
+    const [refusedPlan] = await refusing.providePlannedDefinitions();
+    warnings.length = 0;
+    expect(await refusing.resolveEnvForLabel(refusedPlan!.label)).toBeUndefined();
+    expect(refusedAsks.map((options) => ({ silent: options.silent, createIfNone: options.createIfNone }))).toEqual([
+      { silent: true, createIfNone: undefined },
+      { silent: undefined, createIfNone: true },
+    ]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('credentials for IRIS server "a" were not provided');
   });
 });

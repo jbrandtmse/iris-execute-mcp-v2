@@ -12,6 +12,7 @@ import {
   type SelectServersQuickPickItem,
 } from "../selectServers.js";
 import { readSettings, type ConfigReader } from "../settings.js";
+import { userScopeServers } from "./serverManagerInspection.js";
 import type { LauncherSettings, ServerManagerApi, ServerName } from "../types.js";
 
 function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
@@ -846,11 +847,43 @@ describe("Rule #19 back-compat — selectServers.ts has zero effect on the 31.4 
       authApi: { getSession: vi.fn() as never },
       getSettings: () => settings({ packages: ["dev"], servers: ["prod"] }),
       showWarning: () => {},
+      inspectServerManagerServers: () => userScopeServers(["prod"]),
     });
 
     const planned = await provider.providePlannedDefinitions();
+    // Story 44.6 (sanctioned, AD-15): the provided definition now carries the non-secret `env` a Copilot-harness
+    // session spawns; `label`, `command` and `args` are the pre-31.5 shape, and the resolved env below is unchanged.
     expect(planned).toEqual([
-      { label: "IRIS Dev Tools — prod", command: "npx", args: ["-y", "@iris-mcp/dev@1"] },
+      {
+        label: "IRIS Dev Tools — prod",
+        command: "npx",
+        args: ["-y", "@iris-mcp/dev@1"],
+        env: {
+          IRIS_HOST: "prod.example.com",
+          IRIS_PORT: "52773",
+          IRIS_HTTPS: "false",
+          IRIS_USERNAME: "_SYSTEM",
+          IRIS_NAMESPACE: "HSCUSTOM",
+          IRIS_CREDENTIAL_NAME: "prod",
+          IRIS_PASSWORD: "",
+          IRIS_PROFILES: "",
+          IRIS_GOVERNANCE: "",
+          IRIS_GOVERNANCE_PRESET: "",
+          IRIS_GOVERNANCE_FILE: "",
+          IRIS_AUDIT_LOG: "",
+          IRIS_AUDIT_LOG_MAX_MB: null,
+          IRIS_AUDIT_LOG_PARAMS: "",
+          IRIS_TOOLS_PRESET: "",
+          IRIS_TOOLS_DISABLE: "",
+          IRIS_TOOLS_ENABLE: "",
+          IRIS_SERVER_MANAGER: "",
+          IRIS_SM_SERVERS: "",
+          IRIS_SM_SETTINGS_PATHS: "",
+          IRIS_SM_WORKSPACE: "",
+          IRIS_CREDENTIAL_HELPER: "",
+          MCP_TRANSPORT: "",
+        },
+      },
     ]);
 
     // Code review (Story 31.5): this was five spot-checks

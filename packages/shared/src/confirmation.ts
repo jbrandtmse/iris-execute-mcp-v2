@@ -11,9 +11,12 @@
  * - **Capability.** {@link declaresFormElicitation} is true for `elicitation: {}`, `{form: {}}` and
  *   `{form: {}, url: {}}`, and false for `{url: {}}` alone.
  * - **Binding.** {@link contentHash} is a SHA-256 over key-sorted JSON; a {@link ConfirmationState} carries the tool, the
- *   hash of the call and a nonce that {@link ConfirmationNonces} lets be used once.
+ *   hash of the call, the digest of the scope the dialog showed ({@link scopeDigest}), how many times the dialog was asked
+ *   again because that scope changed (at most {@link CONFIRMATION_SCOPE_REASKS}) and a nonce that {@link ConfirmationNonces}
+ *   lets be used once.
  * - **Outcome.** {@link classifyConfirmationResponse} maps an answer to `accepted`, `decline`, `cancel`, `unconfirmed` or
- *   `missing`; {@link confirmationDeclinedResult} is the `CONFIRMATION_DECLINED` refusal for the first three.
+ *   `missing`; {@link confirmationDeclinedResult} is the `CONFIRMATION_DECLINED` refusal for the first three, and
+ *   {@link confirmationScopeChangedResult} the `CONFIRMATION_SCOPE_CHANGED` refusal for a scope that changed again.
  */
 
 import { createHash } from "node:crypto";
@@ -21,7 +24,7 @@ import { createHash } from "node:crypto";
 import type { AuditConfirmation } from "./audit.js";
 import { REFUSAL_CODES, refusalResult } from "./refusals.js";
 import type { RefusalResult } from "./refusals.js";
-import type { ToolResult } from "./tool-types.js";
+import type { ConfirmationScope, ToolResult } from "./tool-types.js";
 
 /** The key of the one embedded request, and of its answer. */
 export const CONFIRMATION_INPUT_KEY = "confirm";
@@ -141,11 +144,23 @@ export function contentHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(sortKeysDeep(value))).digest("hex");
 }
 
-/** The payload of a confirmation `requestState`: which call it was minted for, and its single-use nonce. */
+/**
+ * How many times one call may ask the person again because the scope it covers changed while the person was answering.
+ * The person is asked at most `1 + CONFIRMATION_SCOPE_REASKS` times; a further change ends the call with
+ * `CONFIRMATION_SCOPE_CHANGED`. The count is in the signed state, so it carries through every retry of the call.
+ */
+export const CONFIRMATION_SCOPE_REASKS = 1;
+
+/**
+ * The payload of a confirmation `requestState`: which call it was minted for, the digest of the scope its dialog showed,
+ * how many times the call has been asked again, and its single-use nonce.
+ */
 export interface ConfirmationState {
-  v: 1;
+  v: 2;
   tool: string;
   hash: string;
+  digest: string;
+  reasks: number;
   nonce: string;
 }
 
@@ -153,12 +168,30 @@ export interface ConfirmationState {
 export function isConfirmationState(value: unknown): value is ConfirmationState {
   return (
     isPlainObject(value) &&
-    value["v"] === 1 &&
+    value["v"] === 2 &&
     typeof value["tool"] === "string" &&
     typeof value["hash"] === "string" &&
+    typeof value["digest"] === "string" &&
+    typeof value["reasks"] === "number" &&
+    Number.isInteger(value["reasks"]) &&
+    value["reasks"] >= 0 &&
     typeof value["nonce"] === "string" &&
     value["nonce"] !== ""
   );
+}
+
+/** The text of a resolved scope: the scope itself, or the text of a scope that carries a binding value. */
+export function scopeText(scope: string | ConfirmationScope): string {
+  return typeof scope === "string" ? scope : scope.text;
+}
+
+/**
+ * The digest of a resolved scope: {@link contentHash} of its binding value when the gate supplied one, and otherwise of its
+ * whole text. Two scopes with the same digest are the same scope for the confirmation, whatever else their texts say.
+ */
+export function scopeDigest(scope: string | ConfirmationScope): string {
+  if (typeof scope === "string") return contentHash(scope);
+  return contentHash(scope.binding === undefined ? scope.text : scope.binding);
 }
 
 /**
@@ -268,6 +301,23 @@ export function confirmationDeclinedResult(
     `${REFUSAL_REASONS[response]}: ${operation}${suffix}. Nothing was changed. ` +
       "Do not repeat this call unless the person asks for it again.",
     { action: actionKey, response },
+  );
+}
+
+/**
+ * The refusal that ends a call whose scope changed again while the person was answering: `CONFIRMATION_SCOPE_CHANGED`,
+ * `isError`, nothing changed. The person was asked again once with the new scope and the scope moved once more (or the client
+ * can no longer be asked), so no answer given so far covers what the call would do now.
+ *
+ * @param actionKey - The call's action (for example `execute`).
+ * @param operation - The gate's operation text, as in the dialog.
+ */
+export function confirmationScopeChangedResult(actionKey: string, operation: string): RefusalResult {
+  return refusalResult(
+    REFUSAL_CODES.CONFIRMATION_SCOPE_CHANGED,
+    `The scope of ${operation} changed again while the person was answering the confirmation dialog, so the call was not run. ` +
+      "Nothing was changed. Run the call again once what it covers has stopped changing.",
+    { action: actionKey },
   );
 }
 

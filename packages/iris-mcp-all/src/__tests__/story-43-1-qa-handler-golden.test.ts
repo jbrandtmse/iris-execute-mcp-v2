@@ -7,7 +7,7 @@
  * instance is reached) and compares three things with the handler golden: the frozen capture `fixtures/sdk-handler-golden.json`, which
  * `scripts/capture-sdk-handler-golden.mjs` took from the SDK v1 build of the baseline revision, plus the sanctioned changes of
  * `fixtures/sdk-golden-sanctioned-changes.json` (Story 43.4, DW-639), applied by `scripts/lib/golden-sanctioned-changes.mjs` to the rows
- * they name (none yet):
+ * they name, and to the server's startup requests (`section: "startup"`; Story 44.4, `S-44.4-current-check`):
  *  - the response line of each `tools/call`, byte for byte (a success, an `isError` result with and without `structuredContent`, a
  *    handler that throws, an HTTP error envelope, a governance denial);
  *  - the requests the server made to IRIS while it answered (they prove the handler received the parsed arguments); and

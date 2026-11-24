@@ -33,7 +33,7 @@ import {
   type StatusReport,
   type YamlNativeEdit,
 } from "../index.js";
-import { fixturePath } from "./helpers.js";
+import { fixturePath, vscodeLegacyAdapter } from "./helpers.js";
 
 import { mergeCertificationRecord, passCreatedPaths } from "../../scripts/certify-record.mjs";
 
@@ -61,8 +61,8 @@ function expectOk(result: ReturnType<typeof diff>): Extract<ReturnType<typeof di
 // ════════════════════════════════════════════════════════════════════
 
 describe("comment-only JSONC insertion (QA-stage fix, engine level)", () => {
-  it("a line-comment-only document renders an add whose result preserves the comment and parses", () => {
-    const adapter = adapterOf("vscode");
+  it("a line-comment-only document renders an add whose result preserves the comment and parses (the vscode legacy view: the roster's JSONC reader)", () => {
+    const adapter = vscodeLegacyAdapter();
     const result = expectOk(diff("// just a comment\n", ENTRY, adapter, "user", "apply"));
     expect(result.mechanism).toBe("add");
     const after = executeNativeEdit("// just a comment\n", result.native);
@@ -83,7 +83,7 @@ describe("comment-only JSONC insertion (QA-stage fix, engine level)", () => {
   });
 
   it("comments + CRLF: the separator before the new document follows the file's EOL", () => {
-    const adapter = adapterOf("vscode");
+    const adapter = vscodeLegacyAdapter();
     const content = "// note\r\n// more\r\n";
     const result = expectOk(diff(content, ENTRY, adapter, "user", "apply"));
     const after = executeNativeEdit(content, result.native);
@@ -92,7 +92,7 @@ describe("comment-only JSONC insertion (QA-stage fix, engine level)", () => {
   });
 
   it("a comment followed by REAL broken tokens still renders NO edit (refusal, never a guess)", () => {
-    const adapter = adapterOf("vscode");
+    const adapter = vscodeLegacyAdapter();
     const result = diff('// note\n{"servers": ,}\n', ENTRY, adapter, "user", "apply");
     expect(result.ok).toBe(false);
   });

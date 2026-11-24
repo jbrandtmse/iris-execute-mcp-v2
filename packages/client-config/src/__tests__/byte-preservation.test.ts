@@ -1,7 +1,7 @@
 /**
  * Story 33.2 (rework, smoke iteration 2) — byte-preservation regression pins
  * for the lead-smoke HIGH: `apply` (any JSON/JSONC insert — and therefore
- * stash `enable` re-inserts, `ensureInputs` merges, and absent-flag inserts)
+ * stash `enable` re-inserts, and absent-flag inserts)
  * reformatted FOREIGN entries because jsonc-parser's `modify()` re-renders
  * every sibling of an inserted property with the hardcoded
  * `{ tabSize: 2, eol: "\n" }` formatting options (diff.ts pre-fix).
@@ -24,7 +24,6 @@ import {
   disable,
   enable,
   remove,
-  ensureInputs,
   diff,
   executeNativeEdit,
   readConfigEntries,
@@ -50,7 +49,7 @@ function adapterOf(id: string): ClientAdapter {
 
 const CLAUDE_CODE_PATH = "/h/.claude.json";
 const CLINE_PATH = "/h/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json";
-const VSCODE_PATH = "/h/.config/Code/User/mcp.json";
+const VSCODE_PATH = "/h/.copilot/mcp-config.json";
 
 /** The lead's repro fixture: a compact single-line foreign entry. */
 const COMPACT_FOREIGN_LINE = `    "third-party-tool": { "command": "x", "env": { "API_KEY": "shh" } }`;
@@ -291,55 +290,58 @@ describe("diff-level surgical insert mechanics", () => {
   });
 });
 
-describe("ensureInputs leaves foreign JSON bytes untouched (the 33.2 vscode-inputs seam)", () => {
-  const DESCRIPTOR = { id: "iris-password", type: "promptString" as const, description: "IRIS password", password: true };
+describe("the vscode Copilot user file (~/.copilot/mcp-config.json) leaves foreign bytes untouched (Story 44.2, Rule #58)", () => {
+  for (const fixture of STASH_FIXTURES) {
+    it(`${fixture.label}: apply -> disable -> enable -> remove, byte oracles at every stage`, () => {
+      const fs = new MemFs();
+      fs.seed(VSCODE_PATH, fixture.content);
+      const synthesis = synthesizeEntry("iris-dev-mcp", "env-reference", { adapter: adapterOf("vscode"), profile: PROFILE });
+      if (!synthesis.ok) throw new Error(`synthesis failed: ${synthesis.reason}`);
 
-  it("compact foreign server + compact existing input descriptor survive the merge verbatim", () => {
-    const content = `{\n  "servers": {\n    "third-party-tool": { "command": "x", "env": { "API_KEY": "shh" } }\n  },\n  "inputs": [{ "id": "existing", "type": "promptString", "description": "keep me compact", "password": false }]\n}\n`;
-    const fs = new MemFs();
-    fs.seed(VSCODE_PATH, content);
-    const result = ensureInputs(ctx(), "vscode", "user", [DESCRIPTOR], { fs });
-    expect(result.ok, !result.ok ? result.reason : "").toBe(true);
-    const bytes = fs.readFile(VSCODE_PATH);
-    expect(bytes).toContain(`    "third-party-tool": { "command": "x", "env": { "API_KEY": "shh" } }`);
-    expect(bytes).toContain(`{ "id": "existing", "type": "promptString", "description": "keep me compact", "password": false }`);
-    const parsed = JSON.parse(bytes) as { inputs: Array<{ id: string }> };
-    expect(parsed.inputs.map((input) => input.id)).toEqual(["existing", "iris-password"]);
-  });
+      const r1 = apply(ctx(), "vscode", "user", synthesis.entry, { fs });
+      expect(r1.ok, r1.reason ?? "").toBe(true);
+      const applied = fs.readFile(VSCODE_PATH);
+      expectLinesVerbatim(applied, fixture.foreignLines, "apply");
+      if (fixture.crlf) expectNoBareLf(applied, "apply");
+      const parsed = JSON.parse(applied) as { mcpServers: Record<string, Record<string, unknown>> };
+      expect(parsed.mcpServers["iris-dev-mcp"]).toMatchObject({ type: "stdio", command: "npx", tools: ["*"] });
+      expect(parsed, "no inputs array is ever written").not.toHaveProperty("inputs");
 
-  it("CRLF file: the appended descriptor uses CRLF; no bare LF introduced", () => {
-    const content = `{\r\n  "servers": {\r\n    "third-party-tool": { "command": "x" }\r\n  },\r\n  "inputs": [\r\n    { "id": "existing", "type": "promptString", "description": "d", "password": false }\r\n  ]\r\n}\r\n`;
-    const fs = new MemFs();
-    fs.seed(VSCODE_PATH, content);
-    const result = ensureInputs(ctx(), "vscode", "user", [DESCRIPTOR], { fs });
-    expect(result.ok).toBe(true);
-    const bytes = fs.readFile(VSCODE_PATH);
-    expectNoBareLf(bytes, "ensureInputs");
-    expect(bytes).toContain(`    { "id": "existing", "type": "promptString", "description": "d", "password": false }`);
-    expect(bytes).toContain(`"id": "iris-password"`);
-  });
+      expect(disable(ctx(), "vscode", "user", "iris-dev-mcp", { fs }).ok).toBe(true);
+      expect(fs.readFile(VSCODE_PATH), "stash disable must restore the original bytes").toBe(fixture.content);
+      expect(enable(ctx(), "vscode", "user", "iris-dev-mcp", { fs }).ok).toBe(true);
+      expect(fs.readFile(VSCODE_PATH), "stash enable must restore the applied bytes").toBe(applied);
+      expect(remove(ctx(), "vscode", "user", "iris-dev-mcp", { fs }).ok).toBe(true);
+      expect(fs.readFile(VSCODE_PATH), "remove must restore the original bytes").toBe(fixture.content);
+    });
+  }
+});
 
-  it("4-space file: the appended descriptor lands at the file's indent unit", () => {
-    const content = `{\n    "servers": {\n        "third-party-tool": {\n            "command": "x"\n        }\n    },\n    "inputs": [\n        {\n            "id": "existing",\n            "type": "promptString",\n            "description": "d",\n            "password": false\n        }\n    ]\n}\n`;
-    const fs = new MemFs();
-    fs.seed(VSCODE_PATH, content);
-    const result = ensureInputs(ctx(), "vscode", "user", [DESCRIPTOR], { fs });
-    expect(result.ok).toBe(true);
-    const bytes = fs.readFile(VSCODE_PATH);
-    // The new descriptor opens at 8 spaces with 12-space members — never 2/4.
-    expect(bytes).toContain(`\n        {\n            "id": "iris-password",`);
-    expect(bytes).not.toContain(`\n    {\n      "id": "iris-password"`);
-  });
+describe("the migration leaves the old file's foreign bytes, comments and inputs untouched (Story 44.2, AC 44.2.4, Rule #58)", () => {
+  const LEGACY_PATH = "/h/.config/Code/User/mcp.json";
+  // A compact foreign entry, a comment after the owned entry, and an `inputs` array: only the comma the owned entry took with it may go.
+  const OLD_COMPACT = `{\n  "inputs": [{ "id": "iris-password", "type": "promptString", "password": true }],\n  "servers": {\n    "third-party-tool": { "command": "x", "env": { "API_KEY": "shh" } },\n    "iris-dev-mcp": { "command": "npx", "args": ["-y", "@iris-mcp/dev@1"], "env": { "IRIS_PASSWORD": "\${input:iris-password}" } } // owned\n  }\n}\n`;
+  const OLD_CRLF = `{\r\n  "servers": {\r\n    // keep me\r\n    "third-party-tool": { "command": "x" },\r\n    "iris-dev-mcp": { "command": "npx" }\r\n  },\r\n  "inputs": [\r\n    { "id": "iris-password", "type": "promptString", "password": true }\r\n  ]\r\n}\r\n`;
 
-  it("inputs key absent: created at top level with foreign siblings untouched", () => {
-    const content = `{\n  "servers": {\n    "third-party-tool": { "command": "x" }\n  }\n}\n`;
-    const fs = new MemFs();
-    fs.seed(VSCODE_PATH, content);
-    const result = ensureInputs(ctx(), "vscode", "user", [DESCRIPTOR], { fs });
-    expect(result.ok).toBe(true);
-    const bytes = fs.readFile(VSCODE_PATH);
-    expect(bytes).toContain(`    "third-party-tool": { "command": "x" }`);
-    const parsed = JSON.parse(bytes) as { inputs: Array<{ id: string }> };
-    expect(parsed.inputs.map((input) => input.id)).toEqual(["iris-password"]);
-  });
+  for (const [label, content, foreign, keep] of [
+    ["compact + inputs + trailing comment", OLD_COMPACT, `    "third-party-tool": { "command": "x", "env": { "API_KEY": "shh" } }`, `  "inputs": [{ "id": "iris-password", "type": "promptString", "password": true }],`],
+    ["CRLF + comment + trailing inputs", OLD_CRLF, `    // keep me\r\n    "third-party-tool": { "command": "x" }`, `  "inputs": [\r\n    { "id": "iris-password", "type": "promptString", "password": true }\r\n  ]`],
+  ] as const) {
+    it(`${label}: only the owned entry leaves the old file`, () => {
+      const fs = new MemFs();
+      fs.seed(LEGACY_PATH, content);
+      const synthesis = synthesizeEntry("iris-dev-mcp", "env-reference", { adapter: adapterOf("vscode"), profile: PROFILE });
+      if (!synthesis.ok) throw new Error(`synthesis failed: ${synthesis.reason}`);
+      const result = apply(ctx(), "vscode", "user", synthesis.entry, { fs });
+      expect(result.ok, result.reason ?? "").toBe(true);
+      expect(result.legacy?.[0]).toMatchObject({ path: LEGACY_PATH, ok: true, changed: true, removed: ["iris-dev-mcp"] });
+      const after = fs.readFile(LEGACY_PATH);
+      expect(after).toContain(foreign);
+      expect(after).toContain(keep);
+      expect(after).not.toContain("iris-dev-mcp");
+      const crlf = content.includes("\r\n");
+      expect(after.includes("\r\n"), "the line-ending style survives the removal").toBe(crlf);
+      if (crlf) expect((after.match(/(?<!\r)\n/g) ?? []).length, "no bare LF in a CRLF file").toBe(0);
+    });
+  }
 });

@@ -492,7 +492,8 @@ describe.each(ERAS)("Story 43.3 on the %s era: five of the six gates ask the per
         expect(exchange.asks[0]).toMatchObject({ mode: "form", message: messageOf(gate, rig.port) });
         expect(exchange.asks[0]?.requestedSchema).toStrictEqual(SCHEMA);
         expect(exchange.result).toEqual(gate.ok.result);
-        expect(exchange.writes).toEqual([...gate.preflight, ...gate.ok.writes]);
+        // The accepting round resolves the scope again, so a gate that previews sends its preview once per round (Story 44.3).
+        expect(exchange.writes).toEqual([...gate.preflight, ...gate.preflight, ...gate.ok.writes]);
         const entries = await rig.entries(1);
         expect(entries).toEqual([auditOf(gate.ok, { confirmation: "accepted" })]);
       },

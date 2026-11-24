@@ -14,7 +14,7 @@
  * test's ability to exercise the real module.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Readable } from "node:stream";
 
 interface FakeCredential {
@@ -64,6 +64,12 @@ import { resolveCredential, CREDENTIAL_CHAIN_KEYCHAIN_SERVICE } from "../credent
 const silentOutput = { write: (): void => {} };
 
 describe("credentials.ts default loadKeyring wiring (real @napi-rs/keyring import, module mocked)", () => {
+  // DW-753: `fakeStore` is module-level, so the list assertion of the first test saw whatever a test that ran before it left behind
+  // (a shuffled order made the list hold a second name). Every test starts from an empty store, whatever the order.
+  beforeEach(() => {
+    fakeStore.clear();
+  });
+
   it("set/list/delete all key off CREDENTIAL_CHAIN_KEYCHAIN_SERVICE — the imported constant, not a re-declared string", async () => {
     entryConstructions.length = 0;
 
@@ -104,7 +110,6 @@ describe("credentials.ts default loadKeyring wiring (real @napi-rs/keyring impor
   // keyed store, so a change to EITHER side's service constant fails this.
   it("a password written by the real `set` wiring is read back by the real, un-seamed credential chain — writer AND reader service pinned end-to-end", async () => {
     entryConstructions.length = 0;
-    fakeStore.clear();
 
     const setCode = await runCli(["set", "roundtrip-server", "--stdin"], {
       env: {},
@@ -128,5 +133,19 @@ describe("credentials.ts default loadKeyring wiring (real @napi-rs/keyring impor
     for (const [service] of roundtripEntries) {
       expect(service).toBe(CREDENTIAL_CHAIN_KEYCHAIN_SERVICE);
     }
+  });
+
+  // DW-753 in default order: the test above leaves `roundtrip-server` in the store, so without the `beforeEach` this one, which runs
+  // after it, lists a name. mutation: delete the `beforeEach` -> this goes red in default order.
+  it("every test starts from an empty store: `list --json` lists no name", async () => {
+    let listOut = "";
+    const listCode = await runCli(["list", "--json"], {
+      env: {},
+      stdout: { write: (c: string) => { listOut += c; } },
+      stderr: silentOutput,
+    });
+
+    expect(listCode).toBe(0);
+    expect(JSON.parse(listOut.trim())).toEqual({ names: [] });
   });
 });

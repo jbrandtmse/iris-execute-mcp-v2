@@ -1,0 +1,624 @@
+{
+  "captureCommand": "node capture-oracle.mjs <repo-root> <out-dir> against the dist built from the pre-edit tree (baseline commit 9f7797c5)",
+  "fixtures": {
+    "compact": "{\"mcpServers\":{\"foo\":{\"command\":\"x\",\"args\":[\"a\"]}}}",
+    "fourSpace": "{\n    \"mcpServers\": {\n        \"foo\": {\n            \"command\": \"x\"\n        }\n    }\n}\n",
+    "crlf": "{\r\n  \"mcpServers\": {\r\n    \"foo\": {\r\n      \"command\": \"x\"\r\n    }\r\n  }\r\n}\r\n",
+    "bom": "\ufeff{\n  \"mcpServers\": {\n    \"foo\": {\n      \"command\": \"x\"\n    }\n  }\n}\n",
+    "comments": "// top comment\n{\n  /* block */ \"mcpServers\": {\n    \"foo\": { \"command\": \"x\" }, // trailing\n    \"bar\": { \"command\": \"y\" /* inner */ }\n  }\n}\n"
+  },
+  "scenarios": {
+    "compact": {
+      "apply": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"apply\",\"data\":{\"client\":\"claude-code\",\"scope\":\"project\",\"mode\":\"env-reference\",\"changed\":1,\"inputsMerged\":[],\"results\":[{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"apply\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"add\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}],\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "Pending changes for claude-code (project, env-reference):\n--- iris-dev-mcp (add) ---\nAPPLY iris-dev-mcp \u2192 Claude Code (project scope, json, root key \"mcpServers\")\nAdd entry \"iris-dev-mcp\" (not currently present).\njsonc-parser edit set: 1 edit(s).\n{\n  \"iris-dev-mcp\": {\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ],\n    \"env\": {\n      \"IRIS_HOST\": \"${IRIS_HOST}\",\n      \"IRIS_PORT\": \"${IRIS_PORT}\",\n      \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n      \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n      \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n      \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n    }\n  }\n}\n",
+        "file": "{\"mcpServers\":{\"foo\":{\"command\":\"x\",\"args\":[\"a\"]}, \"iris-dev-mcp\": {\"command\":\"npx\",\"args\":[\"-y\",\"@iris-mcp/dev@1\"],\"env\":{\"IRIS_HOST\":\"${IRIS_HOST}\",\"IRIS_PORT\":\"${IRIS_PORT}\",\"IRIS_USERNAME\":\"${IRIS_USERNAME}\",\"IRIS_NAMESPACE\":\"${IRIS_NAMESPACE}\",\"IRIS_HTTPS\":\"${IRIS_HTTPS}\",\"IRIS_PASSWORD\":\"${IRIS_PASSWORD}\"}}}}"
+      },
+      "statusRow": {
+        "client": "claude-code",
+        "displayName": "Claude Code",
+        "scopes": [
+          {
+            "scope": "user",
+            "path": "/home/u/.claude.json",
+            "file": "missing",
+            "servers": [],
+            "foreign": []
+          },
+          {
+            "scope": "project",
+            "path": "/proj/.mcp.json",
+            "file": "ok",
+            "servers": [
+              {
+                "server": "iris-dev-mcp",
+                "state": "present-enabled"
+              },
+              {
+                "server": "iris-admin-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-ops-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-interop-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-data-mcp",
+                "state": "absent"
+              }
+            ],
+            "foreign": [
+              "foo"
+            ]
+          }
+        ]
+      },
+      "doctorFindings": [
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_HOST (or ${IRIS_HOST}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_HTTPS (or ${IRIS_HTTPS}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_NAMESPACE (or ${IRIS_NAMESPACE}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_PASSWORD (or ${IRIS_PASSWORD}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_PORT (or ${IRIS_PORT}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_USERNAME (or ${IRIS_USERNAME}), which is not set in the current environment"
+        }
+      ],
+      "applyAgain": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"apply\",\"data\":{\"client\":\"claude-code\",\"scope\":\"project\",\"mode\":\"env-reference\",\"changed\":1,\"inputsMerged\":[],\"results\":[{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"apply\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"update\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-1\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}],\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "Pending changes for claude-code (project, env-reference):\n--- iris-dev-mcp (update) ---\nAPPLY iris-dev-mcp \u2192 Claude Code (project scope, json, root key \"mcpServers\")\nUpdate entry \"iris-dev-mcp\" in place (currently present): manager-owned keys (command/args/env) are overwritten; unmanaged keys on the entry (e.g. autoApprove, timeout) and its enablement state are preserved.\njsonc-parser edit set: 1 edit(s).\n{\n  \"iris-dev-mcp\": {\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ],\n    \"env\": {\n      \"IRIS_HOST\": \"${IRIS_HOST}\",\n      \"IRIS_PORT\": \"${IRIS_PORT}\",\n      \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n      \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n      \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n      \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n    }\n  }\n}\n",
+        "file": "{\"mcpServers\":{\"foo\":{\"command\":\"x\",\"args\":[\"a\"]}, \"iris-dev-mcp\": {\n  \"command\": \"npx\",\n  \"args\": [\n    \"-y\",\n    \"@iris-mcp/dev@1\"\n  ],\n  \"env\": {\n    \"IRIS_HOST\": \"${IRIS_HOST}\",\n    \"IRIS_PORT\": \"${IRIS_PORT}\",\n    \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n    \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n    \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n    \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n  }\n}}}"
+      },
+      "disable": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"disable\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"disable\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"stash-remove\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-2\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "{\"mcpServers\":{\"foo\":{\"command\":\"x\",\"args\":[\"a\"]}}}"
+      },
+      "enable": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"enable\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"enable\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"stash-add\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-3\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "{\"mcpServers\":{\"foo\":{\"command\":\"x\",\"args\":[\"a\"]}, \"iris-dev-mcp\": {\"command\":\"npx\",\"args\":[\"-y\",\"@iris-mcp/dev@1\"],\"env\":{\"IRIS_HOST\":\"${IRIS_HOST}\",\"IRIS_PORT\":\"${IRIS_PORT}\",\"IRIS_USERNAME\":\"${IRIS_USERNAME}\",\"IRIS_NAMESPACE\":\"${IRIS_NAMESPACE}\",\"IRIS_HTTPS\":\"${IRIS_HTTPS}\",\"IRIS_PASSWORD\":\"${IRIS_PASSWORD}\"}}}}"
+      },
+      "remove": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"remove\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"remove\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"remove\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-4\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "{\"mcpServers\":{\"foo\":{\"command\":\"x\",\"args\":[\"a\"]}}}"
+      }
+    },
+    "fourSpace": {
+      "apply": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"apply\",\"data\":{\"client\":\"claude-code\",\"scope\":\"project\",\"mode\":\"env-reference\",\"changed\":1,\"inputsMerged\":[],\"results\":[{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"apply\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"add\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}],\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "Pending changes for claude-code (project, env-reference):\n--- iris-dev-mcp (add) ---\nAPPLY iris-dev-mcp \u2192 Claude Code (project scope, json, root key \"mcpServers\")\nAdd entry \"iris-dev-mcp\" (not currently present).\njsonc-parser edit set: 1 edit(s).\n{\n  \"iris-dev-mcp\": {\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ],\n    \"env\": {\n      \"IRIS_HOST\": \"${IRIS_HOST}\",\n      \"IRIS_PORT\": \"${IRIS_PORT}\",\n      \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n      \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n      \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n      \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n    }\n  }\n}\n",
+        "file": "{\n    \"mcpServers\": {\n        \"foo\": {\n            \"command\": \"x\"\n        },\n        \"iris-dev-mcp\": {\n            \"command\": \"npx\",\n            \"args\": [\n                \"-y\",\n                \"@iris-mcp/dev@1\"\n            ],\n            \"env\": {\n                \"IRIS_HOST\": \"${IRIS_HOST}\",\n                \"IRIS_PORT\": \"${IRIS_PORT}\",\n                \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n                \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n                \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n                \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n            }\n        }\n    }\n}\n"
+      },
+      "statusRow": {
+        "client": "claude-code",
+        "displayName": "Claude Code",
+        "scopes": [
+          {
+            "scope": "user",
+            "path": "/home/u/.claude.json",
+            "file": "missing",
+            "servers": [],
+            "foreign": []
+          },
+          {
+            "scope": "project",
+            "path": "/proj/.mcp.json",
+            "file": "ok",
+            "servers": [
+              {
+                "server": "iris-dev-mcp",
+                "state": "present-enabled"
+              },
+              {
+                "server": "iris-admin-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-ops-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-interop-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-data-mcp",
+                "state": "absent"
+              }
+            ],
+            "foreign": [
+              "foo"
+            ]
+          }
+        ]
+      },
+      "doctorFindings": [
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_HOST (or ${IRIS_HOST}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_HTTPS (or ${IRIS_HTTPS}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_NAMESPACE (or ${IRIS_NAMESPACE}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_PASSWORD (or ${IRIS_PASSWORD}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_PORT (or ${IRIS_PORT}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_USERNAME (or ${IRIS_USERNAME}), which is not set in the current environment"
+        }
+      ],
+      "applyAgain": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"apply\",\"data\":{\"client\":\"claude-code\",\"scope\":\"project\",\"mode\":\"env-reference\",\"changed\":1,\"inputsMerged\":[],\"results\":[{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"apply\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"update\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-1\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}],\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "Pending changes for claude-code (project, env-reference):\n--- iris-dev-mcp (update) ---\nAPPLY iris-dev-mcp \u2192 Claude Code (project scope, json, root key \"mcpServers\")\nUpdate entry \"iris-dev-mcp\" in place (currently present): manager-owned keys (command/args/env) are overwritten; unmanaged keys on the entry (e.g. autoApprove, timeout) and its enablement state are preserved.\njsonc-parser edit set: 1 edit(s).\n{\n  \"iris-dev-mcp\": {\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ],\n    \"env\": {\n      \"IRIS_HOST\": \"${IRIS_HOST}\",\n      \"IRIS_PORT\": \"${IRIS_PORT}\",\n      \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n      \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n      \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n      \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n    }\n  }\n}\n",
+        "file": "{\n    \"mcpServers\": {\n        \"foo\": {\n            \"command\": \"x\"\n        },\n        \"iris-dev-mcp\": {\n            \"command\": \"npx\",\n            \"args\": [\n                \"-y\",\n                \"@iris-mcp/dev@1\"\n            ],\n            \"env\": {\n                \"IRIS_HOST\": \"${IRIS_HOST}\",\n                \"IRIS_PORT\": \"${IRIS_PORT}\",\n                \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n                \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n                \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n                \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n            }\n        }\n    }\n}\n"
+      },
+      "disable": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"disable\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"disable\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"stash-remove\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-2\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "{\n    \"mcpServers\": {\n        \"foo\": {\n            \"command\": \"x\"\n        }\n    }\n}\n"
+      },
+      "enable": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"enable\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"enable\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"stash-add\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-3\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "{\n    \"mcpServers\": {\n        \"foo\": {\n            \"command\": \"x\"\n        },\n        \"iris-dev-mcp\": {\n            \"command\": \"npx\",\n            \"args\": [\n                \"-y\",\n                \"@iris-mcp/dev@1\"\n            ],\n            \"env\": {\n                \"IRIS_HOST\": \"${IRIS_HOST}\",\n                \"IRIS_PORT\": \"${IRIS_PORT}\",\n                \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n                \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n                \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n                \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n            }\n        }\n    }\n}\n"
+      },
+      "remove": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"remove\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"remove\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"remove\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-4\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "{\n    \"mcpServers\": {\n        \"foo\": {\n            \"command\": \"x\"\n        }\n    }\n}\n"
+      }
+    },
+    "crlf": {
+      "apply": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"apply\",\"data\":{\"client\":\"claude-code\",\"scope\":\"project\",\"mode\":\"env-reference\",\"changed\":1,\"inputsMerged\":[],\"results\":[{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"apply\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"add\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}],\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "Pending changes for claude-code (project, env-reference):\n--- iris-dev-mcp (add) ---\nAPPLY iris-dev-mcp \u2192 Claude Code (project scope, json, root key \"mcpServers\")\nAdd entry \"iris-dev-mcp\" (not currently present).\njsonc-parser edit set: 1 edit(s).\n{\n  \"iris-dev-mcp\": {\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ],\n    \"env\": {\n      \"IRIS_HOST\": \"${IRIS_HOST}\",\n      \"IRIS_PORT\": \"${IRIS_PORT}\",\n      \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n      \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n      \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n      \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n    }\n  }\n}\n",
+        "file": "{\r\n  \"mcpServers\": {\r\n    \"foo\": {\r\n      \"command\": \"x\"\r\n    },\r\n    \"iris-dev-mcp\": {\r\n      \"command\": \"npx\",\r\n      \"args\": [\r\n        \"-y\",\r\n        \"@iris-mcp/dev@1\"\r\n      ],\r\n      \"env\": {\r\n        \"IRIS_HOST\": \"${IRIS_HOST}\",\r\n        \"IRIS_PORT\": \"${IRIS_PORT}\",\r\n        \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\r\n        \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\r\n        \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\r\n        \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\r\n      }\r\n    }\r\n  }\r\n}\r\n"
+      },
+      "statusRow": {
+        "client": "claude-code",
+        "displayName": "Claude Code",
+        "scopes": [
+          {
+            "scope": "user",
+            "path": "/home/u/.claude.json",
+            "file": "missing",
+            "servers": [],
+            "foreign": []
+          },
+          {
+            "scope": "project",
+            "path": "/proj/.mcp.json",
+            "file": "ok",
+            "servers": [
+              {
+                "server": "iris-dev-mcp",
+                "state": "present-enabled"
+              },
+              {
+                "server": "iris-admin-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-ops-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-interop-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-data-mcp",
+                "state": "absent"
+              }
+            ],
+            "foreign": [
+              "foo"
+            ]
+          }
+        ]
+      },
+      "doctorFindings": [
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_HOST (or ${IRIS_HOST}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_HTTPS (or ${IRIS_HTTPS}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_NAMESPACE (or ${IRIS_NAMESPACE}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_PASSWORD (or ${IRIS_PASSWORD}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_PORT (or ${IRIS_PORT}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_USERNAME (or ${IRIS_USERNAME}), which is not set in the current environment"
+        }
+      ],
+      "applyAgain": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"apply\",\"data\":{\"client\":\"claude-code\",\"scope\":\"project\",\"mode\":\"env-reference\",\"changed\":1,\"inputsMerged\":[],\"results\":[{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"apply\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"update\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-1\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}],\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "Pending changes for claude-code (project, env-reference):\n--- iris-dev-mcp (update) ---\nAPPLY iris-dev-mcp \u2192 Claude Code (project scope, json, root key \"mcpServers\")\nUpdate entry \"iris-dev-mcp\" in place (currently present): manager-owned keys (command/args/env) are overwritten; unmanaged keys on the entry (e.g. autoApprove, timeout) and its enablement state are preserved.\njsonc-parser edit set: 1 edit(s).\n{\n  \"iris-dev-mcp\": {\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ],\n    \"env\": {\n      \"IRIS_HOST\": \"${IRIS_HOST}\",\n      \"IRIS_PORT\": \"${IRIS_PORT}\",\n      \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n      \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n      \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n      \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n    }\n  }\n}\n",
+        "file": "{\r\n  \"mcpServers\": {\r\n    \"foo\": {\r\n      \"command\": \"x\"\r\n    },\r\n    \"iris-dev-mcp\": {\r\n      \"command\": \"npx\",\r\n      \"args\": [\r\n        \"-y\",\r\n        \"@iris-mcp/dev@1\"\r\n      ],\r\n      \"env\": {\r\n        \"IRIS_HOST\": \"${IRIS_HOST}\",\r\n        \"IRIS_PORT\": \"${IRIS_PORT}\",\r\n        \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\r\n        \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\r\n        \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\r\n        \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\r\n      }\r\n    }\r\n  }\r\n}\r\n"
+      },
+      "disable": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"disable\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"disable\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"stash-remove\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-2\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "{\r\n  \"mcpServers\": {\r\n    \"foo\": {\r\n      \"command\": \"x\"\r\n    }\r\n  }\r\n}\r\n"
+      },
+      "enable": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"enable\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"enable\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"stash-add\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-3\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "{\r\n  \"mcpServers\": {\r\n    \"foo\": {\r\n      \"command\": \"x\"\r\n    },\r\n    \"iris-dev-mcp\": {\r\n      \"command\": \"npx\",\r\n      \"args\": [\r\n        \"-y\",\r\n        \"@iris-mcp/dev@1\"\r\n      ],\r\n      \"env\": {\r\n        \"IRIS_HOST\": \"${IRIS_HOST}\",\r\n        \"IRIS_PORT\": \"${IRIS_PORT}\",\r\n        \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\r\n        \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\r\n        \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\r\n        \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\r\n      }\r\n    }\r\n  }\r\n}\r\n"
+      },
+      "remove": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"remove\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"remove\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"remove\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-4\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "{\r\n  \"mcpServers\": {\r\n    \"foo\": {\r\n      \"command\": \"x\"\r\n    }\r\n  }\r\n}\r\n"
+      }
+    },
+    "bom": {
+      "apply": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"apply\",\"data\":{\"client\":\"claude-code\",\"scope\":\"project\",\"mode\":\"env-reference\",\"changed\":1,\"inputsMerged\":[],\"results\":[{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"apply\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"add\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}],\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "Pending changes for claude-code (project, env-reference):\n--- iris-dev-mcp (add) ---\nAPPLY iris-dev-mcp \u2192 Claude Code (project scope, json, root key \"mcpServers\")\nAdd entry \"iris-dev-mcp\" (not currently present).\njsonc-parser edit set: 1 edit(s).\n{\n  \"iris-dev-mcp\": {\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ],\n    \"env\": {\n      \"IRIS_HOST\": \"${IRIS_HOST}\",\n      \"IRIS_PORT\": \"${IRIS_PORT}\",\n      \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n      \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n      \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n      \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n    }\n  }\n}\n",
+        "file": "\ufeff{\n  \"mcpServers\": {\n    \"foo\": {\n      \"command\": \"x\"\n    },\n    \"iris-dev-mcp\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@iris-mcp/dev@1\"\n      ],\n      \"env\": {\n        \"IRIS_HOST\": \"${IRIS_HOST}\",\n        \"IRIS_PORT\": \"${IRIS_PORT}\",\n        \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n        \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n        \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n        \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n      }\n    }\n  }\n}\n"
+      },
+      "statusRow": {
+        "client": "claude-code",
+        "displayName": "Claude Code",
+        "scopes": [
+          {
+            "scope": "user",
+            "path": "/home/u/.claude.json",
+            "file": "missing",
+            "servers": [],
+            "foreign": []
+          },
+          {
+            "scope": "project",
+            "path": "/proj/.mcp.json",
+            "file": "ok",
+            "servers": [
+              {
+                "server": "iris-dev-mcp",
+                "state": "present-enabled"
+              },
+              {
+                "server": "iris-admin-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-ops-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-interop-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-data-mcp",
+                "state": "absent"
+              }
+            ],
+            "foreign": [
+              "foo"
+            ]
+          }
+        ]
+      },
+      "doctorFindings": [
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_HOST (or ${IRIS_HOST}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_HTTPS (or ${IRIS_HTTPS}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_NAMESPACE (or ${IRIS_NAMESPACE}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_PASSWORD (or ${IRIS_PASSWORD}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_PORT (or ${IRIS_PORT}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_USERNAME (or ${IRIS_USERNAME}), which is not set in the current environment"
+        }
+      ],
+      "applyAgain": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"apply\",\"data\":{\"client\":\"claude-code\",\"scope\":\"project\",\"mode\":\"env-reference\",\"changed\":1,\"inputsMerged\":[],\"results\":[{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"apply\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"update\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-1\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}],\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "Pending changes for claude-code (project, env-reference):\n--- iris-dev-mcp (update) ---\nAPPLY iris-dev-mcp \u2192 Claude Code (project scope, json, root key \"mcpServers\")\nUpdate entry \"iris-dev-mcp\" in place (currently present): manager-owned keys (command/args/env) are overwritten; unmanaged keys on the entry (e.g. autoApprove, timeout) and its enablement state are preserved.\njsonc-parser edit set: 1 edit(s).\n{\n  \"iris-dev-mcp\": {\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ],\n    \"env\": {\n      \"IRIS_HOST\": \"${IRIS_HOST}\",\n      \"IRIS_PORT\": \"${IRIS_PORT}\",\n      \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n      \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n      \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n      \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n    }\n  }\n}\n",
+        "file": "\ufeff{\n  \"mcpServers\": {\n    \"foo\": {\n      \"command\": \"x\"\n    },\n    \"iris-dev-mcp\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@iris-mcp/dev@1\"\n      ],\n      \"env\": {\n        \"IRIS_HOST\": \"${IRIS_HOST}\",\n        \"IRIS_PORT\": \"${IRIS_PORT}\",\n        \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n        \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n        \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n        \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n      }\n    }\n  }\n}\n"
+      },
+      "disable": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"disable\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"disable\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"stash-remove\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-2\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "\ufeff{\n  \"mcpServers\": {\n    \"foo\": {\n      \"command\": \"x\"\n    }\n  }\n}\n"
+      },
+      "enable": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"enable\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"enable\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"stash-add\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-3\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "\ufeff{\n  \"mcpServers\": {\n    \"foo\": {\n      \"command\": \"x\"\n    },\n    \"iris-dev-mcp\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@iris-mcp/dev@1\"\n      ],\n      \"env\": {\n        \"IRIS_HOST\": \"${IRIS_HOST}\",\n        \"IRIS_PORT\": \"${IRIS_PORT}\",\n        \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n        \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n        \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n        \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n      }\n    }\n  }\n}\n"
+      },
+      "remove": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"remove\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"remove\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"remove\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-4\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "\ufeff{\n  \"mcpServers\": {\n    \"foo\": {\n      \"command\": \"x\"\n    }\n  }\n}\n"
+      }
+    },
+    "comments": {
+      "apply": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"apply\",\"data\":{\"client\":\"claude-code\",\"scope\":\"project\",\"mode\":\"env-reference\",\"changed\":1,\"inputsMerged\":[],\"results\":[{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"apply\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"add\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}],\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "Pending changes for claude-code (project, env-reference):\n--- iris-dev-mcp (add) ---\nAPPLY iris-dev-mcp \u2192 Claude Code (project scope, json, root key \"mcpServers\")\nAdd entry \"iris-dev-mcp\" (not currently present).\njsonc-parser edit set: 1 edit(s).\n{\n  \"iris-dev-mcp\": {\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ],\n    \"env\": {\n      \"IRIS_HOST\": \"${IRIS_HOST}\",\n      \"IRIS_PORT\": \"${IRIS_PORT}\",\n      \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n      \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n      \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n      \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n    }\n  }\n}\n",
+        "file": "// top comment\n{\n  /* block */ \"mcpServers\": {\n    \"foo\": { \"command\": \"x\" }, // trailing\n    \"bar\": { \"command\": \"y\" /* inner */ },\n    \"iris-dev-mcp\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@iris-mcp/dev@1\"\n      ],\n      \"env\": {\n        \"IRIS_HOST\": \"${IRIS_HOST}\",\n        \"IRIS_PORT\": \"${IRIS_PORT}\",\n        \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n        \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n        \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n        \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n      }\n    }\n  }\n}\n"
+      },
+      "statusRow": {
+        "client": "claude-code",
+        "displayName": "Claude Code",
+        "scopes": [
+          {
+            "scope": "user",
+            "path": "/home/u/.claude.json",
+            "file": "missing",
+            "servers": [],
+            "foreign": []
+          },
+          {
+            "scope": "project",
+            "path": "/proj/.mcp.json",
+            "file": "ok",
+            "servers": [
+              {
+                "server": "iris-dev-mcp",
+                "state": "present-enabled"
+              },
+              {
+                "server": "iris-admin-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-ops-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-interop-mcp",
+                "state": "absent"
+              },
+              {
+                "server": "iris-data-mcp",
+                "state": "absent"
+              }
+            ],
+            "foreign": [
+              "bar",
+              "foo"
+            ]
+          }
+        ]
+      },
+      "doctorFindings": [
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_HOST (or ${IRIS_HOST}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_HTTPS (or ${IRIS_HTTPS}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_NAMESPACE (or ${IRIS_NAMESPACE}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_PASSWORD (or ${IRIS_PASSWORD}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_PORT (or ${IRIS_PORT}), which is not set in the current environment"
+        },
+        {
+          "check": "env-references",
+          "client": "claude-code",
+          "scope": "project",
+          "path": "/proj/.mcp.json",
+          "detail": "entry \"iris-dev-mcp\" references $IRIS_USERNAME (or ${IRIS_USERNAME}), which is not set in the current environment"
+        }
+      ],
+      "applyAgain": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"apply\",\"data\":{\"client\":\"claude-code\",\"scope\":\"project\",\"mode\":\"env-reference\",\"changed\":1,\"inputsMerged\":[],\"results\":[{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"apply\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"update\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-1\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}],\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "Pending changes for claude-code (project, env-reference):\n--- iris-dev-mcp (update) ---\nAPPLY iris-dev-mcp \u2192 Claude Code (project scope, json, root key \"mcpServers\")\nUpdate entry \"iris-dev-mcp\" in place (currently present): manager-owned keys (command/args/env) are overwritten; unmanaged keys on the entry (e.g. autoApprove, timeout) and its enablement state are preserved.\njsonc-parser edit set: 1 edit(s).\n{\n  \"iris-dev-mcp\": {\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ],\n    \"env\": {\n      \"IRIS_HOST\": \"${IRIS_HOST}\",\n      \"IRIS_PORT\": \"${IRIS_PORT}\",\n      \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n      \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n      \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n      \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n    }\n  }\n}\n",
+        "file": "// top comment\n{\n  /* block */ \"mcpServers\": {\n    \"foo\": { \"command\": \"x\" }, // trailing\n    \"bar\": { \"command\": \"y\" /* inner */ },\n    \"iris-dev-mcp\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@iris-mcp/dev@1\"\n      ],\n      \"env\": {\n        \"IRIS_HOST\": \"${IRIS_HOST}\",\n        \"IRIS_PORT\": \"${IRIS_PORT}\",\n        \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n        \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n        \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n        \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n      }\n    }\n  }\n}\n"
+      },
+      "disable": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"disable\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"disable\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"stash-remove\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-2\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "// top comment\n{\n  /* block */ \"mcpServers\": {\n    \"foo\": { \"command\": \"x\" }, // trailing\n    \"bar\": { \"command\": \"y\" /* inner */ }\n  }\n}\n"
+      },
+      "enable": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"enable\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"enable\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"stash-add\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-3\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "// top comment\n{\n  /* block */ \"mcpServers\": {\n    \"foo\": { \"command\": \"x\" }, // trailing\n    \"bar\": { \"command\": \"y\" /* inner */ },\n    \"iris-dev-mcp\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@iris-mcp/dev@1\"\n      ],\n      \"env\": {\n        \"IRIS_HOST\": \"${IRIS_HOST}\",\n        \"IRIS_PORT\": \"${IRIS_PORT}\",\n        \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n        \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n        \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n        \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n      }\n    }\n  }\n}\n"
+      },
+      "remove": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"command\":\"remove\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"remove\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"remove\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-4\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+        "stderr": "",
+        "file": "// top comment\n{\n  /* block */ \"mcpServers\": {\n    \"foo\": { \"command\": \"x\" }, // trailing\n    \"bar\": { \"command\": \"y\" /* inner */ }\n  }\n}\n"
+      }
+    }
+  },
+  "unrecorded": {
+    "captureCommand": "node capture-oracle-unrecorded.mjs <pre-story package dir> <oracle json> (a dist built from git archive 9f7797c5)",
+    "fixture": "{\n  \"mcpServers\": {\n    \"iris-dev-mcp\": { \"command\": \"node\", \"args\": [\"hand-written.js\"] },\n    \"foo\": { \"command\": \"x\" }\n  }\n}\n",
+    "apply": {
+      "exit": 0,
+      "stdout": "{\"ok\":true,\"command\":\"apply\",\"data\":{\"client\":\"claude-code\",\"scope\":\"project\",\"mode\":\"env-reference\",\"changed\":1,\"inputsMerged\":[],\"results\":[{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"apply\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"update\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}],\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+      "stderr": "Pending changes for claude-code (project, env-reference):\n--- iris-dev-mcp (update) ---\nAPPLY iris-dev-mcp \u2192 Claude Code (project scope, json, root key \"mcpServers\")\nUpdate entry \"iris-dev-mcp\" in place (currently present): manager-owned keys (command/args/env) are overwritten; unmanaged keys on the entry (e.g. autoApprove, timeout) and its enablement state are preserved.\njsonc-parser edit set: 3 edit(s).\n{\n  \"iris-dev-mcp\": {\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ],\n    \"env\": {\n      \"IRIS_HOST\": \"${IRIS_HOST}\",\n      \"IRIS_PORT\": \"${IRIS_PORT}\",\n      \"IRIS_USERNAME\": \"${IRIS_USERNAME}\",\n      \"IRIS_NAMESPACE\": \"${IRIS_NAMESPACE}\",\n      \"IRIS_HTTPS\": \"${IRIS_HTTPS}\",\n      \"IRIS_PASSWORD\": \"${IRIS_PASSWORD}\"\n    }\n  }\n}\n",
+      "file": "{\n  \"mcpServers\": {\n    \"iris-dev-mcp\": { \"command\": \"npx\", \"args\": [\n      \"-y\",\n      \"@iris-mcp/dev@1\"\n    ], \"env\": {\"IRIS_HOST\":\"${IRIS_HOST}\",\"IRIS_PORT\":\"${IRIS_PORT}\",\"IRIS_USERNAME\":\"${IRIS_USERNAME}\",\"IRIS_NAMESPACE\":\"${IRIS_NAMESPACE}\",\"IRIS_HTTPS\":\"${IRIS_HTTPS}\",\"IRIS_PASSWORD\":\"${IRIS_PASSWORD}\"} },\n    \"foo\": { \"command\": \"x\" }\n  }\n}\n"
+    },
+    "remove": {
+      "exit": 0,
+      "stdout": "{\"ok\":true,\"command\":\"remove\",\"data\":{\"ok\":true,\"client\":\"claude-code\",\"scope\":\"project\",\"action\":\"remove\",\"path\":\"/proj/.mcp.json\",\"mechanism\":\"remove\",\"changed\":true,\"backupPath\":\"/home/u/.iris-mcp/client-manager/backups/claude-code/project/.mcp.json.2026-07-27T12-00-00-001Z-1\",\"restartHint\":\"Restart Claude Code (or start a new session) for MCP changes to take effect.\"}}\n",
+      "stderr": "",
+      "file": "{\n  \"mcpServers\": {\n    \"foo\": { \"command\": \"x\" }\n  }\n}\n"
+    }
+  }
+}

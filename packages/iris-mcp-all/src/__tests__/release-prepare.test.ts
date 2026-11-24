@@ -48,7 +48,7 @@ import { MARKER_TAIL, PACKAGE_DIRS, ROOT_SCRIPTS, SERVER_DIRS, SHA, fakeStoresFe
 const SECRET_NPM = "npm_PREPARESECRET1234567890";
 const SECRET_GITHUB = "ghs_PREPARESECRET0987654321";
 /** The root scripts prepare runs on the real root manifest (DW-612): CI's root gates, sorted. */
-const REAL_CHECKS = ["check:provenance", "gen:governance-baseline:check", "gen:ipm:check", "gen:listings:check", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "validate:prompts"];
+const REAL_CHECKS = ["check:live-guards", "check:provenance", "gen:governance-baseline:check", "gen:ipm:check", "gen:listings:check", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "validate:prompts"];
 
 /** The `scripts` of the real root `package.json`. */
 const realRootScripts = (): Record<string, string> => (JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;

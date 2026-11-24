@@ -477,6 +477,38 @@ export function listBackups(path: string, options: RestoreOptions): string[] {
 }
 
 /**
+ * The backup a restore of `path` would write (the latest, or the one `options.backup` names) and its text. Reads only;
+ * never throws on I/O.
+ */
+export function readChosenBackup(
+  path: string,
+  options: RestoreOptions,
+): { ok: true; chosen: string; content: string } | { ok: false; reason: string } {
+  const fs = options.fs ?? REAL_WRITE_FS;
+  const candidates = listBackups(path, options);
+  if (candidates.length === 0) {
+    return { ok: false, reason: `no backups found for ${path}` };
+  }
+  let chosen: string | undefined;
+  if (options.backup !== undefined) {
+    chosen = candidates.find((candidate) => (candidate.split(/[\\/]/).pop() ?? candidate) === options.backup);
+    if (!chosen) {
+      return { ok: false, reason: `no backup named "${options.backup}" found for ${path}` };
+    }
+  } else {
+    chosen = candidates[candidates.length - 1];
+  }
+  if (chosen === undefined) {
+    return { ok: false, reason: `no backups found for ${path}` };
+  }
+  try {
+    return { ok: true, chosen, content: fs.readFile(chosen) };
+  } catch (err) {
+    return { ok: false, reason: `could not read the backup for ${path}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/**
  * Restore the latest (or a named) backup for one config file. The restore is
  * itself a safety-protocol write: the pre-restore file is backed up first
  * and the restored bytes are re-parsed. Refuses when no backup exists.
@@ -487,28 +519,9 @@ export function listBackups(path: string, options: RestoreOptions): string[] {
  */
 export function restoreBackup(path: string, options: RestoreOptions): WriteResult & { restoredFrom?: string } {
   const fs = options.fs ?? REAL_WRITE_FS;
-  const candidates = listBackups(path, options);
-  if (candidates.length === 0) {
-    return { ok: false, path, reason: `no backups found for ${path}` };
-  }
-  let chosen: string | undefined;
-  if (options.backup !== undefined) {
-    chosen = candidates.find((candidate) => (candidate.split(/[\\/]/).pop() ?? candidate) === options.backup);
-    if (!chosen) {
-      return { ok: false, path, reason: `no backup named "${options.backup}" found for ${path}` };
-    }
-  } else {
-    chosen = candidates[candidates.length - 1];
-  }
-  if (chosen === undefined) {
-    return { ok: false, path, reason: `no backups found for ${path}` };
-  }
-  let content: string;
-  try {
-    content = fs.readFile(chosen);
-  } catch (err) {
-    return { ok: false, path, reason: `could not read the backup for ${path}: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  const picked = readChosenBackup(path, options);
+  if (!picked.ok) return { ok: false, path, reason: picked.reason };
+  const { chosen, content } = picked;
   let current: string | null;
   try {
     current = fs.exists(path) ? fs.readFile(path) : null;

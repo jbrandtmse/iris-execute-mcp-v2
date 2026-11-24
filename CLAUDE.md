@@ -1,5 +1,12 @@
 # iris-execute-mcp-v2
 
+## Generated files: do not edit
+
+Fix the source and re-run the generator instead (rule #18 in `.claude/rules/project-rules.md`):
+
+- `packages/shared/src/bootstrap-classes.ts` and any `*.generated.*` file: `pnpm run gen:bootstrap` (or the generator named in the file's header).
+- The stamped IPM tree: the root `module.xml`, `ipm/src/**` and `preload/**`. Only the release version step (`pnpm run version`) writes it, so `main` always holds the content of the last release. Check it with `pnpm gen:ipm:check`.
+
 ## Local IRIS system-class source (`irislib/`, `irissys/`)
 
 These folders hold read-only copies of IRIS system source. Use them to check that a system class, method, query or macro exists, and what it takes, without calling the server (rule #16 in `.claude/rules/project-rules.md`).

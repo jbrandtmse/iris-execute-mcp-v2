@@ -33,6 +33,42 @@ export interface SynthesizeOptions {
   alwaysEmitProfiles?: boolean;
 }
 
+/** The non-secret connection fields the spawn env is built from. */
+export type ConnectionFields = Pick<
+  ResolvedConnectionProfile,
+  "host" | "port" | "https" | "username" | "namespace"
+>;
+
+/** The five non-secret `IRIS_*` connection variables, shared by the resolved env and the provided env. */
+function connectionEnvFields(
+  connection: ConnectionFields,
+  namespaceDefault: string,
+): Record<string, string> {
+  return {
+    IRIS_HOST: connection.host,
+    IRIS_PORT: String(connection.port),
+    IRIS_HTTPS: connection.https ? "true" : "false",
+    IRIS_USERNAME: connection.username,
+    IRIS_NAMESPACE: connection.namespace || namespaceDefault,
+  };
+}
+
+/**
+ * The env a PROVIDED definition carries (what a Copilot-harness session spawns, since the resolver never runs there):
+ * the five non-secret `IRIS_*` variables plus `IRIS_CREDENTIAL_NAME`, which names the iris-mcp keychain entry the server
+ * reads its password from (`iris-mcp-credentials set <name>`). Never a password: VS Code persists provided definitions.
+ */
+export function synthesizeProvidedEnv(
+  connection: ConnectionFields,
+  namespaceDefault: string,
+  credentialName: string,
+): Record<string, string> {
+  return {
+    ...connectionEnvFields(connection, namespaceDefault),
+    IRIS_CREDENTIAL_NAME: credentialName,
+  };
+}
+
 /** Build the `IRIS_*` / `IRIS_PROFILES` portion of the spawn env from one or more resolved profiles. */
 export function synthesizeIrisEnv(
   profiles: ResolvedConnectionProfile[],
@@ -45,12 +81,8 @@ export function synthesizeIrisEnv(
   }
 
   const env: Record<string, string> = {
-    IRIS_HOST: first.host,
-    IRIS_PORT: String(first.port),
-    IRIS_HTTPS: first.https ? "true" : "false",
-    IRIS_USERNAME: first.username,
+    ...connectionEnvFields(first, namespaceDefault),
     IRIS_PASSWORD: first.password,
-    IRIS_NAMESPACE: first.namespace || namespaceDefault,
   };
 
   if (options.alwaysEmitProfiles === true || profiles.length > 1) {
@@ -147,6 +179,32 @@ const LAUNCHER_OWNED_VARS: readonly string[] = [
   // transport at startup, so an ambient MCP_TRANSPORT would stop every spawned server from starting.
   "MCP_TRANSPORT",
 ];
+
+/**
+ * The launcher-owned variables for which an empty string means "not configured" to the suite's servers
+ * (`packages/shared`, verified per variable): the Copilot harness drops `null` env entries, so `""` is the only
+ * way a provided definition can override an ambient value there. `IRIS_AUDIT_LOG_MAX_MB` is NOT here: an empty
+ * value parses as the number 0 and stops a server that has `IRIS_AUDIT_LOG` set, so it stays `null`.
+ */
+export const EMPTY_MEANS_UNSET_VARS: readonly string[] = LAUNCHER_OWNED_VARS.filter(
+  (varName) => varName !== "IRIS_AUDIT_LOG_MAX_MB",
+);
+
+/**
+ * Like {@link withOwnedVarsCleared}, for a PROVIDED definition: every launcher-owned variable that is not being set
+ * becomes `""` when {@link EMPTY_MEANS_UNSET_VARS} lists it, and `null` otherwise.
+ */
+export function withOwnedVarsEmptied(
+  setVars: Record<string, string>,
+): Record<string, string | null> {
+  const env: Record<string, string | null> = { ...setVars };
+  for (const varName of LAUNCHER_OWNED_VARS) {
+    if (!(varName in env)) {
+      env[varName] = EMPTY_MEANS_UNSET_VARS.includes(varName) ? "" : null;
+    }
+  }
+  return env;
+}
 
 /**
  * Take the variables this launcher is actually setting and add an explicit

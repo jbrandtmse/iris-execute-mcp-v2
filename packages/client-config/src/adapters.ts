@@ -16,7 +16,7 @@ import type { ClientAdapter, ClientDisposition } from "./types.js";
  * adapter record changes; surfaced in `status` output so a drift report
  * always names the data vintage it was computed from (spec §3.7).
  */
-export const ADAPTER_DATA_VERSION = "2026-11-21.1";
+export const ADAPTER_DATA_VERSION = "2026-11-22.1";
 
 /** Shared VS Code user-profile roots (per-OS), under which several
  * VS Code-extension clients (Cline, Roo Code) keep their globalStorage. */
@@ -158,35 +158,46 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
   vscode: {
     id: "vscode",
     displayName: "VS Code (Copilot)",
-    format: "jsonc",
-    rootKey: "servers",
+    // The Copilot harness (the default since VS Code 1.143) reads these two files itself: the user
+    // file `~/.copilot/mcp-config.json` and the workspace-root `.mcp.json`, which is also Claude Code's
+    // project file (the shared-file rule, AD-30). VS Code's own `mcp.json` files belong to the Local
+    // harness, which VS Code removes in February 2027; they stay readable through `legacyScopes`.
+    format: "json",
+    rootKey: "mcpServers",
     scopes: [
       {
         scope: "user",
         paths: {
-          win32: `${VSCODE_USER_ROOT.win32}/mcp.json`,
-          darwin: `${VSCODE_USER_ROOT.darwin}/mcp.json`,
-          linux: `${VSCODE_USER_ROOT.linux}/mcp.json`,
+          win32: "~/.copilot/mcp-config.json",
+          darwin: "~/.copilot/mcp-config.json",
+          linux: "~/.copilot/mcp-config.json",
         },
+        // VS Code resolves the file as `$COPILOT_HOME/mcp-config.json` when COPILOT_HOME is set and
+        // non-empty (an empty value falls back to the home directory) and never consults XDG_CONFIG_HOME.
+        envOverride: { var: "COPILOT_HOME", pathSuffix: "mcp-config.json" },
         shareable: false,
+        // The Copilot-global writer emits {type, command, args, env, tools}, and VS Code reads the file with JSON.parse.
+        entryShape: "copilot",
+        strictJson: true,
       },
       {
         scope: "project",
         paths: {
-          win32: ".vscode/mcp.json",
-          darwin: ".vscode/mcp.json",
-          linux: ".vscode/mcp.json",
+          win32: ".mcp.json",
+          darwin: ".mcp.json",
+          linux: ".mcp.json",
         },
         shareable: true,
       },
     ],
     entryShape: "standard",
-    envExpansion: "vscode",
+    envExpansion: "claude",
     // VS Code's native disable is a UI gesture, not a file flag — the file
     // mechanism is stash (spec table: "native (UI) + stash").
     disableSupport: "stash",
     restartHint:
-      "Reload the VS Code window (Developer: Reload Window) or restart the server from the MCP view for changes to take effect.",
+      "Start a new Copilot chat session (or reload the VS Code window) for MCP changes to take effect. " +
+      "${IRIS_*} references resolve from the environment VS Code was launched with, so restart VS Code from a shell that has those variables set.",
     detection: [
       { kind: "config", scope: "user" },
       { kind: "config", scope: "project" },
@@ -200,6 +211,30 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
       },
     ],
     docsUrl: "https://code.visualstudio.com/docs/agents/reference/mcp-configuration",
+    legacyScopes: [
+      {
+        scope: "user",
+        paths: {
+          win32: `${VSCODE_USER_ROOT.win32}/mcp.json`,
+          darwin: `${VSCODE_USER_ROOT.darwin}/mcp.json`,
+          linux: `${VSCODE_USER_ROOT.linux}/mcp.json`,
+        },
+        format: "jsonc",
+        rootKey: "servers",
+        envExpansion: "vscode",
+      },
+      {
+        scope: "project",
+        paths: {
+          win32: ".vscode/mcp.json",
+          darwin: ".vscode/mcp.json",
+          linux: ".vscode/mcp.json",
+        },
+        format: "jsonc",
+        rootKey: "servers",
+        envExpansion: "vscode",
+      },
+    ],
   },
 
   cline: {

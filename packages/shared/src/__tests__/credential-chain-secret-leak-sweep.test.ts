@@ -36,6 +36,7 @@ import {
 } from "../credential-chain.js";
 import type { ServerManagerProfileResult } from "../server-manager-source.js";
 import { logger } from "../logger.js";
+import { loadProfileRegistry } from "../profiles.js";
 
 function unresolvedEntry(
   name: string,
@@ -292,6 +293,50 @@ describe("secret-leak sweep — successful resolution never logs the password (a
 // error (or any log) triggered by a DIFFERENT, exhausted profile in the
 // same call.
 // ════════════════════════════════════════════════════════════════════
+
+describe("secret-leak sweep — IRIS_CREDENTIAL_NAME error and warn paths (Story 44.6)", () => {
+  const BASE = { IRIS_HOST: "h", IRIS_USERNAME: "u", IRIS_NAMESPACE: "N" };
+
+  it("the exhausted-chain error and the member-miss warning never carry a password", async () => {
+    const secret = "PROFILEPWSECRET_k3j9";
+    const defaultSecret = "DEFAULTPWSECRET_p8w2";
+    const spy = spyAllLoggerText();
+    try {
+      let caught: unknown;
+      try {
+        await loadProfileRegistry(
+          {
+            ...BASE,
+            IRIS_CREDENTIAL_NAME: "dev1",
+            IRIS_PROFILES: JSON.stringify({ a: { host: "h1" }, b: { password: secret } }),
+          },
+          undefined,
+          { getKeychainPassword: async () => undefined },
+        );
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).message).not.toContain(secret);
+
+      // Member-miss path: the default resolves, member "a" misses, a warning names it.
+      await loadProfileRegistry(
+        {
+          ...BASE,
+          IRIS_CREDENTIAL_NAME: "dev1",
+          IRIS_PROFILES: JSON.stringify({ a: { host: "h1" }, b: { password: secret } }),
+        },
+        undefined,
+        { getKeychainPassword: async (name) => (name === "dev1" ? defaultSecret : undefined) },
+      );
+      expect(spy.text()).toContain("iris-mcp-credentials set a");
+      expect(spy.text()).not.toContain(secret);
+      expect(spy.text()).not.toContain(defaultSecret);
+    } finally {
+      spy.restore();
+    }
+  });
+});
 
 describe("secret-leak sweep — cross-profile isolation under required-mode escalation", () => {
   it("a chain-resolved profile's password never appears in the thrown error naming a DIFFERENT exhausted profile", async () => {

@@ -121,6 +121,7 @@ describe("AC 42.3.1: the workflow is the registry's workflow", () => {
     ["a Node leg dropped", () => mutate(text, '"22.17.0", "24.0.0", "26.0.0"', '"22.17.0", "24.0.0"'), /gates matrix/],
     ["a Node leg with a gap", () => mutate(text, '"26.0.0"]', '"28.0.0"]'), /gates matrix/],
     ["a dropped step (the epics-sync check)", () => mutate(text, "      - name: epics sync check\n        run: node scripts/check-epics-sync.mjs\n", ""), /declared step is not in the workflow.*check-epics-sync/],
+    ["a dropped step (the live-guard check)", () => mutate(text, "      - name: live-guard check\n        run: pnpm check:live-guards\n", ""), /declared step is not in the workflow.*check:live-guards/],
     ["a dropped step (the lint)", () => mutate(text, "      - name: lint\n        run: pnpm lint\n", ""), /declared step is not in the workflow.*pnpm lint/],
     ["a dropped test step of one package", () => mutate(text, "      - name: test @iris-mcp/ops\n        run: pnpm --filter @iris-mcp/ops test\n", ""), /declared step is not in the workflow.*@iris-mcp\/ops test/],
     ["an undeclared step", () => mutate(text, "      - name: type-check\n        run: pnpm type-check\n", "      - name: type-check\n        run: pnpm type-check\n      - name: extra\n        run: echo extra\n"), /step the registry does not declare.*echo extra/],
@@ -263,6 +264,18 @@ describe("AC 42.3.5 / DW-443: no tarball is built from a red commit, and every p
     const runs = (DECLARED_STEPS.throwaway as Array<{ run: string; if?: string }>).map((step) => step.run);
     expect(runs.findIndex((run) => run.includes("throwaway-iris.mjs logs"))).toBeGreaterThan(runs.findIndex((run) => run.includes("ci-live-suite.mjs launcher-live")));
     expect(runs[runs.length - 1]).toContain("throwaway-iris.mjs down");
+    // Story 44.5 (DW-726): the Epic 35 F5 gate in prepublish-all needs %Service_DocDB disabled and the DocDB lifecycle in integration-data needs it
+    // enabled, so the enable step runs after prepublish-all and immediately before integration-data. Moving it earlier turns F5 into an unlisted skip.
+    const enableStep = runs.findIndex((run) => run.includes("ci-enable-docdb-service.script"));
+    expect(enableStep, "the enable step is declared").toBeGreaterThan(-1);
+    expect(runs.filter((run) => run.includes("ci-enable-docdb-service.script")).length).toBe(1);
+    expect(runs[enableStep]).toContain("session --state");
+    expect(runs[enableStep]).toContain("--namespace %SYS");
+    const prepublishAll = runs.findIndex((run) => run.endsWith("ci-live-suite.mjs prepublish-all"));
+    expect(prepublishAll, "the prepublish-all suite step is declared").toBeGreaterThan(-1);
+    expect(enableStep).toBeGreaterThan(prepublishAll);
+    expect(runs[enableStep + 1]).toMatch(/ci-live-suite\.mjs integration-data$/);
+    expect(existsSync(path.join(REPO_ROOT, "scripts", "ci-enable-docdb-service.script"))).toBe(true);
     expect(workflowProblems(mutate(text, '"${{ always() }}"', '"${{ success() }}"'), context).join("\n")).toMatch(/down step does not run on always/);
     expect(workflowProblems(mutate(text, '"${{ failure() || cancelled() }}"', '"${{ failure() }}"'), context).join("\n")).toMatch(/logs step does not run on failure/);
   });
@@ -423,8 +436,8 @@ describe("DW-676: every armed file runs in a suite, and a skip is never silent",
     const entries = (Object.entries(LIVE_SUITES) as Array<[string, { expectedFiles: () => string[]; allowedSkips: Array<{ file: string; test: string; reason: string }> }]>).flatMap(([id, suite]) =>
       suite.allowedSkips.map((entry) => ({ id, suite, ...entry })),
     );
-    expect(entries.length, "the 4 capture legs and the 9 DocDB lifecycle tests").toBe(13);
-    expect(entries.filter(({ id }) => id === "integration-data").length, "the DocDB lifecycle of data.integration.test.ts, all of it").toBe(9);
+    expect(entries.length, "the 4 capture legs, and no other skip (Story 44.5: CI runs the DocDB lifecycle)").toBe(4);
+    expect(entries.filter(({ id }) => id !== "prepublish-all"), "only prepublish-all allowlists a skip").toEqual([]);
     for (const { id, suite, file, test, reason } of entries) {
       expect(existsSync(path.join(REPO_ROOT, file)), `${id}: ${file} exists`).toBe(true);
       expect(suite.expectedFiles(), `${id}: ${file} is a file the suite runs`).toContain(file);
@@ -562,5 +575,9 @@ describe("the README documents the CI (Story 42.3)", () => {
     expect(section).toMatch(/pnpm live:bootstrap-guard/);
     expect(section).toMatch(/Docker/);
     expect(section).toMatch(/removes its own container/);
+    // Story 44.5: the live-guard check and the DocDB enable step are documented where the jobs are.
+    expect(section).toContain("check:live-guards");
+    expect(section).toContain("%Service_DocDB");
+    expect(section).not.toMatch(/CI never runs that lifecycle|which the wrapper cannot see/);
   });
 });

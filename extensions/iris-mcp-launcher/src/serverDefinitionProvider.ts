@@ -16,6 +16,10 @@
  * authentication." Credential resolution therefore happens ONLY in
  * {@link resolveEnvForLabel} (VS Code's `resolveMcpServerDefinition`), never in
  * {@link providePlannedDefinitions}.
+ *
+ * Story 44.8 (DW-752): {@link resolveEnvForLabel} starts a server only when every server of its plan is defined in
+ * user (or default) settings alone ({@link isUserScopedServer}); otherwise it returns `undefined` with one warning,
+ * before any call to Server Manager's `getServerSpec`/`getAccount`/`getSession`.
  */
 import { stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -27,7 +31,14 @@ import {
   type DefinitionPlan,
 } from "./definitions.js";
 import { resolveServerCredentials, type CredentialResult } from "./credentials.js";
-import { synthesizeIrisEnv, buildGovernanceEnv, withOwnedVarsCleared } from "./env.js";
+import { deriveConnection } from "./connection.js";
+import {
+  synthesizeIrisEnv,
+  synthesizeProvidedEnv,
+  buildGovernanceEnv,
+  withOwnedVarsCleared,
+  withOwnedVarsEmptied,
+} from "./env.js";
 import type {
   AuthApi,
   CancellationTokenLike,
@@ -36,14 +47,28 @@ import type {
   ResolvedConnectionProfile,
   ServerManagerApi,
   ServerManagerApiFailureReason,
+  ServerManagerServersInspection,
   SuitePackageKey,
 } from "./types.js";
 
-/** The skeletal shape `provideMcpServerDefinitions` returns — no credentials, no env yet. */
+/**
+ * The shape `provideMcpServerDefinitions` returns. `env` is what a Copilot-harness session spawns (its resolver never
+ * runs) and carries NO secret: the non-secret `IRIS_*` settings plus `IRIS_CREDENTIAL_NAME`, or `{}` when the
+ * connection cannot be known without a session. Under the Local harness `resolveEnvForLabel`'s env replaces it.
+ */
 export interface PlannedDefinition {
   label: string;
   command: string;
   args: string[];
+  env: Record<string, string | null>;
+}
+
+/** The non-secret connection of one Server Manager server, as a provided definition carries it. */
+interface ProvidedConnection {
+  host: string;
+  port: number;
+  https: boolean;
+  username: string;
 }
 
 /** Dependencies injected into {@link LauncherProvider} — real implementations come from `extension.ts`; fakes come from tests. */
@@ -70,6 +95,70 @@ export interface ProviderDeps {
    * lose only the crumb, not the containment.
    */
   logDiagnostic?: (message: string) => void;
+  /**
+   * The per-scope layers of `intersystems.servers` for `scope` (see {@link ServerManagerServersInspection}). Both
+   * harnesses use it, through one verdict (`inspectServerScope`): a provided definition names a stored credential only
+   * for a server that {@link isUserScopedServer} accepts, and the Local resolve step (`resolveEnvForLabel`) starts only
+   * such servers, before it touches Server Manager's credential API. Absent, throwing or returning a non-object: the
+   * verdict is `uninspectable`, so every provided env is `{}` and the Local resolve step starts nothing.
+   */
+  inspectServerManagerServers?: (scope?: ConfigScope) => ServerManagerServersInspection | undefined;
+}
+
+/**
+ * Whether `serverName`'s `intersystems.servers` entry comes from user (or default) settings alone. `false` when any
+ * workspace or workspace-folder layer (language-specific ones included) defines that name or is not an object, or when
+ * neither the user nor the default layer defines it. A provided definition sends the password stored under the server's
+ * name to the host of the merged entry, so a workspace's `settings.json` (an untrusted repository's included) must not be
+ * able to choose or alter that entry (AD-9).
+ */
+export function isUserScopedServer(
+  inspection: ServerManagerServersInspection | undefined,
+  serverName: string,
+): boolean {
+  if (typeof inspection !== "object" || inspection === null) return false;
+  const defines = (layer: unknown): boolean =>
+    typeof layer === "object" && layer !== null && Object.prototype.hasOwnProperty.call(layer, serverName);
+  const workspaceLayers = [
+    inspection.workspaceValue,
+    inspection.workspaceFolderValue,
+    inspection.workspaceLanguageValue,
+    inspection.workspaceFolderLanguageValue,
+  ];
+  for (const layer of workspaceLayers) {
+    if (layer === undefined) continue;
+    if (typeof layer !== "object" || layer === null || defines(layer)) return false;
+  }
+  return defines(inspection.globalValue) || defines(inspection.defaultValue);
+}
+
+/**
+ * Whether a server's definition is user-scoped: `user` (user or default settings alone), `not-user` (a workspace,
+ * folder or language-specific layer defines, overrides or is not an object, or only a language-specific user layer
+ * defines it), `absent` (every layer is an object or unset and none defines the name: it was renamed or removed since
+ * the plan was made) or `uninspectable` (the inspection dependency is absent, threw, or returned a non-object). Only
+ * `user` may reach Server Manager's credential API.
+ */
+type ServerScopeVerdict = "user" | "not-user" | "absent" | "uninspectable";
+
+/** Every layer of `inspection`, as `WorkspaceConfiguration.inspect` names them. */
+const INSPECTION_LAYERS: readonly (keyof ServerManagerServersInspection)[] = [
+  "defaultValue",
+  "globalValue",
+  "workspaceValue",
+  "workspaceFolderValue",
+  "defaultLanguageValue",
+  "globalLanguageValue",
+  "workspaceLanguageValue",
+  "workspaceFolderLanguageValue",
+];
+
+/** The warning for a server Server Manager no longer defines (the resolve step's no-spec outcome and the `absent` verdict). */
+function noSuchServerWarning(label: string, serverName: string): string {
+  return (
+    `IRIS MCP Launcher: "${label}" was not started — Server Manager has no server named ` +
+    `"${serverName}" (it may have been renamed or removed; try reloading the window).`
+  );
 }
 
 const NPX_COMMAND = "npx";
@@ -340,7 +429,102 @@ export class LauncherProvider {
       acceptedPlans.map(({ plan, localSpawn }) => [plan.label, { plan, localSpawn }]),
     );
 
+    // `definitions[i]` is the definition of `acceptedPlans[i]` (resolveSpawnTargets pushes both together).
+    const specLookups = new Map<string, Promise<ProvidedConnection | undefined>>();
+    await Promise.all(
+      acceptedPlans.map(async ({ plan, localSpawn }, index) => {
+        const definition = definitions[index];
+        if (definition === undefined) return;
+        definition.env = await this.providedEnvFor(api, settings, plan, localSpawn, specLookups);
+      }),
+    );
+
     return definitions;
+  }
+
+  /**
+   * The env a provided definition carries (Copilot-harness sessions never run the resolver). Only the secret-free
+   * prefix of `resolveServerCredentials` runs: `getServerSpec` (settings only; it never prompts) and
+   * `deriveConnection`. `spec.password`, `getAccount` and `getSession` are never touched, so no secret and no
+   * session token can reach the result, and nothing prompts or warns.
+   *
+   * `{}` (today's provided env) when the connection cannot be known without a session: a `combineProfiles` plan
+   * (Local-only), a server whose spec is missing, malformed or has no `webServer`, or one without a username. Also `{}`
+   * for a server a workspace or folder `settings.json` defines or overrides ({@link isUserScopedServer}): the stored
+   * password is chosen by name, so only a user-scope definition may say where it is sent.
+   */
+  private async providedEnvFor(
+    api: ServerManagerApi,
+    settings: LauncherSettings,
+    plan: DefinitionPlan,
+    localSpawn: boolean,
+    specLookups: Map<string, Promise<ProvidedConnection | undefined>>,
+  ): Promise<Record<string, string | null>> {
+    const [serverName] = plan.serverNames;
+    if (settings.combineProfiles || plan.serverNames.length !== 1 || serverName === undefined) return {};
+    // eslint-disable-next-line no-control-regex
+    if (serverName.trim() === "" || /[\u0000-\u001f\u007f-\u009f]/.test(serverName)) return {};
+
+    let lookup = specLookups.get(serverName);
+    if (lookup === undefined) {
+      lookup = this.lookUpProvidedConnection(api, serverName, this.scopesByServerName.get(serverName));
+      specLookups.set(serverName, lookup);
+    }
+    const connection = await lookup;
+    if (connection === undefined) return {};
+
+    const env = withOwnedVarsEmptied({
+      ...synthesizeProvidedEnv({ ...connection, namespace: settings.namespace }, settings.namespace, serverName),
+      ...buildGovernanceEnv(settings),
+    });
+    // 31-6-3: a local-build plan spawns the extension host's own Electron binary as the interpreter.
+    if (localSpawn) {
+      env["ELECTRON_RUN_AS_NODE"] = "1";
+    }
+    return env;
+  }
+
+  /**
+   * The one scope verdict both harnesses use (Story 44.8): inspect `intersystems.servers` in `scope` (the scope
+   * `getServerSpec` would read) and apply {@link isUserScopedServer}. Never throws.
+   */
+  private inspectServerScope(serverName: string, scope: ConfigScope | undefined): ServerScopeVerdict {
+    let inspection: ServerManagerServersInspection | undefined;
+    try {
+      inspection = this.deps.inspectServerManagerServers?.(scope);
+    } catch {
+      return "uninspectable";
+    }
+    if (typeof inspection !== "object" || inspection === null) return "uninspectable";
+    if (isUserScopedServer(inspection, serverName)) return "user";
+    const definedNowhere = INSPECTION_LAYERS.every((name) => {
+      const layer: unknown = inspection[name];
+      if (layer === undefined) return true;
+      return typeof layer === "object" && layer !== null && !Object.prototype.hasOwnProperty.call(layer, serverName);
+    });
+    return definedNowhere ? "absent" : "not-user";
+  }
+
+  /**
+   * The non-secret connection of one Server Manager server, or `undefined` when it cannot be known without a session or
+   * the server is not defined in user settings alone (inspected in the same scope `getServerSpec` reads).
+   */
+  private async lookUpProvidedConnection(
+    api: ServerManagerApi,
+    serverName: string,
+    scope: ConfigScope | undefined,
+  ): Promise<ProvidedConnection | undefined> {
+    try {
+      if (this.inspectServerScope(serverName, scope) !== "user") return undefined;
+      const spec = await api.getServerSpec(serverName, scope, undefined, { hideFromRecents: true });
+      if (!spec || typeof spec.webServer !== "object" || spec.webServer === null) return undefined;
+      const username = typeof spec.username === "string" ? spec.username : "";
+      if (username.trim() === "") return undefined;
+      const { host, port, https } = deriveConnection(spec);
+      return { host, port, https, username };
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -366,6 +550,7 @@ export class LauncherProvider {
           label: plan.label,
           command: NPX_COMMAND,
           args: ["-y", pinnedSpec(PACKAGE_NPM_NAME[plan.packageKey])],
+          env: {},
         });
         acceptedPlans.push({ plan, localSpawn: false });
       }
@@ -467,7 +652,7 @@ export class LauncherProvider {
       // entire fail-closed, legible-failure design. The interpreter the
       // extension is running in always exists. `resolveEnvForLabel` adds the
       // ELECTRON_RUN_AS_NODE=1 variable for these plans.
-      definitions.push({ label: plan.label, command: process.execPath, args: [entryPoint] });
+      definitions.push({ label: plan.label, command: process.execPath, args: [entryPoint], env: {} });
       acceptedPlans.push({ plan, localSpawn: true });
     }
 
@@ -489,9 +674,21 @@ export class LauncherProvider {
    * provide -> resolve hop and is unique by construction, see `definitions.ts`).
    *
    * Returns `undefined` (never throws) when the server should not be started:
-   * an unknown label, a Server Manager definition that no longer exists, or a
-   * user-cancelled credential prompt. Every `undefined` path surfaces exactly
-   * ONE `showWarning` call — never a toast storm, never a retry loop.
+   * an unknown label, a Server Manager definition that no longer exists, a
+   * server that is not defined in user settings alone (or whose settings could
+   * not be inspected; Story 44.8, DW-752), or a user-cancelled credential
+   * prompt. Every `undefined` path surfaces exactly ONE `showWarning` call,
+   * except a cancelled token (on entry, or between the servers of a plan),
+   * which returns silently — never a toast storm, never a retry loop.
+   *
+   * Story 44.8 (DW-752): before ANY credential step, every server of the plan
+   * must be user-scoped ({@link isUserScopedServer}, inspected in the scope it
+   * was enumerated in; a server no layer defines gets the no-such-server
+   * warning). Otherwise nothing is started and Server Manager's
+   * `getServerSpec`/`getAccount`/`getSession` are never called: its session
+   * is keyed by server name and username only, and its own session check
+   * sends the stored password to the MERGED host, which a workspace's
+   * `settings.json` may have chosen.
    */
   async resolveEnvForLabel(
     label: string,
@@ -527,6 +724,34 @@ export class LauncherProvider {
       return undefined;
     }
 
+    // A cancellation already pending on entry is silent, and precedes the guard.
+    if (token?.isCancellationRequested) {
+      return undefined;
+    }
+    // Story 44.8 (DW-752): the user-scope guard, for EVERY server of the plan before the first credential step, so a
+    // refused plan never prompts and never reaches Server Manager's credential API. The first refused server in plan
+    // order is named. The texts carry no secret.
+    for (const serverName of plan.serverNames) {
+      const verdict = this.inspectServerScope(serverName, this.scopesByServerName.get(serverName));
+      if (verdict === "user") continue;
+      if (verdict === "absent") {
+        this.deps.showWarning(noSuchServerWarning(label, serverName));
+        return undefined;
+      }
+      this.deps.showWarning(
+        verdict === "not-user"
+          ? `IRIS MCP Launcher: "${label}" was not started — IRIS server "${serverName}" is defined or overridden in ` +
+              `this workspace's settings (an intersystems.servers entry in a workspace, folder or language-specific ` +
+              `settings layer), so its stored password was not used: a workspace must not choose where that ` +
+              `password is sent. Define the server in your user settings under a name no workspace settings use, ` +
+              `and select that name in irisMcpLauncher.servers.`
+          : `IRIS MCP Launcher: "${label}" was not started — the intersystems.servers settings that define IRIS ` +
+              `server "${serverName}" could not be inspected, so its stored password was not used. Try reloading ` +
+              `the window.`,
+      );
+      return undefined;
+    }
+
     const profiles: ResolvedConnectionProfile[] = [];
     /** Per-server, so a multi-server plan attributes each prefix to the server that actually declared it. */
     const ignoredPathPrefixes: { serverName: string; pathPrefix: string }[] = [];
@@ -556,10 +781,7 @@ export class LauncherProvider {
         return undefined;
       }
       if (result.status === "no-spec") {
-        this.deps.showWarning(
-          `IRIS MCP Launcher: "${label}" was not started — Server Manager has no server named ` +
-            `"${serverName}" (it may have been renamed or removed; try reloading the window).`,
-        );
+        this.deps.showWarning(noSuchServerWarning(label, serverName));
         return undefined;
       }
       if (result.status === "no-username") {

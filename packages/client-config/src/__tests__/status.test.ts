@@ -92,13 +92,17 @@ describe("status matrix over the sandbox tree", () => {
     expect(userScope?.foreign).toEqual(["developer"]);
   });
 
-  it("vscode: malformed file yields per-client unparseable, never a crash (AC 33.0.4)", () => {
+  it("vscode: a malformed OLD mcp.json yields an unparseable legacy file, never a crash (AC 33.0.4, Story 44.2)", () => {
     const vscode = run().clients.find((c) => c.client === "vscode");
     const userScope = vscode?.scopes.find((s) => s.scope === "user");
-    expect(userScope?.file).toBe("unparseable");
-    expect(userScope?.error?.length).toBeGreaterThan(0);
+    // The Copilot user file is absent; the malformed old Local-harness file is reported beside it.
+    expect(userScope?.file).toBe("missing");
     expect(userScope?.servers).toEqual([]);
     expect(userScope?.foreign).toEqual([]);
+    expect(userScope?.legacy).toHaveLength(1);
+    expect(userScope?.legacy?.[0]?.file).toBe("unparseable");
+    expect(userScope?.legacy?.[0]?.error?.length).toBeGreaterThan(0);
+    expect(userScope?.legacy?.[0]?.servers).toEqual([]);
     // The rest of the matrix is unaffected by one unparseable client.
     const report = run();
     expect(report.clients.find((c) => c.client === "claude-code")?.scopes[0]?.file).toBe("ok");

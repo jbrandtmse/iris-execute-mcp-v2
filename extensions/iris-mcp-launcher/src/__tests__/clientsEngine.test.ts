@@ -349,7 +349,7 @@ describe("parseAvailableModes", () => {
   const BARE_HELP = `
   --mode <mode>         Entry synthesis mode (default: env-reference). Modes
                         available on THIS host:
-      env-reference    \${VAR} / \${env:VAR} references (VS Code: native inputs for the password)
+      env-reference    \${VAR} references resolved from the environment the client was launched with
       explicit         literal values; a literal IRIS_PASSWORD needs --confirm-secret <entry-name>
       (2 mode(s) unavailable on this host are hidden; run with the host probe satisfied —
       server-manager: IRIS_SERVER_MANAGER is unset and no intersystems.servers definitions were found at the standard VS Code settings locations
@@ -359,7 +359,7 @@ describe("parseAvailableModes", () => {
   // And with both probes satisfied (governance-file + server-manager lines listed).
   const FULL_HELP = `
                         available on THIS host:
-      env-reference    \${VAR} / \${env:VAR} references (VS Code: native inputs for the password)
+      env-reference    \${VAR} references resolved from the environment the client was launched with
       explicit         literal values; a literal IRIS_PASSWORD needs --confirm-secret <entry-name>
       server-manager   IRIS_SERVER_MANAGER=auto — connections from Server Manager profiles
       governance-file  IRIS_GOVERNANCE_FILE=<path> — governance from a shared file

@@ -46,6 +46,7 @@ import {
   isBodyKind,
   type BodyKind,
   type BodyPolicyOutcome,
+  type ConfirmationScope,
   type DataPolicy,
   type DataPolicySummary,
   type ToolDefinition,
@@ -622,7 +623,7 @@ export const messageResendTool: ToolDefinition = {
       // execute goes out as before. A preview that fails any other way (a timeout, a connection error, a 5xx, a
       // cancel) ends the call with that error and sends nothing: the person cannot be shown what would be resent.
       if (input.dryRun === false && input.confirm === true) {
-        const preview = async (): Promise<string | undefined> => {
+        const preview = async (): Promise<ConfirmationScope | undefined> => {
           try {
             const previewBody: Record<string, unknown> = { ...body, dryRun: true };
             delete previewBody.confirm;
@@ -632,10 +633,19 @@ export const messageResendTool: ToolDefinition = {
             const { matchCount, maxMessages } = found;
             if (typeof matchCount !== "number" || typeof maxMessages !== "number") return undefined;
             if (matchCount < 1 || matchCount > maxMessages) return undefined;
-            return (
-              `${matchCount} message(s) match now (status ${found.status}, from ${found.from} to ${found.to}); ` +
-              `IRIS counts again when it runs and resends at most ${maxMessages}`
-            );
+            // The person approves the filter and the cap. The count, and a `to` that IRIS filled in (the current second, for
+            // an omitted or empty `to`), change from round to round, so the binding leaves them out; IRIS counts again when it runs.
+            return {
+              text:
+                `${matchCount} message(s) match now (status ${found.status}, from ${found.from} to ${found.to}); ` +
+                `IRIS counts again when it runs and resends at most ${maxMessages}`,
+              binding: {
+                status: found.status,
+                from: found.from,
+                to: input.to === undefined || input.to === "" ? undefined : found.to,
+                maxMessages,
+              },
+            };
           } catch (error: unknown) {
             if (error instanceof IrisApiError && error.statusCode < 500) return undefined;
             throw error;

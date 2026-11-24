@@ -57,6 +57,7 @@ import {
 } from "./bootstrap-guard-legs.js";
 import {
   SETUP_DOCUMENT,
+  isCompileCheckQuery,
   startStatefulFakeAtelier,
   summarizeRequests,
   type FakeRequest,
@@ -125,8 +126,16 @@ function guardReads(summary: ReturnType<typeof summarizeRequests>): string[] {
 function assertServerRequests(expectation: Expectation, window: readonly FakeRequest[], names: readonly string[]): void {
   const summary = summarizeRequests(window);
   const versionReads = summary.queries.filter((query) => query === VERSION_QUERY).length;
-  const writes = summary.queries.filter((query) => query !== VERSION_QUERY && query !== IS_CONFIGURED_QUERY && query !== UNIT_TEST_ROOT_QUERY);
+  // The compile check (Story 44.4) reads: its dictionary query is not a write, and it is pinned apart below.
+  const checkQueries = summary.queries.filter(isCompileCheckQuery);
+  const checkDocnames = summary.others.filter((other) => /\/docnames\/CLS$/.test(other));
+  const writes = summary.queries.filter(
+    (query) => query !== VERSION_QUERY && query !== IS_CONFIGURED_QUERY && query !== UNIT_TEST_ROOT_QUERY && !isCompileCheckQuery(query),
+  );
   expect(writes, "no Configure or mapping statement is issued: the instance was seeded configured").toEqual([]);
+  const expectedChecks = expectation === "upgraded" || expectation === "current" ? 1 : 0;
+  expect(checkQueries, `the compile check's dictionary query runs only after a compile or on a current start (${expectation})`).toHaveLength(expectedChecks);
+  expect(checkDocnames, `and so does its one docnames read (${expectation})`).toHaveLength(expectedChecks);
   if (expectation === "newer" || expectation === "foreign") {
     expect(summary.puts, "no PUT").toEqual([]);
     expect(summary.compiles, "no compile").toBe(0);
@@ -154,7 +163,7 @@ function assertServerRequests(expectation: Expectation, window: readonly FakeReq
   }
   expect(summary.puts, "no PUT").toEqual([]);
   expect(summary.compiles, "no compile").toBe(0);
-  expect(summary.queries, "the probe and the IsConfigured check only").toEqual([VERSION_QUERY, IS_CONFIGURED_QUERY]);
+  expect(summary.queries.filter((query) => !isCompileCheckQuery(query)), "the probe and the IsConfigured check only, besides the compile check").toEqual([VERSION_QUERY, IS_CONFIGURED_QUERY]);
   expect(guardReads(summary), "a current deployment makes no ownership read").toEqual([]);
 }
 

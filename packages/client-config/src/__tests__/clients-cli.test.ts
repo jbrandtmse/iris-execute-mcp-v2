@@ -197,7 +197,7 @@ describe("AC 33.2-I1 — the CLI re-implements no engine logic (mechanical pin)"
     }
     const core = readFileSync(new URL("../cli/clients.ts", import.meta.url), "utf8");
     // The engine surface is CONSUMED, not re-implemented (33.2-I1).
-    for (const fn of ["apply", "enable", "disable", "remove", "restore", "ensureInputs"]) {
+    for (const fn of ["apply", "enable", "disable", "remove", "restore", "previewLegacyRemoval", "sharedWriteVerdict"]) {
       expect(core).toContain(`../engine.js`);
       expect(core).toMatch(new RegExp(`\\b${fn}\\b`));
     }
@@ -554,19 +554,32 @@ describe("apply", () => {
     expect(h2.fs.readFile(`${HOME}/.claude.json`)).toContain(`"IRIS_GOVERNANCE_FILE": "${HOME}/gov.json"`);
   });
 
-  it("VS Code env-reference apply merges the native inputs descriptor (the 33.2 seam)", async () => {
+  it("VS Code env-reference apply writes the Copilot user file with ${IRIS_PASSWORD}, no inputs, and says so in the envelope (Story 44.2)", async () => {
     const h = harness();
-    h.fs.seed(
-      `${HOME}/.config/Code/User/mcp.json`,
-      `{\n  "inputs": [\n    {\n      "type": "promptString",\n      "id": "other-input",\n      "description": "keep me",\n      "password": false\n    }\n  ],\n  "servers": {}\n}\n`,
-    );
+    expect(await h.run(["apply", "--client", "vscode", "--servers", "iris-dev-mcp", "--yes", "--json"])).toBe(0);
+    const written = h.fs.readFile(`${HOME}/.copilot/mcp-config.json`);
+    const parsed = JSON.parse(written) as { mcpServers: Record<string, { env: Record<string, string>; type: string; tools: string[] }> };
+    expect(parsed.mcpServers["iris-dev-mcp"]?.type).toBe("stdio");
+    expect(parsed.mcpServers["iris-dev-mcp"]?.tools).toEqual(["*"]);
+    expect(parsed.mcpServers["iris-dev-mcp"]?.env["IRIS_PASSWORD"]).toBe("${IRIS_PASSWORD}");
+    expect(written).not.toContain("input:");
+    expect(written).not.toContain("env:");
+    expect(parsed).not.toHaveProperty("inputs");
+    const payload = JSON.parse(h.stdout.text) as { data: { inputsMerged: string[] } };
+    expect(payload.data.inputsMerged).toEqual([]);
+  });
+
+  it("VS Code apply moves an owned entry out of the old profile mcp.json and keeps its foreign bytes and inputs (Story 44.2)", async () => {
+    const h = harness();
+    const old = `{\n  "inputs": [\n    { "id": "iris-password", "type": "promptString", "password": true }\n  ],\n  "servers": {\n    "keep-me": { "command": "x" },\n    "iris-dev-mcp": { "command": "npx", "env": { "IRIS_PASSWORD": "\${input:iris-password}" } }\n  }\n}\n`;
+    h.fs.seed(`${HOME}/.config/Code/User/mcp.json`, old);
     expect(await h.run(["apply", "--client", "vscode", "--servers", "iris-dev-mcp", "--yes"])).toBe(0);
-    const written = h.fs.readFile(`${HOME}/.config/Code/User/mcp.json`);
-    expect(written).toContain('"iris-dev-mcp"');
-    expect(written).toContain('"id": "iris-password"'); // merged descriptor
-    expect(written).toContain('"id": "other-input"'); // existing descriptor preserved
-    expect(written).toContain('"${input:iris-password}"');
-    expect(h.stdout.text).toContain("merged native inputs descriptor(s): iris-password");
+    expect(h.fs.readFile(`${HOME}/.copilot/mcp-config.json`)).toContain("iris-dev-mcp");
+    const after = h.fs.readFile(`${HOME}/.config/Code/User/mcp.json`);
+    expect(after).not.toContain("iris-dev-mcp");
+    expect(after).toContain(`    "keep-me": { "command": "x" }`);
+    expect(after).toContain(`    { "id": "iris-password", "type": "promptString", "password": true }`);
+    expect(h.stdout.text).toContain("removed iris-dev-mcp from the old location");
   });
 
   it("an unparseable target file refuses (exit 1) and stays byte-identical", async () => {
@@ -1046,34 +1059,25 @@ describe("--help mode gating", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
-// ensureInputs engine op (the 33.2 seam, engine-side).
+// The vscode user file is strict JSON (Story 44.2).
 // ════════════════════════════════════════════════════════════════════
 
-describe("ensureInputs (engine op)", () => {
-  it("is idempotent: a descriptor whose id is present is left untouched", async () => {
-    const h = harness();
-    h.fs.seed(
-      `${HOME}/.config/Code/User/mcp.json`,
-      `{\n  "inputs": [\n    {\n      "type": "promptString",\n      "id": "iris-password",\n      "description": "customized by the user",\n      "password": true\n    }\n  ],\n  "servers": {}\n}\n`,
-    );
-    expect(await h.run(["apply", "--client", "vscode", "--servers", "iris-dev-mcp", "--yes"])).toBe(0);
-    const written = h.fs.readFile(`${HOME}/.config/Code/User/mcp.json`);
-    expect(written).toContain("customized by the user"); // user's descriptor survives
-    expect((written.match(/"id": "iris-password"/g) ?? []).length).toBe(1); // no duplicate
+describe("vscode user file (strict JSON)", () => {
+  it("refuses a user file with a comment or a trailing comma at validate, and writes nothing", async () => {
+    for (const bad of [`// note\n{ "mcpServers": {} }\n`, `{ "mcpServers": { "a": { "command": "x" }, } }\n`]) {
+      const h = harness();
+      h.fs.seed(`${HOME}/.copilot/mcp-config.json`, bad);
+      expect(await h.run(["apply", "--client", "vscode", "--servers", "iris-dev-mcp", "--yes"])).toBe(1);
+      expect(h.fs.readFile(`${HOME}/.copilot/mcp-config.json`)).toBe(bad);
+    }
   });
 
-  it("refuses for a non-vscode client (native inputs are a VS Code concept)", async () => {
-    const { ensureInputs } = await import("../engine.js");
-    const fs = new MemFs();
-    const result = ensureInputs(
-      { platform: "linux", env: {}, homeDir: HOME },
-      "claude-code",
-      "user",
-      [{ id: "x", type: "promptString", description: "d", password: true }],
-      { fs },
-    );
-    expect(result.ok).toBe(false);
-    expect(result.reason).toContain("VS Code concept");
+  it("a second apply of the same entry is a no-op (idempotent)", async () => {
+    const h = harness();
+    expect(await h.run(["apply", "--client", "vscode", "--servers", "iris-dev-mcp", "--yes"])).toBe(0);
+    const first = h.fs.readFile(`${HOME}/.copilot/mcp-config.json`);
+    expect(await h.run(["apply", "--client", "vscode", "--servers", "iris-dev-mcp", "--yes"])).toBe(0);
+    expect(h.fs.readFile(`${HOME}/.copilot/mcp-config.json`)).toBe(first);
   });
 });
 

@@ -144,6 +144,19 @@ Code documentation:
   2026-07-25 via `gh issue view 47344 --repo anthropics/claude-code`: `state: CLOSED`,
   `stateReason: NOT_PLANNED`.)
 
+**Where the MCP Clients view writes for VS Code (Copilot).** Since the Copilot harness became the default (VS Code 1.143), the **MCP Clients view** wires the suite into the files that harness reads itself, not into VS Code's own `mcp.json`: the user file `~/.copilot/mcp-config.json` (`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set; on Windows `%USERPROFILE%\.copilot\mcp-config.json`) and the workspace-root `.mcp.json`, which Claude Code reads too (an entry in it belongs to the client that wrote it, and the other client is refused with the reason; to switch a server between the two clients, remove it with its owner first, then apply it with the other; configure one client per server). Entries the manager wrote into the old `mcp.json` files (the Local harness, which VS Code removes in February 2027) are reported, and the next apply moves them. The Copilot harness has no password prompt, so start VS Code from an environment that has the `IRIS_*` variables. The `server-manager` mode writes only `IRIS_SERVER_MANAGER` and `IRIS_SM_SERVERS` and no secret: the OS keychain supplies the passwords of the Server Manager connections it adds, not the base one. The server's `default` profile still reads the base `IRIS_*` variables at startup, `IRIS_PASSWORD` included, so they must be in that environment too.
+
+**The servers this extension registers in a Copilot-harness session.** Under the Copilot harness VS Code forwards each registered definition as the extension provided it and never runs this extension's resolve step, which is where the Local harness gets its password. So every definition this extension provides for a single Server Manager server carries what it can know without prompting: `IRIS_HOST`, `IRIS_PORT`, `IRIS_HTTPS`, `IRIS_USERNAME` and `IRIS_NAMESPACE` (the namespace setting), the governance and visibility settings you set, and `IRIS_CREDENTIAL_NAME=<server name>`. It never carries a password: VS Code stores provided definitions in workspace storage and in copies for the harness, so a secret in one would be written to several files. The server reads its password from the OS keychain entry of that name instead.
+
+- **One-time step.** Run `npx -y -p @iris-mcp/shared@1 iris-mcp-credentials set <server name>` (the Server Manager server's name, exactly as in `intersystems.servers`; the command is plain `iris-mcp-credentials set <server name>` when `@iris-mcp/shared` is installed globally) once per machine and enter the password at the hidden prompt. The `iris-mcp-credentials` CLI is documented in the [root README](../../README.md#iris-mcp-credentials-cli); a server with no stored entry fails to start and says which command to run. The same entry also serves the Server Manager import of the suite's `IRIS_SERVER_MANAGER=auto`. In a Copilot-harness session the password comes from the OS keychain only: this extension sets `IRIS_CREDENTIAL_HELPER` to an empty value in what it provides (it owns that variable), so a credential helper cannot stand in for a keychain there.
+- **Only servers defined in your user settings get a connection.** The password is chosen by the server's name, so a server whose `intersystems.servers` entry is defined or changed by a workspace or folder `settings.json` (or a `.code-workspace` file) keeps the empty environment in a Copilot-harness session: a repository you open can never point your stored password at another host. Define the server in your user settings, under a name no workspace settings use, to use it there. The Local harness refuses such a server in the same way: its resolve step does not start it and shows one warning that names the workspace override (see Credential handling).
+- **Non-secret values are persisted.** The host, port, username and namespace in a provided definition are saved by VS Code (workspace storage, and the files it writes for the Copilot harness). Under the Local harness the resolve step replaces the provided environment entirely, so the Local spawn environment of a server defined in your user settings alone is unchanged.
+- **`combineProfiles` works under the Local harness only.** Its definitions keep an empty environment, so a Copilot-harness session starts them with no connection settings. Leave `combineProfiles` off for Copilot sessions.
+- **A server without a `username` in `intersystems.servers` is not supported in a Copilot-harness session.** The username is not known without a sign-in, which a provided definition may not trigger, so that definition also keeps the empty environment. Add `username` to the server's definition. The provided definition is built when the launcher provides its servers, so after you edit a server's host, port or username in `intersystems.servers`, reload the window for a Copilot-harness session to pick the change up.
+- **Residual risks.** The Copilot harness drops `null` environment entries instead of unsetting the variable, so this extension overrides the variables it owns with an empty string, which every one of them reads as "not configured". Two cases remain: `IRIS_AUDIT_LOG_MAX_MB` (an empty value would stop a server that has `IRIS_AUDIT_LOG` set, so it is left unset), and every variable the extension does not own (`IRIS_TIMEOUT`, the `IRIS_SQL_*` settings and so on), which a server inherits if the Copilot runtime passes its own environment to the child. Whether it does is not yet verified in a signed-in Copilot session (the owner's checklist, Story 44.6).
+
+The wired files above are not affected by any of this: they are read by the harness itself.
+
 **If you use Claude Code**, this extension has nothing for you — use the suite's other Epic 31 path instead:
 [Server Manager connections](../../README.md#server-manager-connections-optional) (`IRIS_SERVER_MANAGER=auto`),
 the credential chain (OS keychain / `IRIS_CREDENTIAL_HELPER` / `IRIS_PROFILES`), and the `iris-mcp-credentials`
@@ -257,8 +270,8 @@ The mode picker offers only what the host can actually support (the CLI probes a
 
 | Mode | What it writes | Needs |
 | --- | --- | --- |
-| `env-reference` (default) | `${IRIS_PASSWORD}`-style references, or a native `${input:iris-password}` prompt on VS Code | The client must see real `IRIS_*` env vars at launch (VS Code prompts instead) |
-| `server-manager` | `IRIS_SERVER_MANAGER=auto` — connections from Server Manager, passwords from the OS keychain | Epic 31 path; nothing secret in the file |
+| `env-reference` (default) | `${IRIS_PASSWORD}`-style references. On VS Code (Copilot) too: there is no `${env:...}` form and no password prompt, because the Copilot harness forwards neither | The client must see real `IRIS_*` env vars at launch (for VS Code, the environment it was started from: restart VS Code from a shell that has them set; `server-manager` does not replace them for the `default` profile) |
+| `server-manager` | `IRIS_SERVER_MANAGER=auto` and `IRIS_SM_SERVERS` only: the Server Manager connections are added, with passwords from the OS keychain | Epic 31 path; nothing secret in the file. The server's `default` profile still needs the base `IRIS_*` variables at startup, `IRIS_PASSWORD` included, so the client must see them too |
 | `governance-file` | `IRIS_GOVERNANCE_FILE=<path>` | An existing governance file (see the [Governance editor](#governance-editor)) |
 | `explicit` | A literal password | A typed confirmation; the entry is marked `contains-secret` |
 
@@ -350,7 +363,21 @@ path instead, which does support it.
 ## Credential handling
 
 - Credentials resolved from Server Manager / `vscode.authentication` are handed to VS Code **only** as the
-  `env` of the spawned `npx` child process, at the moment that server is started.
+  `env` of the spawned `npx` child process, at the moment that server is started. That is the Local harness's resolve
+  step. The definitions this extension _provides_ (what a Copilot-harness session spawns) never carry a password or a
+  session token: they hold the non-secret `IRIS_*` settings and `IRIS_CREDENTIAL_NAME`, and the server reads the password
+  from the OS keychain entry you stored with `iris-mcp-credentials set <server name>`. The provide path calls
+  `getServerSpec` only; it never reads the spec's password and never calls `getAccount` or `getSession`, so it cannot
+  prompt (`src/__tests__/containment.test.ts` pins both).
+- **The Local resolve step starts only servers defined in your user settings alone** (Story 44.8, DW-752). Server Manager
+  keeps a stored password per server name and username, and it reads a server's host from the merged `intersystems.servers`
+  setting, which a workspace, folder or language-specific `settings.json` can override. So before any credential step the
+  resolve step checks every server of the plan, and one that any workspace-scope layer defines or overrides (or whose
+  settings cannot be inspected) is not started: the extension never calls Server Manager's `getServerSpec`,
+  `getAccount` or `getSession` for it, so the stored password is not used and nothing prompts. One warning names the
+  server and says what to do: define it in your user settings under a name no workspace settings use, and select that name in
+  `irisMcpLauncher.servers`. A server defined only in a workspace's settings (a team's committed `.vscode/settings.json`) is
+  refused too. A server defined in user settings alone resolves exactly as before.
 - This extension never calls a write API with a credential: no `context.globalState.update(...)`, no
   `context.workspaceState.update(...)`, no `vscode.workspace.getConfiguration(...).update(...)`, no
   `SecretStorage.store(...)`, and no log/output-channel write ever receives a resolved password or session

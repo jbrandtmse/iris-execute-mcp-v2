@@ -52,13 +52,54 @@ iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--dry
   unmanaged keys on the entry (Cline `autoApprove`/`timeout`, Codex
   `startup_timeout_sec`, …) and its enablement state are preserved — an
   apply never re-enables a `disabled` entry (Story 33.5).
-- Modes: `env-reference` (default; VS Code gets the native `inputs` password
-  upgrade, merged on apply), `explicit` (literal values — the password comes
+- Modes: `env-reference` (default; `${VAR}` references that the client resolves from the
+  environment it was launched with), `explicit` (literal values — the password comes
   from `--password-stdin` or a hidden prompt, NEVER argv, behind the
   `--confirm-secret <entry-name>` typed confirmation), `server-manager` and
   `governance-file` (host-probed: offered in `--help` only when Server
   Manager definitions or a governance file are actually discoverable, and
   refused with an explanatory exit 2 when forced while unavailable).
+- **VS Code (Copilot)** (Story 44.2). The `vscode` adapter writes the files the Copilot
+  harness (the default since VS Code 1.143) reads itself, not VS Code's own `mcp.json`
+  (the Local harness, which VS Code removes in February 2027):
+  - user scope: `~/.copilot/mcp-config.json` on every OS (on Windows
+    `%USERPROFILE%\.copilot\mcp-config.json`), or `$COPILOT_HOME/mcp-config.json` when
+    `COPILOT_HOME` is set and non-empty. The file is strict JSON (VS Code reads it with
+    `JSON.parse`), so a file with a comment or a trailing comma is refused, and a user entry is
+    `{type: "stdio", command, args, env, tools: ["*"]}`;
+  - project scope: the workspace-root `.mcp.json`, keyed `mcpServers`, with the same entry
+    `claude-code` writes there. Claude Code reads that file too, so each entry has one owner,
+    the client that wrote it, and the other client is **refused**: its `apply` (an identical
+    entry included), `disable`, `enable` and `remove` of that entry exit 1 and write nothing.
+    Nothing is ever adopted. Configuring both clients for one project means picking one client
+    per server; to switch, `remove` the entry with its owner, then `apply` it with the other
+    client. An iris-mcp entry that no record names for this file belongs to Claude Code. A
+    `restore` whose backup would change an entry the other client owns is refused the same way.
+    The owner's `disable` or `remove` says that the other client reads the same file. `detect`,
+    `status` and `doctor` list the file under both clients and check it once. Ownership is kept
+    per project file: a record or a disabled entry from another project never counts, and after
+    a project folder is moved or renamed, `enable` finds nothing to enable there and VS Code's
+    entries there belong to Claude Code: `remove` them with `claude-code`, then `apply` with
+    `vscode`.
+  - There is no password prompt and no `inputs` array: the Copilot harness cannot forward
+    either. `env-reference` writes `"IRIS_PASSWORD": "${IRIS_PASSWORD}"`, which VS Code resolves
+    from the environment it was launched with (restart VS Code from a shell that has the
+    `IRIS_*` variables after changing them); `server-manager` writes no secret at all (the
+    server reads the passwords of the Server Manager connections from the OS keychain, while its
+    `default` profile still needs the base `IRIS_*` variables, `IRIS_PASSWORD` included, in that
+    environment); only `explicit` writes a literal.
+  - **Migration.** Entries the manager wrote into the old files (`.vscode/mcp.json` and the
+    profile `mcp.json`) are reported by `status` and `doctor` (check
+    `vscode-local-harness-entries`), and are not forwarded to Copilot sessions. The next
+    `apply --client vscode --scope S` writes the new file first and then, once it has
+    re-parsed clean, removes the owned entries from that scope's old file through the same
+    protocol (foreign entries, comments and `inputs` there stay byte-identical); `remove`
+    sweeps them too. A stash recorded before the move that holds `${env:...}` or `${input:...}`
+    is refused by `enable`, which names `apply` as the fix. A server whose entry in the shared
+    workspace `.mcp.json` belongs to Claude Code cannot be moved by `apply` (a refused verb writes
+    nothing, the old file included), and Copilot sessions already read that entry, so the copy in
+    the old file is unused: for that server `doctor` names deleting the entry from the old file
+    by hand instead of `apply`. The other servers keep the `apply` advice.
 - `doctor` diagnoses env-reference resolvability, config parseability,
   **config-surface drift** (below), stale backups, orphaned stashes,
   present `iris-`-namespaced entries that fail ownership (a state.json loss;
@@ -284,9 +325,10 @@ named `iris-mcp-all` are surfaced read-only (foreign), never modified.
   v1 flow, so this only bites a hand-edited comment placed inside one.
 - `synthesizeEntry` — canonical entries in four env modes (`server-manager`,
   `env-reference`, `governance-file`, `explicit`).
-- `ensureInputs` / `presentInputIds` — the VS Code native `inputs` merge
-  (the env-reference mode's `${input:iris-password}` upgrade), idempotent
-  and safety-protocol-wrapped.
+- `previewLegacyRemoval` / `sharedWriteVerdict` — the two read-only planners the CLI
+  preview uses: the owned entries an apply or remove takes out of a client's old files
+  (VS Code's Local-harness `mcp.json`), and the refusal verdict for an entry of a file two
+  clients share that the other client owns.
 
 ## v1 client roster
 
@@ -298,7 +340,7 @@ Goose, Kimi CLI (archived), Kimi Code, Pi, JetBrains Junie.
 
 <!-- ADAPTER-TABLE:BEGIN -->
 Paths, formats, and mechanisms below are GENERATED from `CLIENT_ADAPTERS`
-(adapter data 2026-11-21.1) by `scripts/render-certification-table.mjs` —
+(adapter data 2026-11-22.1) by `scripts/render-certification-table.mjs` —
 never hand-edit this section.
 
 | Client | Format | Root key | User config | Project config | Disable | Restart hint | Certification |
@@ -306,7 +348,7 @@ never hand-edit this section.
 | Claude Code (`claude-code`) | json | `mcpServers` | `~/.claude.json` (or $CLAUDE_CONFIG_DIR/.claude.json) | `.mcp.json` | manager stash | Restart Claude Code (or start a new session) for MCP changes to take effect. | **certified-live** 2026-11-22 (incl. agent CLI probe) against @iris-mcp/dev@1 → 1.1.0 |
 | Claude Desktop (`claude-desktop`) | json | `mcpServers` | win `%APPDATA%/Claude/claude_desktop_config.json`<br>mac `~/Library/Application Support/Claude/claude_desktop_config.json`<br>linux `~/.config/Claude/claude_desktop_config.json` | — | manager stash | Quit and relaunch Claude Desktop for MCP changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): after apply --client claude-desktop and a restart, the tools menu lists the server and one read call succeeds |
 | Cursor (`cursor`) | json | `mcpServers` | `~/.cursor/mcp.json` | `.cursor/mcp.json` | manager stash | Restart Cursor (or refresh the server from the MCP settings page) for changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): Settings > MCP shows the server green with its tools |
-| VS Code (Copilot) (`vscode`) | jsonc | `servers` | win `%APPDATA%/Code/User/mcp.json`<br>mac `~/Library/Application Support/Code/User/mcp.json`<br>linux `~/.config/Code/User/mcp.json` | `.vscode/mcp.json` | manager stash | Reload the VS Code window (Developer: Reload Window) or restart the server from the MCP view for changes to take effect. | **certified-live** 2026-11-22 (file-level; agent-side GUI stays manual) against @iris-mcp/dev@1 → 1.1.0<br>human-only (marked 2026-11-21): in Copilot agent mode the iris_* tools are listed and one read call (for example iris_server_info) succeeds |
+| VS Code (Copilot) (`vscode`) | json | `mcpServers` | `~/.copilot/mcp-config.json` (or $COPILOT_HOME/mcp-config.json) | `.mcp.json` | manager stash | Start a new Copilot chat session (or reload the VS Code window) for MCP changes to take effect. ${IRIS_*} references resolve from the environment VS Code was launched with, so restart VS Code from a shell that has those variables set. | **certified-live** 2026-11-22 (file-level; agent-side GUI stays manual) against @iris-mcp/dev@1 → 1.1.0<br>human-only (marked 2026-11-23): in a Copilot chat session the iris_* tools are listed and one read call (for example iris_server_info) succeeds, from ~/.copilot/mcp-config.json and from the workspace .mcp.json (owner runbook: D-6 of the Story 44.2 spec) |
 | Cline (`cline`) | json | `mcpServers` | win `%APPDATA%/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`<br>mac `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`<br>linux `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | — | native `disabled` flag | Reload the VS Code window (Developer: Reload Window) for Cline to pick up MCP changes. | **certified-live** 2026-11-22 (file-level; agent-side GUI stays manual) against @iris-mcp/dev@1 → 1.1.0<br>human-only (marked 2026-11-21): the Cline panel shows iris-dev-mcp with its tools |
 | Roo Code (discontinued) (`roo-code`) | json | `mcpServers` | win `%APPDATA%/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json`<br>mac `~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json`<br>linux `~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json` | `.roo/mcp.json` | native `disabled` flag | Reload the VS Code window (Developer: Reload Window) for Roo Code to pick up MCP changes. | fixture-only (residual risk) |
 | Devin Desktop (formerly Windsurf) (`windsurf`) | json | `mcpServers` | `~/.codeium/windsurf/mcp_config.json` | — | manager stash | Restart Devin Desktop (formerly Windsurf) for MCP changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): Devin Local shows the server from the legacy ~/.codeium/windsurf/mcp_config.json, which also confirms the import |
@@ -344,10 +386,10 @@ version `npm view` resolved it to (`@iris-mcp/dev@1 → 1.0.0`; `unresolved` whe
 failed). A client whose last step needs a person (a GUI listing, a CLI the harness cannot
 reach) keeps an optional `humanOnly` marker, `{check, markedOn}`, in its record, which the
 table shows as `human-only (marked <date>): <check>`; a malformed marker makes the render
-exit 2. Two mode notes for re-runs: the VS Code pass applies in
-**explicit mode with a dummy placeholder password** (a single write —
-env-reference would also merge a top-level `inputs[]` descriptor that
-`remove` does not roll back), and the Kimi Code agent leg needs a real
+exit 2. Two notes for re-runs: run the harness from a scratch project
+directory with a scratch `HOME`/`USERPROFILE` (and `COPILOT_HOME` unset), because a
+project-scope probe reads the shared `.mcp.json` of the directory it runs in;
+and the Kimi Code agent leg needs a real
 credential in the OS environment (`IRIS_PASSWORD`) because kimi-code does
 no env expansion — see its residual-risk note.
 
@@ -396,8 +438,8 @@ Repo `.mcp.json` sharing (Claude half, AC 33.4.4): **verified-live** (2026-07-28
 **certified-live** (2026-11-22, darwin/arm64) — scripted pass via `scripts/certify.mjs` (server used: `iris-dev-mcp`, against `@iris-mcp/dev@1 → 1.1.0`): add (engine apply) → client surfaces the entry → disable → entry inactive → remove → byte-exact restore + side-effect cleanup.
 
 Recorded evidence:
-- PASS snapshot — config 20 bytes; state.json absent; 0 pre-existing backup(s)
-- PASS add (engine apply) — iris-dev-mcp written to /private/tmp/claude-501/-Users-jbrandt-git-iris-execute-mcp-v2/03eb9a39-2d9e-4087-85ac-363a9bb86d2a/scratchpad/cert-home/Library/Application Support/Code/User/mcp.json
+- PASS snapshot — config 21 bytes; state.json absent; 0 pre-existing backup(s)
+- PASS add (engine apply) — iris-dev-mcp written to /private/tmp/claude-501/-Users-jbrandt-git-iris-execute-mcp-v2/03eb9a39-2d9e-4087-85ac-363a9bb86d2a/scratchpad/cert-home-44-2/.copilot/mcp-config.json
 - PASS client surfaces the entry — file-level: "iris-dev-mcp" present-enabled (agent-side tool listing stays a manual GUI step — not claimed)
 - $ iris-mcp-clients status --json → vscode iris-dev-mcp = present-enabled
 - PASS disable (engine)
@@ -405,9 +447,9 @@ Recorded evidence:
 - PASS remove (engine)
 - PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass
 
-Residual risk: File-level lifecycle certified live with iris-dev-mcp against the published @iris-mcp/dev@1 (1.1.0), under a scratch HOME (a seeded scratch mcp.json, not a person's real config). The agent-side tool listing (the Copilot MCP view) is a manual GUI step, never claimed here: it is the human-only check below (DW-442).
+Residual risk: The Copilot-harness paths (the new .mcp.json / ~/.copilot/mcp-config.json targets, legacy-file forwarding, precedence, and the launcher provider's keychain credential) are verified against VS Code 1.147.0 source and an emulated Agent Host only; no real Copilot session has been run (owner has no Copilot subscription, 2026-11-23).
 
-**human-only (marked 2026-11-21): in Copilot agent mode the iris_* tools are listed and one read call (for example iris_server_info) succeeds**
+**human-only (marked 2026-11-23): in a Copilot chat session the iris_* tools are listed and one read call (for example iris_server_info) succeeds, from ~/.copilot/mcp-config.json and from the workspace .mcp.json (owner runbook: D-6 of the Story 44.2 spec)**
 
 #### Cline (`cline`)
 
@@ -485,7 +527,7 @@ Residual risk: CLI/TUI half: certified live (file-level lifecycle + agent surfac
 AC 33.4.4 dual-surface:
 - CLI/TUI half: **verified-live** (2026-07-28) — user-scope pass certified live (see steps/evidence above); the agent surface (kimi -p, 0.29.0) called iris_server_info LIVE through the existing entries of the same ~/.kimi-code/mcp.json the manager writes (returned IRIS for Windows (x86-64) 2026.1 (Build 235U)); kimi -p listing answered exactly the user-scope servers (chrome-devtools, iris-admin-mcp, iris-data-mcp, iris-dev-mcp, iris-interop-mcp, iris-ops-mcp, perplexity).
 - VS Code extension half: **fixture-only-with-residual-risk** (2026-07-28) — the Kimi Code VS Code extension is NOT installed locally (code --list-extensions shows no kimi/moonshot extension, 2026-07-28) — per the stage brief this half is never claimed; per the extension docs it reads the same ~/.kimi-code/mcp.json, unproven live.
-- Repo `.mcp.json` sharing: Claude side verified-live (see claude-code record); Kimi side — FALSIFIED for kimi-code 0.29.0 as probed — official docs (moonshotai.github.io/kimi-code MCP customization) document ONLY .kimi-code/mcp.json as the project path (no .mcp.json fallback anywhere); live print-mode probes loaded NO project-scope server: a distinctive WORKING probe server (iris-sharing-probe, node dist entry) placed first in .mcp.json then in .kimi-code/mcp.json answered TOOL-NOT-LOADED to mcp__iris-sharing-probe__iris_server_info, even in a TUI-registered workspace. Consequence: the adapter data fallback was REMOVED (ADAPTER_DATA_VERSION 2026-07-25.2 → 2026-07-28.1, drift-fix data patch; adapter data is 2026-11-21.1 since Story 42.9); project-scope loading itself may be TUI-only (print mode loads user scope only) — residual risk recorded.
+- Repo `.mcp.json` sharing: Claude side verified-live (see claude-code record); Kimi side — FALSIFIED for kimi-code 0.29.0 as probed — official docs (moonshotai.github.io/kimi-code MCP customization) document ONLY .kimi-code/mcp.json as the project path (no .mcp.json fallback anywhere); live print-mode probes loaded NO project-scope server: a distinctive WORKING probe server (iris-sharing-probe, node dist entry) placed first in .mcp.json then in .kimi-code/mcp.json answered TOOL-NOT-LOADED to mcp__iris-sharing-probe__iris_server_info, even in a TUI-registered workspace. Consequence: the adapter data fallback was REMOVED (ADAPTER_DATA_VERSION 2026-07-25.2 → 2026-07-28.1, drift-fix data patch; adapter data is 2026-11-22.1 since Story 44.2); project-scope loading itself may be TUI-only (print mode loads user scope only) — residual risk recorded.
 
 **human-only (marked 2026-11-21): the Kimi Code VS Code extension (moonshot-ai.kimi-code) lists the server from ~/.kimi-code/mcp.json with IRIS_PASSWORD exported, and the Kimi Code CLI half runs ~/.kimi-code/bin/kimi, which the scratch-HOME harness cannot reach**
 

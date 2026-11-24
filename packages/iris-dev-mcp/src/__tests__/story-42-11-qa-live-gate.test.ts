@@ -361,7 +361,7 @@ describe("iris_env_promote execute of a class whose source copy keeps the target
     expect(confirm.mock.calls[0]?.[0]).toEqual({
       operation: "promote changes to another server",
       target: `server 'target', namespace ${IRIS_NAMESPACE}`,
-      scope: `1 step(s) from server 'source': #1 documents putAndCompile ${PROM_DOC}`,
+      scope: { text: `1 step(s) from server 'source': #1 documents putAndCompile ${PROM_DOC}`, binding: [] },
     });
     expect(put).toHaveBeenCalledTimes(1);
     expect(String(put.mock.calls[0]?.[0])).toBe(`${docPath(version, IRIS_NAMESPACE, PROM_DOC)}?ignoreConflict=1`);

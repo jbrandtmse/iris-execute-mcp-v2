@@ -38,7 +38,13 @@ const CONSUMERS: Record<string, Array<"wire" | "handler">> = {
 };
 
 /** The test files that pin or read the frozen bytes on purpose (and so may also name the frozen files). */
-const FROZEN_READERS = [`${TESTS}/story-43-4-sanctioned-golden-changes.test.ts`, `${TESTS}/story-43-4-qa-sanctioned-wire.test.ts`, `${TESTS}/story-43-4-qa-gate-guards.test.ts`];
+// Story 44.4 (wave-9 decision #148): the startup-section ledger test applies entries to the frozen handler golden, as the 43.4 ledger tests do.
+const FROZEN_READERS = [
+  `${TESTS}/story-43-4-sanctioned-golden-changes.test.ts`,
+  `${TESTS}/story-43-4-qa-sanctioned-wire.test.ts`,
+  `${TESTS}/story-43-4-qa-gate-guards.test.ts`,
+  `${TESTS}/story-44-4-qa-startup-ledger.test.ts`,
+];
 
 /** What names a frozen golden in code: the files and the two path constants the capture scripts export. */
 const RAW_TOKENS: Array<[string, RegExp]> = [

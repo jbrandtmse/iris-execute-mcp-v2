@@ -5,7 +5,8 @@
  * `<stateDir>/state.json` holds two rosters:
  *
  * - `entries`: manager-CREATED entries (`{client, scope, name, containsSecret,
- *   createdAt, updatedAt}`). This is the ownership ledger for AC 33.1.4: an
+ *   createdAt, updatedAt, path?}`; `path` is the resolved config file the entry
+ *   was written to, kept so a shared file's owners are told apart per file). This is the ownership ledger for AC 33.1.4: an
  *   entry whose name is outside the canonical iris-mcp namespace may only be
  *   modified when recorded here. Recorded on `apply`, dropped on `remove`.
  * - `stashes`: disabled stash-client entries (`{client, scope, name, entry,
@@ -22,6 +23,7 @@
 
 import path from "node:path";
 
+import { pathKey } from "./home-guard.js";
 import type { RawEntry } from "./readers.js";
 import type { AdapterPlatform, ClientScope, HostContext } from "./types.js";
 import type { WriteFs } from "./write.js";
@@ -35,6 +37,11 @@ export interface ManagedEntryRecord {
   containsSecret: boolean;
   createdAt: string;
   updatedAt: string;
+  /**
+   * The resolved absolute config file the entry was written to. Optional and additive: a record written before the
+   * path was recorded has none, and a shared-file rule never counts it as another client's (see `shared-files.ts`).
+   */
+  path?: string;
 }
 
 /** One stashed (disabled) entry — the spec §3.4 shape. */
@@ -45,6 +52,8 @@ export interface StashRecord {
   /** The parsed native entry exactly as it sat in the client file. */
   entry: RawEntry;
   disabledAt: string;
+  /** The resolved absolute config file the entry was disabled in; optional and additive, as on `ManagedEntryRecord`. */
+  path?: string;
 }
 
 export interface ManagerState {
@@ -120,26 +129,41 @@ export function writeState(fs: WriteFs, stateDir: string, platform: AdapterPlatf
   fs.writeFile(stateFilePath(stateDir, platform), JSON.stringify(state, null, 2) + "\n");
 }
 
-function sameSlot(client: string, scope: ClientScope, name: string) {
-  return (record: { client: string; scope: ClientScope; name: string }) =>
-    record.client === client && record.scope === scope && record.name === name;
+/** The config file a ledger call concerns: the platform decides how paths compare (case, separators). */
+export interface RecordFile {
+  platform: AdapterPlatform;
+  path: string;
+}
+
+/**
+ * The records of one (client, scope, name) slot that belong to `at`. Without `at` every record of the slot matches. With
+ * it, a record matches when it has no path (written before paths were recorded, so its file is unknown) or its path is
+ * the same file; a record of another project's file stays out of the way.
+ */
+function sameSlot(client: string, scope: ClientScope, name: string, at?: RecordFile) {
+  return (record: { client: string; scope: ClientScope; name: string; path?: string }) =>
+    record.client === client &&
+    record.scope === scope &&
+    record.name === name &&
+    (at === undefined || record.path === undefined || pathKey(at.platform, record.path) === pathKey(at.platform, at.path));
 }
 
 /** AC 33.1.4 ownership: recorded manager-created? */
-export function isManagerCreated(state: ManagerState, client: string, scope: ClientScope, name: string): boolean {
-  return state.entries.some(sameSlot(client, scope, name));
+export function isManagerCreated(state: ManagerState, client: string, scope: ClientScope, name: string, at?: RecordFile): boolean {
+  return state.entries.some(sameSlot(client, scope, name, at));
 }
 
 /** Record (or refresh) a manager-created entry. Returns a NEW state (inputs
  * are not mutated). */
 export function recordManaged(
   state: ManagerState,
-  record: { client: string; scope: ClientScope; name: string; containsSecret: boolean },
+  record: { client: string; scope: ClientScope; name: string; containsSecret: boolean; at?: RecordFile },
   now: Date,
 ): ManagerState {
   const iso = now.toISOString();
-  const entries = state.entries.filter((r) => !sameSlot(record.client, record.scope, record.name)(r));
-  const existing = state.entries.find(sameSlot(record.client, record.scope, record.name));
+  const slot = sameSlot(record.client, record.scope, record.name, record.at);
+  const entries = state.entries.filter((r) => !slot(r));
+  const existing = state.entries.find(slot);
   entries.push({
     client: record.client,
     scope: record.scope,
@@ -147,13 +171,14 @@ export function recordManaged(
     containsSecret: record.containsSecret,
     createdAt: existing?.createdAt ?? iso,
     updatedAt: iso,
+    ...(record.at !== undefined ? { path: record.at.path } : {}),
   });
   return { ...state, entries };
 }
 
 /** Drop a manager-created record (on remove). Returns a NEW state. */
-export function dropManaged(state: ManagerState, client: string, scope: ClientScope, name: string): ManagerState {
-  return { ...state, entries: state.entries.filter((r) => !sameSlot(client, scope, name)(r)) };
+export function dropManaged(state: ManagerState, client: string, scope: ClientScope, name: string, at?: RecordFile): ManagerState {
+  return { ...state, entries: state.entries.filter((r) => !sameSlot(client, scope, name, at)(r)) };
 }
 
 /** Find the stash record for one slot, if any. */
@@ -162,28 +187,30 @@ export function findStash(
   client: string,
   scope: ClientScope,
   name: string,
+  at?: RecordFile,
 ): StashRecord | undefined {
-  return state.stashes.find(sameSlot(client, scope, name));
+  return state.stashes.find(sameSlot(client, scope, name, at));
 }
 
 /** Add/replace a stash record (on disable). Returns a NEW state. */
 export function addStash(
   state: ManagerState,
-  record: { client: string; scope: ClientScope; name: string; entry: RawEntry },
+  record: { client: string; scope: ClientScope; name: string; entry: RawEntry; at?: RecordFile },
   now: Date,
 ): ManagerState {
-  const stashes = state.stashes.filter((r) => !sameSlot(record.client, record.scope, record.name)(r));
+  const stashes = state.stashes.filter((r) => !sameSlot(record.client, record.scope, record.name, record.at)(r));
   stashes.push({
     client: record.client,
     scope: record.scope,
     name: record.name,
     entry: record.entry,
     disabledAt: now.toISOString(),
+    ...(record.at !== undefined ? { path: record.at.path } : {}),
   });
   return { ...state, stashes };
 }
 
 /** Drop a stash record (on enable/remove). Returns a NEW state. */
-export function dropStash(state: ManagerState, client: string, scope: ClientScope, name: string): ManagerState {
-  return { ...state, stashes: state.stashes.filter((r) => !sameSlot(client, scope, name)(r)) };
+export function dropStash(state: ManagerState, client: string, scope: ClientScope, name: string, at?: RecordFile): ManagerState {
+  return { ...state, stashes: state.stashes.filter((r) => !sameSlot(client, scope, name, at)(r)) };
 }

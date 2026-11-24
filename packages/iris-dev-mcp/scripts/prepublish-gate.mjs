@@ -113,6 +113,11 @@ const gateTestFiles = [
   // values, a class that is new, the import of the tool's own export, a promotion whose source keeps the Storage): writes only the
   // disposable ExecuteMCPv2.Temp.QaStory4211NdLoad, ...NdNew, ...NdXml and ...NdProm documents (persistent, no data rows), and removes them.
   "src/__tests__/story-42-11-qa-live-gate.test.ts",
+  // Story 44.7 (DW-754, DW-755, DW-756): the compile check of `iris_doc_compile` (a partial failure, a wildcard, a clean compile),
+  // `iris_doc_load` with `compile: true` and `iris_env_promote` execute, and the evidence that the `iris_doc_xml_export` import names
+  // a failed class: writes only the disposable ExecuteMCPv2.Temp.QaStory447 documents (a failing class and persistent classes with no
+  // data rows), and removes them and any global that carries the name.
+  "src/__tests__/compile-check-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its

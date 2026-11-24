@@ -13,7 +13,7 @@
 
 import path from "node:path";
 
-import type { AdapterPlatform, ClientAdapter, ClientScope, HostContext, ScopeDef } from "./types.js";
+import type { AdapterPlatform, ClientAdapter, ClientScope, HostContext, LegacyScopeDef, ScopeDef } from "./types.js";
 
 /** The path module view for the simulated platform. */
 function pathFor(platform: AdapterPlatform): typeof path.win32 | typeof path.posix {
@@ -83,6 +83,43 @@ export function resolveScopePath(
     if (candidate !== null && exists(candidate)) return candidate;
   }
   return primary;
+}
+
+/**
+ * The adapter as one of its scopes sees it: the scope's `entryShape` and `strictJson` override the
+ * adapter's. An adapter whose scope sets neither is returned as is, so every other adapter's data and
+ * behavior are untouched.
+ */
+export function adapterForScope(adapter: ClientAdapter, scope: ClientScope): ClientAdapter {
+  const scopeDef = adapter.scopes.find((s) => s.scope === scope);
+  if (scopeDef === undefined || (scopeDef.entryShape === undefined && scopeDef.strictJson !== true)) return adapter;
+  return {
+    ...adapter,
+    ...(scopeDef.entryShape !== undefined ? { entryShape: scopeDef.entryShape } : {}),
+    ...(scopeDef.strictJson === true ? { strictJson: true } : {}),
+  };
+}
+
+/**
+ * The adapter as one of its legacy files sees it: the legacy format, root key and expansion, one scope
+ * holding the legacy path templates, and the standard entry shape. It is a read-only view for
+ * reading the old file and for removing owned entries from it.
+ */
+export function legacyAdapterView(adapter: ClientAdapter, legacy: LegacyScopeDef): ClientAdapter {
+  return {
+    ...adapter,
+    format: legacy.format,
+    rootKey: legacy.rootKey,
+    envExpansion: legacy.envExpansion,
+    entryShape: "standard",
+    scopes: [{ scope: legacy.scope, paths: legacy.paths, shareable: legacy.scope === "project" }],
+    detection: [],
+  };
+}
+
+/** The resolved path of one legacy file, or `null` when the context cannot resolve it (a project file with no project directory). */
+export function resolveLegacyPath(adapter: ClientAdapter, legacy: LegacyScopeDef, ctx: HostContext): string | null {
+  return resolveScopePath(legacyAdapterView(adapter, legacy), legacy.scope, ctx);
 }
 
 /** All candidate paths for a scope (primary + fallbacks), resolved, for

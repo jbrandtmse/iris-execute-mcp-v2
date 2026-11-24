@@ -131,7 +131,8 @@ function makeSandbox(): Sandbox {
           ? path.join(home, "AppData", "Roaming", "Block", "goose", "config", "config.yaml")
           : path.join(home, ".config", "goose", "config.yaml");
       case "vscode":
-        return path.join(vscodeUserRoot, "mcp.json");
+        // The Copilot user file (Story 44.2), with COPILOT_HOME unset.
+        return path.join(home, ".copilot", "mcp-config.json");
       case "cline":
         return path.join(vscodeUserRoot, "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json");
       case "roo-code":
@@ -693,16 +694,26 @@ describe("QA 33.5: comment-only JSONC lifecycle (built bin)", () => {
     expect(reparsed.mcpServers["iris-dev-mcp"]).toBeUndefined();
   }, T);
 
-  it("vscode: a block-comment-only mcp.json accepts an apply (the JSONC family's documented file form)", () => {
+  it("vscode: a block-comment-only Copilot user file is refused (VS Code reads it with JSON.parse), and nothing is written (Story 44.2)", () => {
     const sandbox = makeSandbox();
     const target = sandbox.seed("vscode", "/* user notes only */\n");
 
     const applied = sandbox.run(["apply", "--client", "vscode", "--servers", "iris-dev-mcp", "--yes"]);
-    expect(applied.status).toBe(0);
+    expect(applied.status).toBe(1);
+    expect(readFileSync(target, "utf8")).toBe("/* user notes only */\n");
+  }, T);
+
+  it("vscode: a block-comment-only project .mcp.json accepts an apply, exactly as claude-code does (the shared file, the JSONC-tolerant reader)", () => {
+    const sandbox = makeSandbox();
+    const target = path.join(sandbox.project, ".mcp.json");
+    writeFileSync(target, "/* project notes only */\n");
+
+    const applied = sandbox.run(["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"]);
+    expect(applied.status, `${applied.stdout}${applied.stderr}`).toBe(0);
     const text = readFileSync(target, "utf8");
-    expect(text.startsWith("/* user notes only */")).toBe(true);
-    const parsed = parseJsonc(text) as { servers: Record<string, Record<string, unknown>> };
-    expect(parsed.servers["iris-dev-mcp"]?.command).toBe("npx");
+    expect(text.startsWith("/* project notes only */")).toBe(true);
+    const parsed = parseJsonc(text) as { mcpServers: Record<string, Record<string, unknown>> };
+    expect(parsed.mcpServers["iris-dev-mcp"]?.command).toBe("npx");
 
     const statusJson = sandbox.run(["status", "--json"]);
     expect(statusRowState(parseEnvelope(statusJson), "vscode", "iris-dev-mcp")).toBe("present-enabled");

@@ -124,7 +124,7 @@
 # put new epic notes in epics.md, not here.
 
 generated: '2026-04-05'
-last_updated: '11-21-2026 23:01'
+last_updated: '11-24-2026 00:10'
 previous_update: '2026-09-16 (Story 37.1 dev complete via bmad-dev-story - ready-for-dev
   -> review. Fixed McpServerBase.start(): a default-profile health-check rejection
   no longer calls process.exit(1) - it logs (health-check-failed line + a new continuation
@@ -559,6 +559,17 @@ development_status:
   43-3-human-confirmation-through-elicitation: done
   43-4-sdk-v2-docs-smokes-and-capstone: done
   epic-43-retrospective: optional
+
+  epic-44: done
+  44-1-docdb-create-registers-the-database: done
+  44-2-vs-code-copilot-mcp-configuration-targets: done
+  44-3-confirmation-bound-to-the-scope-shown: done
+  44-4-bootstrap-compile-result-accuracy: done
+  44-5-integration-suites-cannot-pass-without-testing: done
+  44-6-launcher-provider-works-in-copilot-sessions: done
+  44-7-epic-44-burn-down: done
+  44-8-local-resolver-hands-a-password-only-to-user-scoped-servers: done
+  epic-44-retrospective: optional
 action_items:
   - id: "epic-38-retro-item-1-decide-whether-to-build-a-streamable-htt"
     epic: 38
@@ -566,7 +577,7 @@ action_items:
       use case and design authentication, bind address and sessions (AD-23); until
       then stdio stays the only transport (DW-538)"
     owner: "user"
-    status: open
+    status: done
     ref: ""
   - id: "epic-41-decision-sheet-item-1-correct-the-agent-rule-files-dw-615"
     epic: 41
@@ -577,7 +588,7 @@ action_items:
       back). The list is in DW-615 and spec-41-2 'Flagged for the retro'; agents never
       edit .claude/rules/* (DW-615)"
     owner: "user"
-    status: open
+    status: done
     ref: "DW-615"
   - id: "epic-43-decision-sheet-item-1-vs-code-copilot-confirmation-dialog-run"
     epic: 43
@@ -587,8 +598,11 @@ action_items:
       second-client check; the Inspector CLI covered the no-dialog fallback unattended
       (wave-8 decisions #25 and #32)"
     owner: "user"
-    status: open
+    status: done
     ref: "AC 43.4.1"
+    resolution: "closed by owner decision 2026-11-23: the owner has no Copilot subscription
+      and chose not to get one, so no Copilot-session run will happen (wave-9 decision
+      #149). Reopens only if the owner gets Copilot; not re-deferred (Rule #37)."
   - id: "epic-42-retro-item-4-charter-a-story-in-the-next-planned-epic"
     epic: 42
     action: "Charter a story in the next planned epic: bind a scope digest into the
@@ -596,8 +610,11 @@ action_items:
       so that drops iris_env_promote finds in the accepting round cannot be written
       without having been shown (DW-670)"
     owner: "user"
-    status: open
+    status: done
     ref: ""
+    resolution: "delivered by Story 44.3 (confirmation bound to the scope shown);
+      closed by the owner at the Epic 44 merge gate, 2026-11-23, with no retrospective
+      (wave-9 decision #153)"
   - id: "epic-42-retro-item-5-lead-add-to-project-rule-17-that-a-setup"
     epic: 42
     action: "Lead: add to project rule #17 that a Setup.cls hand-loaded from src/
@@ -605,7 +622,7 @@ action_items:
       delete ExecuteMCPv2.Setup and restart afterwards. Agents never edit .claude/rules/*
       (DW-678)"
     owner: "user"
-    status: open
+    status: done
     ref: ""
   - id: "epic-42-retro-item-6-charter-a-story-in-the-next-planned-epic"
     epic: 42
@@ -613,8 +630,11 @@ action_items:
       not pass through guard returns (interop and admin create/verify tests); per
       suite, ctx.skip() with an allowlisted reason or a hard assertion (DW-684)"
     owner: "user"
-    status: open
+    status: done
     ref: ""
+    resolution: "delivered by Story 44.5 (integration suites cannot pass without testing);
+      closed by the owner at the Epic 44 merge gate, 2026-11-23, with no retrospective
+      (wave-9 decision #153)"
   - id: "epic-42-retro-item-7-charter-a-story-in-the-next-planned-epic"
     epic: 42
     action: "Charter a story in the next planned epic: bootstrap() reads the Atelier
@@ -622,8 +642,11 @@ action_items:
       compile is not reported compiled=true; the console lines are localized (Rule
       #13) (DW-685)"
     owner: "user"
-    status: open
+    status: done
     ref: ""
+    resolution: "delivered by Story 44.4 (bootstrap compile result accuracy); closed
+      by the owner at the Epic 44 merge gate, 2026-11-23, with no retrospective (wave-9
+      decision #153)"
   - id: "epic-42-retro-item-8-charter-a-story-in-the-next-planned-epic"
     epic: 42
     action: "Charter a story in the next planned epic, high priority: iris_docdb_manage
@@ -632,15 +655,18 @@ action_items:
       as Ens.Setting.Report.base does) or document it in the data README, which today
       names only %Service_DocDB (DW-688)"
     owner: "user"
-    status: open
+    status: done
     ref: ""
+    resolution: "delivered by Story 44.1 (DocDB create registers the database); closed
+      by the owner at the Epic 44 merge gate, 2026-11-23, with no retrospective (wave-9
+      decision #153)"
   - id: "epic-42-retro-item-9-owner-deprecate-the-public-0-0-0-stage-p"
     epic: 42
     action: "Owner: deprecate the public 0.0.0-stage placeholder on each of the 8
       @iris-mcp packages (npm deprecate @iris-mcp/<pkg>@0.0.0-stage \"staged-publishing
       placeholder; use >=1.0.0\"), a registry write (DW-716)"
     owner: "user"
-    status: open
+    status: done
     ref: ""
   - id: "epic-42-retro-item-10-lead-name-the-stamped-ipm-tree-the-root"
     epic: 42
@@ -648,7 +674,7 @@ action_items:
       preload/**, written by the release version step) as generated do-not-edit output
       in project rule #18 and CLAUDE.md (DW-717)"
     owner: "user"
-    status: open
+    status: done
     ref: ""
   - id: "epic-42-retro-item-11-charter-a-story-due-before-february-2027"
     epic: 42
@@ -658,5 +684,9 @@ action_items:
       (or COPILOT_HOME) and a workspace-root .mcp.json (mcpServers), then re-certify
       (decision #118) (DW-721)"
     owner: "user"
-    status: open
+    status: done
     ref: ""
+    resolution: "delivered by Stories 44.2 and 44.6 (VS Code Copilot targets; launcher
+      provider); the live Copilot check was not run (owner decision #149); closed
+      by the owner at the Epic 44 merge gate, 2026-11-23, with no retrospective (wave-9
+      decision #153)"

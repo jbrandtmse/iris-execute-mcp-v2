@@ -147,26 +147,6 @@ const CAPTURE_SKIPS = [
   ['story-39-4-search-table-live-gate', 'Story 39.4: the headers and body wire is unchanged (AD-15, AD-33) capture: replay the request list against A and C and write the baseline'],
 ].map(([file, test]) => Object.freeze({ file: `packages/iris-mcp-all/src/__tests__/${file}.test.ts`, test, reason: CAPTURE_REASON }));
 
-/** The `reason` of a DocDB lifecycle test: it needs an operator's setup that a fresh instance lacks, and one gate needs it absent. */
-const DOCDB_REASON =
-  'the DocDB REST routes answer ERROR #822 (Access Denied) until an operator enables %Service_DocDB and registers a Security.DocDBs record for the database, ' +
-  'and a fresh instance has neither; the Epic 35 F5 gate of the all roster needs the service disabled, so the seed leaves it so (probed on irishealth-community 2026.2)';
-
-/** The DocDB lifecycle of `data.integration.test.ts`: its probe finds the service disabled and skips the whole `describe`. */
-const DOCDB_SKIPS = [
-  'creates a test database',
-  'creates a property on the test database',
-  'creates an index on the property',
-  'inserts a test document',
-  'gets the document by ID and verifies content',
-  'updates the document and verifies changes',
-  'finds documents with filter',
-  'deletes the document by ID',
-  'drops the test database',
-].map((test) =>
-  Object.freeze({ file: 'packages/iris-data-mcp/src/__tests__/data.integration.test.ts', test: `DocDB lifecycle integration ${test}`, reason: DOCDB_REASON }),
-);
-
 /** The reporter options CI appends to a vitest run; the JSON report lands where `--outputFile.json` says. */
 export function reporterArgs(reportFile) {
   return ['--reporter=default', '--reporter=json', `--outputFile.json=${reportFile}`];
@@ -214,7 +194,7 @@ function buildLiveSuites() {
       cwd: `packages/${pkg.dir}`,
       command: ['pnpm', 'exec', 'vitest', 'run', '--config', 'vitest.integration.config.ts'],
       expectedFiles: () => integrationFiles(pkg.dir),
-      allowedSkips: pkg.dir === 'iris-data-mcp' ? DOCDB_SKIPS : [],
+      allowedSkips: [],
     };
   }
 
@@ -288,6 +268,10 @@ const IF_SEED = "${{ !cancelled() && steps.seed.outcome == 'success' }}";
 const STATE_FILE = '${{ runner.temp }}/throwaway-live.json';
 const HARNESS = 'node scripts/throwaway-iris.mjs';
 
+/** The session script that enables `%Service_DocDB` on the throwaway (Story 44.5), and the suite it runs immediately before. */
+export const DOCDB_ENABLE_SCRIPT = 'scripts/ci-enable-docdb-service.script';
+const DOCDB_ENABLE_BEFORE = 'integration-data';
+
 /** The checks of the `gates` job that are npm scripts of the root, in order. The release's `prepare` runs the same `pnpm` ones. */
 export const ROOT_GATE_SCRIPTS = Object.freeze([
   'pnpm gen:governance-baseline:check',
@@ -299,6 +283,7 @@ export const ROOT_GATE_SCRIPTS = Object.freeze([
   'pnpm check:provenance',
   'pnpm gen:tools-list-snapshot:check',
   'node scripts/check-epics-sync.mjs',
+  'pnpm check:live-guards',
 ]);
 
 function buildDeclaredSteps() {
@@ -330,7 +315,12 @@ function buildDeclaredSteps() {
       if: IF_SETUP,
     },
     { run: `${HARNESS} exec --state ${STATE_FILE} -- node scripts/ci-seed-throwaway.mjs`, id: 'seed', if: IF_UP },
-    ...SEEDED_SUITE_IDS.map((id) => ({ run: `${HARNESS} exec --state ${STATE_FILE} -- node scripts/ci-live-suite.mjs ${id}`, if: IF_SEED })),
+    // Story 44.5 (DW-726): the DocDB lifecycle needs %Service_DocDB enabled and the Epic 35 F5 gate (in prepublish-all) needs it disabled,
+    // so the service is enabled by one session step between the two: after prepublish-all, immediately before integration-data.
+    ...SEEDED_SUITE_IDS.flatMap((id) => [
+      ...(id === DOCDB_ENABLE_BEFORE ? [{ run: `${HARNESS} session --state ${STATE_FILE} --namespace %SYS --script ${DOCDB_ENABLE_SCRIPT}`, if: IF_SEED }] : []),
+      { run: `${HARNESS} exec --state ${STATE_FILE} -- node scripts/ci-live-suite.mjs ${id}`, if: IF_SEED },
+    ]),
     { run: `${HARNESS} logs --state ${STATE_FILE}`, if: '${{ failure() || cancelled() }}' },
     { run: `${HARNESS} down --state ${STATE_FILE}`, if: '${{ always() }}' },
   ];
