@@ -450,7 +450,7 @@ Each server is configured independently in the client's MCP configuration with i
 ### Auto-Bootstrap & Installation
 
 - FR8: Server can detect whether the IRIS-side custom REST service is installed
-- FR9: Server can deploy ObjectScript classes to IRIS via the Atelier API when the REST service is missing
+- FR9: Server can deploy ObjectScript classes to IRIS via the Atelier API when the REST service is missing, unless the profile's automatic install is off (FR164)
 - FR10: Server can compile deployed ObjectScript classes via the Atelier API
 - FR11: Server can execute the configuration class method to register the `/api/executemcp` web application
 - FR12: Server can detect insufficient privileges during bootstrap and report which steps succeeded and which failed
@@ -706,7 +706,7 @@ Sourced from the Project Lead decision record [decision-record-2026-10-14-distri
 - FR149: Operator and developer can confine `iris_sql_execute` to read-only statements, cap the rows a DML statement may affect, receive `%ROWCOUNT`, and count rows without transferring them. A read-classified `iris_sql_query` serves queries under the `read-only` preset (Lead decision L-3). (Epic 38, Story 38.5)
 - FR150: Integration engineer can search messages by header fields, by body content (a structured, parameterized filter on a body class) and by Search Table value, within a required scope window (`iris_message_search`). (Epic 39, Stories 39.1, 39.3 and 39.4)
 - FR151: Integration engineer can read any message body by header id: HL7 as ER7, XML, persistent objects as JSON, and streams as text (`iris_message_body`). (Epic 39, Story 39.5)
-- FR152: Operator can set a per-profile PHI data policy (`block`, `redact` or `allow`; default `redact`, Lead decision L-2) that governs every surface returning body content or body-derived values, including the existing resend preview. (Epic 39, Story 39.2)
+- FR152: Operator can set a per-profile PHI data policy (`block`, `redact` or `allow`; default `redact`, Lead decision L-2) that governs every surface returning body content or body-derived values, including the existing resend preview. (Epic 39, Story 39.2) *(Scope stated 2026-11-24, Epic 45, GitHub issue #1.)* "Governs" means the message tools the PHI scope table lists as governed. The raw-read and code-execution tools (SQL, globals, code execution) and Event Log text under `redact` are outside it and documented as such; under `block` those tools are turned off (FR166).
 - FR153: Developer can measure line-by-line coverage of the classes a test run exercises: per class and method, uncovered ranges, Cobertura XML and a target verdict. The run never disturbs another monitor session on a shared instance. (Epic 40, Stories 40.1 and 40.2)
 - FR154: Developer can run `%UnitTest.TestProduction` tests without disturbing a different running production. (Epic 40, Story 40.3)
 - FR155: Agents get an always-on ObjectScript pre-write rule and 6–10 knowledge skills alongside the generated workflow skills, shipped with the competitor's MIT notice wherever adapted content ships. (Epic 41, Stories 41.1–41.5)
@@ -717,6 +717,15 @@ Sourced from the Project Lead decision record [decision-record-2026-10-14-distri
 - FR160: Claude Code users can install the whole suite plus skills as one plugin, and VS Code users can install the extension from the Marketplace or Open VSX. (Epic 42, Stories 42.7 and 42.8)
 - FR161: The servers run on the MCP TypeScript SDK v2 before `1.0.0` is published. They behave byte-identically for clients on the 2025-11-25 protocol revision, and also serve revision `2026-07-28` over stdio from the same process, with identical logical content on both. (Epic 43, added 2026-10-15 by Project Lead decision; stdio support verified by live probe on 2026-10-15)
 - FR162: On a client that supports MCP elicitation, every confirmation gate asks the human directly before executing; examples are audit purge, promote execute, `clean` with `killAppData`, resend execute and `regenerateStorage`. A decline refuses and changes nothing. The confirmation is bound to the exact arguments and scope shown: if the scope changes before the answer is honored, the human is asked again (Epic 44, Story 44.3). On clients that cannot elicit, today's `confirm: true` contract applies unchanged. (Epic 43, Story 43.3, added 2026-10-15 by Project Lead decision)
+
+**Epic 45 — Security Boundaries (added 2026-11-24)**
+
+Sourced from GitHub issue #1, an external user's security report on commit `9a2f5150`, verified against `1.2.0` by the Planner and decided by the owner on 2026-11-24; see [sprint-change-proposal-2026-11-24.md](./sprint-change-proposal-2026-11-24.md). Three sanctioned behavior changes (AD-15): `S-45.1-sql-privileges`, `S-45.2-read-only-no-install` and `S-45.4-block-raw-tools`.
+
+- FR163: The suite's SQL tools honor the IRIS account's SQL privileges: statements are prepared with privilege checking on, with no switch to turn it off, so an account without a grant on a table is refused and gets rows once granted. (Epic 45, Story 45.1)
+- FR164: Operator can turn the automatic install of the IRIS side off (`IRIS_AUTO_INSTALL`, and per profile `autoInstall`; default on). The `read-only` preset forces it off, and an explicit "on" with that preset fails startup naming the conflict. With it off, the server never installs, upgrades or repairs the IRIS side; on a missing or out-of-date IRIS side, the tools that need the custom REST service return a clear refusal naming how to install, and Atelier-only tools keep working. (Epic 45, Story 45.2)
+- FR165: IRIS administrator can remove the IRIS side completely: the web application, the `%ALL` package mapping and the classes, plus the `%ALL` namespace and `^UnitTestRoot` only when the recorded install created them and nobody else uses or changed them. (Epic 45, Story 45.3)
+- FR166: Under the `block` data policy, the raw-read and code-execution tools (at least `iris_sql_query`, `iris_sql_execute`, `iris_global_get`, `iris_global_list`, `iris_execute_command` and `iris_execute_classmethod`) are turned off for that profile unless an operator re-enables one explicitly; under `redact` or `block`, each server says at startup which of them are enabled. (Epic 45, Story 45.4)
 
 Release requirement (non-functional): releases run only from a tagged commit with green CI, through an approved protected environment, with npm provenance. (Epic 42, Stories 42.3 and 42.5)
 
@@ -734,7 +743,8 @@ Release requirement (non-functional): releases run only from a tagged commit wit
 - All HTTP communication to IRIS must support HTTPS (TLS) when configured
 - The MCP server must not escalate privileges beyond what the connected IRIS user has — IRIS's own permission model is the authority
 - **Backward compatibility (hard constraint, Epics 14–17):** all added features are strictly additive. With no `IRIS_PROFILES` and no `IRIS_GOVERNANCE` configured, every server behaves byte-for-byte as it did before — the default profile is synthesized from the existing `IRIS_*` variables, and the governance default seed leaves every previously-available tool action enabled. New `server` parameters are optional; new tools and new write actions are opt-in. No existing tool name, parameter, default, or output shape may change. This is a release gate — the suite has live users.
-- **Governance is additive:** governance only adds the *ability* to restrict actions (opt-in) plus default-off for *newly-introduced* write actions; it never disables a capability users have today.
+- **Governance is additive:** governance only adds the *ability* to restrict actions (opt-in) plus default-off for *newly-introduced* write actions; it never disables a capability users have today. *(Sanctioned exception, owner decision (4), 2026-11-24, Epic 45: under the opt-in `block` data policy the raw-read and code-execution tools seed disabled, FR166.)*
+- **The trust model (stated 2026-11-24, Epic 45):** governance, the presets, the confirmation dialogs, the audit log and the data policy run in the MCP process and guard the agent, not the IRIS account; the account's privileges are the boundary. The README and `SECURITY.md` say so, including that the read-only preset does not stop a SELECT from calling a `SqlProc` method and that the audit log records MCP tool calls only (Story 45.5).
 - Tool annotations must accurately reflect destructive potential — `destructiveHint: true` for all tools that can delete or modify data
 - The custom REST service must validate all inputs (type, range, format, and required fields) against the tool's inputSchema before passing to IRIS system classes
 - The custom REST service must not expose internal IRIS error details (stack traces, global references) to external callers
