@@ -43,3 +43,5 @@
 2026-11-25T21:21:50Z	Story 45.2	story_cycle	commits=48ad0819(build),d4dc0097(qa),fa4afed5(cr) review=CLEAN smoke=25/25 ledger=DW-768(45-5),DW-769(by-design),DW-770(burndown,#161) decisions=159,160,161
 2026-11-25T21:22:31Z	Story 45.2	committed	sha=ec6ab9ba ci=pending run=45703667020
 2026-11-25T21:22:31Z	Story 45.3	stage_spawned	stage=plan spawn_at=2026-11-25T21:22:31Z model=claude-opus-5-5 agent_name=45-3-careful-uninstall-plan-1 cycle_iteration=1 ledger_inbox=none prev_ci=pending(45703667020)
+2026-11-25T21:40:36Z	Story 45.3	story_created	spec=_bmad-output/implementation-artifacts/spec-45-3-careful-uninstall-of-the-iris-side.md model=claude-opus-5-5 probes=throwaway_x2(2026.2_221U) teardown=clean
+2026-11-25T21:40:36Z	Story 45.3	spec_validated	service_introducing=false integration_ac=present(terminal_one-liner_via_throwaway_session+built_dev_server_install;CI_suite_uninstall-round-trip) adr_constrained_acs=AD-13,AD-14,AD-15,Rule_19,Rule_24,Rule_35,Rule_48,Rule_49,Rule_59 decision_dependency=none owned_ledger=none amendments=epics_45.3.1x3/.4/.5/.6 spine=AD-14(Rule20) decision=162 form=A(one-liner)
