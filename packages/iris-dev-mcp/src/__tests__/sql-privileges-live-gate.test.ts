@@ -13,6 +13,10 @@
  *  - after `GRANT SELECT` the same calls return the rows that `_SYSTEM`'s Atelier `action/query` returns, a write is still
  *    refused, and after `REVOKE` the SELECT is refused again (no privilege cache); `GRANT EXECUTE` lets the SqlProc run, and
  *    `REVOKE` refuses it again;
+ *  - with the grants a statement needs, the controls still work for that account (QA 2026-11-25, AC 45.1.3): `readOnly` and `countOnly`
+ *    declines come from the handler (`SQL_READ_ONLY`, the countOnly text), a capped write commits within the cap and is rolled back over it
+ *    (as the least-privilege account), and a CALL under a cap is declined; an ungranted `countOnly` UPDATE and `%NOJOURN` DELETE get the
+ *    privilege error too;
  *  - the residual the story documents and 45.5 explains: IRIS's own Atelier `action/query` returns the ungranted rows to the
  *    same account (it prepares with checking off; this suite does not change IRIS's API).
  *
@@ -34,7 +38,6 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import {
-  IrisApiError,
   IrisHttpClient,
   buildToolContext,
   loadConfig,
@@ -48,6 +51,7 @@ import { executeClassMethodTool } from "../tools/execute.js";
 import { globalKillTool, globalListTool } from "../tools/global.js";
 import { sqlExecuteTool, sqlQueryTool } from "../tools/sql.js";
 import { compileDocs, putDocLines, removeStored, runQuery } from "./live-doc-helpers.js";
+import { isMissingUserError } from "./live-principal-helpers.js";
 
 const LIVE = liveGateTarget();
 const IRIS_HOST = LIVE.target.host;
@@ -167,7 +171,9 @@ async function userExists(name: string): Promise<boolean> {
     await client.get(`${SECURITY_PATH}/user/${encodeURIComponent(name)}`);
     return true;
   } catch (error) {
-    if (error instanceof IrisApiError) return false;
+    // Only the route's own "User <name> does not exist" answer means absent; a 401, a 500 or any other error is rethrown, so the
+    // teardown assertions cannot pass without proving the user is gone (DW-763; the captured answer is pinned in live-principal-helpers.test.ts).
+    if (isMissingUserError(error, name)) return false;
     throw error;
   }
 }
@@ -399,6 +405,23 @@ describe("the least-privilege account with no SQL grant is refused through both 
     expect(await counter()).toBe(0);
   }, 60000);
 
+  it("ordering, countOnly and %NOJOURN: an ungranted UPDATE with countOnly, and an ungranted DELETE %NOJOURN under a cap, get the privilege error and change nothing", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    const counted = await run(sqlExecuteTool, { query: `UPDATE ${T} SET Qty = 99`, countOnly: true });
+    const journal = await run(sqlExecuteTool, { query: `DELETE %NOJOURN FROM ${T}`, maxRowsAffected: 10 });
+
+    expectPrivilegeError(counted, "countOnly UPDATE");
+    // IRIS answers a %NOJOURN statement with its own privilege text (probed live 2026-11-25): the account lacks the %NOJOURN privilege.
+    expect(journal.isError, "capped DELETE %NOJOURN").toBe(true);
+    expect(journal.content[0]?.text).toContain("SQLCODE: -99");
+    expect(journal.content[0]?.text).toContain(`User ${USER} does not have %NOJOURN privileges`);
+    expect(journal.structuredContent, "no tool refusal code").toBeUndefined();
+    expect(counted.content[0]?.text).not.toContain("countOnly counts the rows");
+    expect(journal.content[0]?.text).not.toContain("%NOJOURN, the keyword");
+    expect(await quantities()).toEqual([1, 2, 3]);
+  }, 60000);
+
   it("the residual, pinned: IRIS's own Atelier action/query returns the ungranted rows to the same account (IRIS's API, documented by Story 45.5)", async (testCtx) => {
     if (skipReason) return testCtx.skip();
 
@@ -492,6 +515,81 @@ describe("a SQL grant opens the statement it covers, and REVOKE closes it at onc
     expectPrivilegeError(await run(sqlExecuteTool, { query: `CALL ${FN}()` }), "CALL after the revoke");
     expect(await counter()).toBe(2);
   }, 120000);
+});
+
+// -- A granted account still gets every control (AC 45.1.3) -----------
+
+describe("with the grants a statement needs, every control of both tools works for the least-privilege account (Story 45.1, AC 45.1.3)", () => {
+  const ALL_FOUR = "SELECT, INSERT, UPDATE, DELETE";
+
+  it("readOnly, countOnly and the rows-affected cap: the handler's own declines and rollbacks apply, not the privilege error", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    const select = `SELECT ID, Name, Qty FROM ${T} ORDER BY ID`;
+    const oracle = await systemRows(select);
+    let tableGranted = false;
+    let executeGranted = false;
+
+    try {
+      await systemRows(`GRANT ${ALL_FOUR} ON ${T} TO ${USER}`);
+      tableGranted = true;
+      await systemRows(`GRANT EXECUTE ON ${FN} TO ${USER}`);
+      executeGranted = true;
+
+      // readOnly: a SELECT runs, a write is declined by the handler (SQL_READ_ONLY) although the account may write.
+      const readOnlySelect = await run(sqlExecuteTool, { query: select, readOnly: true });
+      expect(readOnlySelect.isError).toBeUndefined();
+      expect(readOnlySelect.structuredContent).toEqual(todayMapping(oracle));
+      const readOnlyUpdate = await run(sqlExecuteTool, { query: `UPDATE ${T} SET Qty = 99`, readOnly: true });
+      expect(readOnlyUpdate.isError).toBe(true);
+      expect(readOnlyUpdate.structuredContent).toEqual({ code: "SQL_READ_ONLY", namespace: IRIS_NAMESPACE, statementType: "UPDATE", readOnlySource: "parameter" });
+      const queryUpdate = await run(sqlQueryTool, { query: `UPDATE ${T} SET Qty = 99` });
+      expect(queryUpdate.structuredContent).toEqual({ code: "SQL_READ_ONLY", namespace: IRIS_NAMESPACE, statementType: "UPDATE", readOnlySource: "tool" });
+      const readOnlyCall = await run(sqlExecuteTool, { query: `CALL ${FN}()`, readOnly: true });
+      expect(readOnlyCall.structuredContent).toMatchObject({ code: "SQL_READ_ONLY", statementType: "CALL" });
+      expect(await quantities()).toEqual([1, 2, 3]);
+      expect(await counter()).toBe(0);
+
+      // countOnly: the count a SELECT returns, no rows; a write is declined with the countOnly text.
+      const counted = await run(sqlQueryTool, { query: select, countOnly: true });
+      expect(counted.structuredContent).toEqual({ columns: [], rows: [], rowCount: 0, totalCount: ROWS });
+      const countedUpdate = await run(sqlExecuteTool, { query: `UPDATE ${T} SET Qty = 99`, countOnly: true });
+      expect(countedUpdate.isError).toBe(true);
+      expect(countedUpdate.content[0]?.text).toContain("countOnly counts the rows a query returns");
+      expect(countedUpdate.content[0]?.text).not.toContain("SQLCODE");
+
+      // rows-affected cap: within the cap it commits; over it, it is rolled back (the transaction runs as the least-privilege account).
+      const within = await run(sqlExecuteTool, { query: `UPDATE ${T} SET Qty = Qty + 10`, maxRowsAffected: ROWS });
+      expect(within.isError).toBeUndefined();
+      expect(within.structuredContent).toEqual({ columns: [], rows: [], rowCount: 0, rowsAffected: ROWS });
+      expect(await quantities()).toEqual([11, 12, 13]);
+      const over = await run(sqlExecuteTool, { query: `UPDATE ${T} SET Qty = Qty + 100`, maxRowsAffected: 1 });
+      expect(over.isError).toBe(true);
+      expect(over.structuredContent).toEqual({
+        code: "SQL_ROWS_AFFECTED_CAP",
+        namespace: IRIS_NAMESPACE,
+        statementType: "UPDATE",
+        rowsAffected: ROWS,
+        maxRowsAffected: 1,
+        capSource: "parameter",
+      });
+      expect(await quantities(), "the over-cap UPDATE was rolled back").toEqual([11, 12, 13]);
+      const dry = await run(sqlExecuteTool, { query: `DELETE FROM ${T}`, maxRowsAffected: 0 });
+      expect(dry.structuredContent).toMatchObject({ code: "SQL_ROWS_AFFECTED_CAP", statementType: "DELETE", rowsAffected: ROWS, maxRowsAffected: 0 });
+      expect(await tableRows(), "the dry-count DELETE was rolled back").toBe(ROWS);
+
+      // A statement the cap cannot count is declined by the handler, and the SqlProc did not run.
+      const notCountable = await run(sqlExecuteTool, { query: `CALL ${FN}()`, maxRowsAffected: 0 });
+      expect(notCountable.isError).toBe(true);
+      expect(notCountable.structuredContent).toMatchObject({ code: "SQL_ROWS_AFFECTED_CAP", statementType: "CALL", maxRowsAffected: 0 });
+      expect(await counter()).toBe(0);
+    } finally {
+      if (executeGranted) await systemRows(`REVOKE EXECUTE ON ${FN} FROM ${USER}`);
+      if (tableGranted) await systemRows(`REVOKE ${ALL_FOUR} ON ${T} FROM ${USER}`);
+    }
+
+    expectPrivilegeError(await run(sqlExecuteTool, { query: `UPDATE ${T} SET Qty = 99`, readOnly: true }), "readOnly UPDATE after the revoke");
+    expectPrivilegeError(await run(sqlQueryTool, { query: select, countOnly: true }), "countOnly SELECT after the revoke");
+  }, 180000);
 });
 
 // -- An account with %All is unchanged (AC 45.1.6) --------------------

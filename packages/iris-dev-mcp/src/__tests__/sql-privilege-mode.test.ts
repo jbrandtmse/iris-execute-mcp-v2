@@ -81,6 +81,19 @@ describe("the SQL privilege mode of /dev/sql/execute (Story 45.1, AC 45.1.2)", (
     });
   }
 
+  for (const [label, source] of SOURCES) {
+    // QA 2026-11-25 (the review's deferred item: a bypass that keeps the literal 1). `checkPriv` 1 checks the privileges of the process's
+    // roles, so a handler that widens its own roles or user before `Perform` would make the literal meaningless. No code line of the class
+    // may touch them: `$Roles`, `$Username`, a `Security.*` / `%SYS.Security` class, `$System.Security`, or a role/login call.
+    it(`${label}: no code line widens the process's roles or user, so the literal 1 checks the caller's privileges`, () => {
+      const code = codeOf(source);
+      expect(code.length).toBeGreaterThan(0);
+      for (const pattern of [/\$roles/i, /\$username/i, /\$system\.security/i, /##class\(\s*%?(?:SYS\.)?Security\b/i, /\bAddRoles?\b|\bLogin\(|\bChangeUser\b|\bSetUser\b/i]) {
+        expect(code, String(pattern)).not.toMatch(pattern);
+      }
+    });
+  }
+
   it("the embed's Sql class is the working tree's Sql class (the regenerated embed is not stale)", () => {
     const [, tree] = SOURCES[0] as [string, string];
     const [, embed] = SOURCES[1] as [string, string];
