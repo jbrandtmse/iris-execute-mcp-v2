@@ -58,3 +58,5 @@
 2026-11-25T23:17:32Z	Story 45.2	fresh_check	rework=1 files=shared8+all3 in_order=pass shuffle_seed7=pass tests=271 full_all=245f/6557p/737s live-guards=75/0
 2026-11-25T23:17:32Z	Story 45.2	story_cycle	rework=1 commits=c3586e96(rework),bc8e3861(re-review) ledger=DW-772(resolved),DW-773(burndown) decisions=165,166
 2026-11-25T23:18:06Z	Story 45.2	committed	rework=1 sha=b11f51c2 ci=pending run=45720213241
+2026-11-25T23:47:00Z	Story 45.2	ci_resolved	rework=1 run=45720213241 sha=b11f51c2 result=green jobs=throwaway,gates_x3,launcher_x3,package,ipm
+2026-11-25T23:47:00Z	Story 45.3	stage_spawned	stage=implement spawn_at=2026-11-25T23:47:00Z model=claude-sonnet-5-5 agent_name=45-3-careful-uninstall-implement-1 cycle_iteration=1 prev_ci=green(45720213241) binding=decisions_162,163,166
