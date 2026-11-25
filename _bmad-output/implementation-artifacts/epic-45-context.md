@@ -4,17 +4,11 @@
 
 ## Goal
 
-Make the safety settings mean what the documentation says, and make the documentation say where the real boundary is. The epic answers GitHub issue #1, an external user's security review that the Planner verified against `1.2.0`. After it:
-
-- SQL sent through the suite honors the account's SQL grants.
-- A read-only connection never installs or repairs anything on IRIS, and any operator can turn the automatic install off.
-- The IRIS side can be removed cleanly without touching shared pieces the install did not create.
-- The `block` data policy also turns off the raw-read and code-execution tools.
-- The docs state plainly that the safety settings guard the agent, and that the IRIS account's privileges are the boundary.
+Make the suite's safety settings mean what the docs say, and make the docs say where the real boundary is. This answers an external security report (GitHub issue #1, four points). After the epic: SQL sent through the suite honors SQL grants. A read-only connection never installs anything on IRIS, and any operator can turn the automatic install off. The IRIS side can be removed cleanly without breaking shared pieces. `block` also turns off the raw-read and code-execution tools. The README and `SECURITY.md` say plainly that governance guards the agent and that the IRIS account's privileges are the boundary. Everything ships in one minor release, `1.3.0`, at the end of the epic.
 
 ## Stories
 
-- Story 45.1: SQL Statements Honor SQL Privileges
+- Story 45.1: SQL Statements Honor SQL Privileges (done)
 - Story 45.2: Auto-Install Setting, Off Under Read-Only
 - Story 45.3: Careful Uninstall of the IRIS Side
 - Story 45.4: Block Turns Off Raw-Read and Code-Execution Tools
@@ -22,53 +16,82 @@ Make the safety settings mean what the documentation says, and make the document
 
 ## Requirements & Constraints
 
-- **Probe first.** Every IRIS claim marked "probe" in a story is unverified at planning time. Check it in `irislib/`/`irissys/`, then on a throwaway (`scripts/throwaway-iris.mjs`, digest-pinned image, host port 52792, always removed afterwards). Amend the epic text in place if a claim is wrong.
-- **No new tool and no new governance key.** Tool counts, presets and `GOVERNANCE_BASELINE` (frozen `1e62c5ad5bf7`/141, `:check` only) stay unchanged. If a story finds it needs a new tool, it stops and amends the epic first.
-- **Sanctioned behavior changes** (AD-15, each named in `CHANGELOG.md` with its story):
-  - `S-45.1-sql-privileges`;
-  - `S-45.2-read-only-no-install`;
-  - `S-45.3-careful-uninstall` (`Setup.Uninstall`, not a REST route);
-  - `S-45.4-block-raw-tools`.
-- **Back-compat.** With no new setting used and the data policy not `block`, every request and response is byte-identical. The only exceptions are the new 45.4 startup warning and the 45.1 refusal for an account without a grant. Pin both with assertions that fail on drift.
-- **Live proof.** Endpoint-backed stories drive the live route, including one destructive-path refusal. Each gate is proven red on the path it guards.
-- **Shared IRIS instance (localhost:52773).** Never stop or modify it. No uninstall, user or role change, SQL grant or `%ALL` change there; those proofs run on throwaways only.
-- **Owner rulings (2026-11-24/25):**
-  - One release, `1.3.0` (minor), at epic end. No story publishes, and each story adds its changeset per convention.
-  - C-2: a read-only-only instance refuses after a class-changing release until it is upgraded once. The README, the refusal message, the CHANGELOG and the release notes say so.
-  - C-3: `SECURITY.md` keeps bypassing a control through the servers' tools in scope, and puts direct use of the IRIS account out of scope.
-  - C-4: the IPM-owned stale warning stays as it is.
-  - The 45.3 uninstall form and the 45.4 `block` extra-tools list are decided at their spec gates.
-- **Optional evidence.** The reporter's probe cases on issue #1, if shared. They are never a dependency.
+- **No new tool, action or governance key.** Tool counts, presets and the frozen `GOVERNANCE_BASELINE` stay unchanged (check it with `:check` only). A story that needs a new key or tool stops and amends the epic first.
+- **Sanctioned behavior changes** (each named in `CHANGELOG.md` and a changeset by its story):
+  - `S-45.1-sql-privileges`
+  - `S-45.2-read-only-no-install`
+  - `S-45.3-careful-uninstall`
+  - `S-45.4-block-raw-tools`
+
+  Everything else must be byte-identical when the new settings are unused and the policy is not `block`. The only exceptions are the 45.4 warning line and the 45.1 privilege refusal. Each story pins this with an assertion that fails on drift.
+- **Probe before building.** Every claim marked "probe" is unverified. Check it in `irislib/`/`irissys/`, then on a throwaway, and amend the epic text in place if it is wrong.
+- **Shared IRIS instance.** Never stop it. Never run an uninstall on it, change a user, role or SQL grant there, or touch `%ALL` there. Those proofs run on a throwaway (`scripts/throwaway-iris.mjs`). Writes to the shared instance go only to disposable `ExecuteMCPv2.Temp.*` classes.
+- **Live proof.** Endpoint-backed stories drive the live route and include one destructive-path refusal. Every gate is proven red on the path it guards, and the story names that path.
+- **Minimal docs in each story:** the variable's row, a one-line capability statement and its default state. 45.5 enriches these docs and never writes them first.
+- **No story publishes.** The Planner raises the bump to minor at release and merges the wave to `main` when the epic is done.
+- **Out of scope:**
+  - stopping a SELECT from calling a `SqlProc` method under read-only (45.5 documents it);
+  - filtering SQL or global reads under `redact`;
+  - enforcing governance inside IRIS;
+  - changing Atelier's own `action/query` privilege mode;
+  - a launcher setting for `IRIS_AUTO_INSTALL`;
+  - DW-538, DW-719, DW-720 and DW-722.
 
 ## Technical Decisions
 
-- **The spine binds every story.** AD-6, AD-8, AD-9, AD-14, AD-15, AD-19, AD-25, AD-26 and AD-31 carry the epic's amendments, applied with the proposal. Where a story and the spine disagree, the spine wins.
-- **45.1.** `ExecuteMCPv2.REST.Sql.Perform` prepares with `checkPriv` on, with no off-switch. A privilege failure surfaces IRIS's SQLCODE and message through `SanitizeError`. The only caller is `packages/iris-dev-mcp/src/tools/sql.ts`; re-enumerate it. Atelier's own `action/query` prepares with privilege checking off; that is IRIS's API, so it is probed and documented, not changed. One ordering change: an ungranted non-SELECT on a read-only path now answers the privilege error instead of `SQL_READ_ONLY`.
-- **45.2.** New `IRIS_AUTO_INSTALL` (true/false, case-insensitive; a malformed value fails startup). It is on by default, forced off under `IRIS_GOVERNANCE_PRESET=read-only`, and per-profile `autoInstall` is never inherited (AD-9).
-  - An explicit `true` together with the read-only preset fails startup, naming both settings.
-  - With the install off there is no write on connect on any probe branch. `missing`, `stale` and `unconfigured` mark the custom REST service unavailable for that profile. A new refusal code (for example `IRIS_SIDE_NOT_INSTALLED`) is returned in the one gateway, keyed on the `/api/executemcp/v2` prefix, and Atelier-only tools keep working.
-  - `iris_server_profiles` gains additive `autoInstall` and source fields.
-  - IPM-owned installs behave as today.
-- **45.3.** The install records what it created (the `%ALL` namespace, the package mapping, `^UnitTestRoot` and its value, the deploy namespaces). It records only after each step succeeds and never downgrades "created" to "existed". The record's home must survive the class deletion.
-  - The uninstall removes the web app, the mapping, the classes (shadowed copies included), `%ALL` only if the install created it and it is empty, `^UnitTestRoot` only if the install set it and it is unchanged, then the record. It reports what it removed and what it left, and is idempotent.
-  - Without a record (a 1.2.0 install) it leaves `%ALL` and `^UnitTestRoot` and prints the manual commands.
-  - For an IPM-owned install it removes the configuration only, then points to `zpm uninstall`.
-  - The form (a one-liner, a CLI command or a tool) is a probe outcome. A new tool would need an epic amendment.
-- **45.4.** The covered set is declared once and checked mechanically across packages (`iris-mcp-all`, Rule #45) against the `tool_support.md` residual rows.
-  - The floor: `iris_sql_query`, `iris_sql_execute`, `iris_global_get`, `iris_global_list`, `iris_execute_command`, `iris_execute_classmethod`. Recommended and judgment-call tools are decided at the spec gate.
-  - Under the effective `block`, covered keys seed disabled in a new AD-6 cascade layer, above the preset seed and below every explicit layer. Governance, not visibility.
-  - An explicit re-enable wins. A seeded disable is not inherited by child keys.
-  - A denial is `GOVERNANCE_DISABLED` plus an additive attribution field (for example `dataPolicyApplied`), and `configSource` gains `"dataPolicy"`.
-  - One startup `[WARN]` per process names the enabled covered tools under `redact`/`block`.
-- **45.5.** Docs only plus the capstone `epic45-capstone-gate.test.ts` in the default suite. It replays issue #1's four points through the real SDK client, and each point is proven red by reverting its story's guard. The IRIS-side halves run in one armed CI run of the wave tip, whose URL is recorded.
-- **Bootstrap discipline.** 45.1 (`REST/Sql.cls`) and 45.3 (`Setup.cls`) regenerate the embed in-story and record `BOOTSTRAP_VERSION` from → to. It starts at `1.2.0+5.6cbac260e73f`. A new class joins both rosters. The IPM tree is regenerated only by the release.
-- **Process lessons from Epic 44.** Before a story push, run the full `@iris-mcp/all` suite on a closed port (`IRIS_HOST=127.0.0.1 IRIS_PORT=1`). Never push while a gate CI run is in progress. A test reading `.changeset` must skip when it is absent. Credential proofs use a scratch HOME and the fake keyring preload.
+- **SQL privileges (45.1, as built).**
+  - `REST/Sql.cls` prepares with `checkPriv` 1. Nothing turns it off: no parameter, request field or variable.
+  - An ungranted statement fails at prepare with `SQLCODE -99` in the existing error envelope, through `SanitizeError`. Prepare runs before classification and before every refusal check. So an ungranted account now gets the privilege error instead of `SQL_READ_ONLY`, `countOnly` or a cap refusal. Nothing runs in any case.
+  - With checking on, a SELECT that calls a `SqlProc` needs `EXECUTE` on it.
+  - Atelier `action/query` prepares with checking off (`%Api.Atelier.v1:691`, `v6:236`).
+  - The minimum SQL account is `%Development:U` plus the namespace's database resource. This is proven only for a single-database layout (DW-766, which 45.5 must close).
+- **Automatic install (45.2).**
+  - `IRIS_AUTO_INSTALL` takes `true` or `false`, case-insensitive. Empty means unset, and a malformed value fails startup naming its channel.
+  - It can also be set per profile with the `IRIS_PROFILES` field `autoInstall`. That field is never inherited from `default`. An omitted value falls to the variable, then to the default. Server Manager profiles take the variable. The governance file is not a channel.
+  - The default is on. `IRIS_GOVERNANCE_PRESET=read-only` forces it off. An explicit "on" under that preset fails startup, naming both settings and the profile.
+  - When the install is off, bootstrap only reads. It never uploads, compiles, runs `Configure`, `ConfigureMapping` or `EnsureUnitTestRoot`, or repairs anything.
+  - On a `current` IRIS side the compile check still runs.
+  - On `missing`, `stale` and `unconfigured`, the one gateway (`IrisHttpClient`) refuses every call to the `/api/executemcp/v2` prefix, per profile. The refusal uses a new stable code that names the way out. Atelier-only tools keep working.
+  - `newer`, `foreign`, `unknown` and IPM-owned installs (`InstallGuard` present) behave as today: one warning, and nothing is written.
+  - `iris_server_profiles` gains the effective `autoInstall` and its source, as additive fields.
+  - Bootstrap stays ungoverned. The preset reaches it only through this setting.
+- **Install record and uninstall (45.3).**
+  - The `Setup` methods record what the install created: the `%ALL` namespace, the `ExecuteMCPv2` mapping and its database, `^UnitTestRoot` and its value, and the namespaces deployed to. The bootstrap and IPM paths record alike.
+  - Each item is written only after its step succeeds. A repeated install never overwrites "we created it".
+  - The record's home is a probe outcome. It must survive deleting the classes, and it is never a new system-level write.
+  - The uninstall removes, in this order:
+    1. the web application;
+    2. the mapping;
+    3. the classes, shadowed copies included;
+    4. `%ALL`, only if the record says the install created it and nothing else is mapped in it;
+    5. `^UnitTestRoot`, only if the record says the install set it and its value is unchanged;
+    6. the record itself.
+  - The uninstall is idempotent. It reports what it removed, and what it left with the reason.
+  - With no record (an install by `1.2.0` or earlier), it leaves `%ALL` and `^UnitTestRoot` and reports them with the manual commands.
+  - When IPM owns the install, it removes the configuration only and points to `zpm uninstall`.
+  - How the package removes itself, and whether the uninstall is offered as a one-liner, a CLI command or a tool, are probe outcomes. A tool would need an epic amendment.
+- **`block` data-policy seed (45.4).**
+  - This is a new seed layer in the governance cascade: `env.profile ?? env.global ?? file.profile ?? file.global ?? inheritedDisable ?? dataPolicySeed ?? presetSeed ?? defaultSeed`.
+  - It sits above the preset, so `block` also turns off `iris_sql_query`. An explicit `true` re-enables a key.
+  - A seeded disable is never inherited by child keys.
+  - Denials keep `GOVERNANCE_DISABLED` with an additive attribution, and `configSource` reports `"dataPolicy"`.
+  - The mechanism is governance, never visibility.
+  - The covered set is declared once:
+    - Floor: `iris_sql_query`, `iris_sql_execute`, `iris_global_get`, `iris_global_list`, `iris_execute_command`, `iris_execute_classmethod`.
+    - Recommended at the spec gate: `iris_execute_tests`, `iris_test_coverage`, `iris_transform_test`, and the docdb raw reads.
+  - A test in `iris-mcp-all` checks the set mechanically against the PHI scope table, the README and `tool_support.md`.
+  - At startup each server writes at most one `[WARN]` line, naming per `redact` or `block` profile the covered tools that are visible and enabled. It never names hidden tools and never logs values.
+- **Trust model (45.5).** Governance, presets, confirmations, the audit log and the data policy guard the agent in the MCP process. The account's privileges are the boundary: database resources bound a `%Development` account, and SQL grants bound the suite's SQL tools. The audit log covers MCP calls only. In `SECURITY.md` the scope becomes: getting past a control through the servers' tools is in scope, and using the account directly is not. No email address is added.
+- **Bootstrap discipline.** A change to `REST/Sql.cls` (45.1) or `Setup.cls` (45.3) regenerates the embed in the same story and records `BOOTSTRAP_VERSION` from → to. A new class joins both rosters. The IPM tree is regenerated only at the release version step.
 
 ## Cross-Story Dependencies
 
-- **Order 45.1 → 45.2 → 45.3 → 45.4 → 45.5.**
-  - 45.2 comes before 45.3, because the uninstall docs rely on `IRIS_AUTO_INSTALL=false` to keep a removed instance removed.
-  - 45.3 owns the install record; 45.2 needs no record.
-  - 45.4 is independent of 45.1–45.3.
-  - 45.5 is last: it enriches the earlier stories' minimal docs (each story ships its own variable row, capability line and default state) and assembles the capstone.
-- **Out of scope:** blocking `SqlProc`-in-SELECT under read-only (documented instead), filtering SQL and global reads under `redact`, enforcing governance inside IRIS, Atelier's `action/query` privilege mode, a launcher setting for `IRIS_AUTO_INSTALL`, and DW-538, DW-719, DW-720 and DW-722.
+- **45.2 before 45.3.** The uninstall docs rely on `IRIS_AUTO_INSTALL=false` to keep a removed instance removed. 45.3 owns the install record, and 45.2 needs no record.
+- **Upgrade note.** 45.1 and 45.3 move `BOOTSTRAP_VERSION`, so every read-only-only deployment finds a `stale` IRIS side on its first `1.3.0` start, and its custom-REST tools refuse until one upgrade. The owner accepted this. The README, the refusal message, the CHANGELOG and the release notes must say so.
+- **45.4 is independent** of 45.1 to 45.3.
+- **45.5 depends on all four:**
+  - it uses 45.1's probe results;
+  - its doc-rot guard derives from 45.4's declaration;
+  - it points to 45.2 and 45.3;
+  - it assembles the capstone `packages/iris-mcp-all/src/__tests__/epic45-capstone-gate.test.ts`, in the default suite, covering the four points. Each point is proven red by reverting its story's guard.
+- **The epic is done when** the default suite is green and one armed throwaway CI run of the wave tip (45.1's refusal and 45.3's round trip) is green, with its URL recorded.

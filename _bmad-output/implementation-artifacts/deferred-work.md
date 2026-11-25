@@ -4329,3 +4329,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Unverified (maybe-false): the 45.1 probe and live gate granted only the globals database resource on HSCUSTOM. Where code runs from another database (a separate routines database, or the ExecuteMCPv2 package mapped from elsewhere), running it likely needs R on that database's resource too; Rule #34 second layout not probed.
 - 2026-11-25T16:31:50Z status=routed owner=45-5-what-the-safety-settings-protect by=cr note=45.5 states the minimum account in README/SECURITY.md: probe a mapped/split-database layout on a throwaway before stating it
 - 2026-11-25T16:53:16Z status=routed owner=45-5-what-the-safety-settings-protect by=lead note=accepted at 45.1 ledger adjudication; DW-766 bullet added under Story 45.5 in epics.md (Rule 17 1b)
+
+### DW-767: The startup bootstrap uses the IRIS_* config while the default client uses the registry profile, which an IRIS_PROFILES default entry can override, so the two may target different instances
+- source: spec-45-2-auto-install-setting-off-under-read-only.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: Unverified (maybe-false): Story 45.2 plan read server-base.ts start() passing this.config to bootstrap while the default ToolContext client is built from the registry profile; not reproduced
+- 2026-11-25T17:32:19Z status=routed owner=burndown by=harvest note=observed at the 45.2 plan, out of scope (AD-15 unused-feature pin); probe whether an IRIS_PROFILES default entry with a different host makes startup bootstrap one instance and tools call another
