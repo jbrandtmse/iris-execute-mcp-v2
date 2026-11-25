@@ -4310,9 +4310,22 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-45-1-sql-statements-honor-sql-privileges.md | severity: low | fix-risk: low | footprint: in-footprint
 - evidence: sql-privileges-live-gate.test.ts:165 userExists catches every IrisApiError and returns false; the status the Security route gives for a missing user was not probed (throwaway-only gate)
 - 2026-11-25T15:40:17Z status=routed owner=45-1-sql-statements-honor-sql-privileges by=harvest note=lead triage at dev_complete: owned by this story; QA/CR to narrow the catch to the not-found status, probed on the throwaway
+- 2026-11-25T16:53:16Z status=resolved-by:45-1-sql-statements-honor-sql-privileges owner=45-1-sql-statements-honor-sql-privileges by=lead note=QA d6cac7c4: probe on throwaway showed a missing user returns HTTP 200 with envelope error 5001 (User <name> does not exist); isMissingUserError (live-principal-helpers.ts) accepts only that and rethrows everything else; mutation: old catch + 404 route = gate green (the vacuous pass), new catch + 404 route = beforeAll red, helper minus status check = unit test red.
 
 ### DW-764: The 45.1 default-suite privilege pin reads source text only; a bypass that keeps the literal 1 is caught only by the armed live gate in CI
 - source: spec-45-1-sql-statements-honor-sql-privileges.md | severity: low | fix-risk: low | footprint: in-footprint
 - evidence: sql-privilege-mode.test.ts never executes the handler; Sql.cls has no ObjectScript test host by Story 38.5 design
 - 2026-11-25T15:40:17Z status=routed owner=45-1-sql-statements-honor-sql-privileges by=harvest note=lead triage at dev_complete
 - 2026-11-25T15:40:17Z status=by-design owner=45-1-sql-statements-honor-sql-privileges by=lead note=the static pin plus the armed live gate (prepublish roster, CI throwaway job with allowedSkips []) is the Story 38.5 design for Sql.cls: no ObjectScript host can run Perform under a non-%All user in the default suite. The live gate is the executing proof and is mutation-verified red (12/15) with checkPriv 0.
+- 2026-11-25T16:53:16Z status=by-design owner=45-1-sql-statements-honor-sql-privileges by=lead note=QA d6cac7c4 narrowed the residual: the default suite now also pins the no-role-widening class (Set $Roles before the statement turns a new test red); other in-handler bypasses remain covered only by the armed live gate, which is the Story 38.5 design.
+
+### DW-765: The /config/database route reports resource as empty for every database, so iris_database_list never shows a database's resource
+- source: cr spec-45-1-sql-statements-honor-sql-privileges.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: Config.cls:209 reads tProps(Resource) from Config.Databases.Get, but Config.Databases has no Resource property (irissys/Config/Databases.cls); IRIS keeps it in SYS.Database.ResourceName. Live read 2026-11-25 (shared instance, iris_database_list): resource is empty for all 15 databases, IRISSYS included. The create/modify resource input (Config.cls:244) is unverified too.
+- 2026-11-25T16:31:50Z status=routed owner=burndown by=cr note=IRIS-side fix (read SYS.Database ResourceName in %SYS, probe the create/modify path) plus embed regen; found while reviewing the 45.1 live gate
+
+### DW-766: The SQL tools' minimum account (%Development:U plus the namespace's database resource) is proven only where the namespace's globals, routines and the ExecuteMCPv2 classes share one database
+- source: cr spec-45-1-sql-statements-honor-sql-privileges.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: Unverified (maybe-false): the 45.1 probe and live gate granted only the globals database resource on HSCUSTOM. Where code runs from another database (a separate routines database, or the ExecuteMCPv2 package mapped from elsewhere), running it likely needs R on that database's resource too; Rule #34 second layout not probed.
+- 2026-11-25T16:31:50Z status=routed owner=45-5-what-the-safety-settings-protect by=cr note=45.5 states the minimum account in README/SECURITY.md: probe a mapped/split-database layout on a throwaway before stating it
+- 2026-11-25T16:53:16Z status=routed owner=45-5-what-the-safety-settings-protect by=lead note=accepted at 45.1 ledger adjudication; DW-766 bullet added under Story 45.5 in epics.md (Rule 17 1b)
