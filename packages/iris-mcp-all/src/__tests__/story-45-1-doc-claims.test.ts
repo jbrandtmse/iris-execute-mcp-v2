@@ -2,8 +2,9 @@
  * Story 45.1 QA (AC 45.1.7; project rules #30, #43, #45) - the documents say what the SQL route now does, and every claim has an oracle
  * other than the document itself:
  *  - the dev README's "SQL privileges (Story 45.1)" blockquote sits inside the SQL Tools section, between the write-safety and the
- *    resource-caps blockquotes, and carries the claims of AC 45.1.7: the SQL privileges the account needs, SQLCODE -99 ahead of the two
- *    refusal codes, the minimum account, the Atelier residual and the default state;
+ *    resource-caps blockquotes, and carries the claims of AC 45.1.7: the SQL privileges the account needs (administrative ones included),
+ *    SQLCODE -99 ahead of the two refusal codes for the privileges IRIS checks at prepare, the minimum account, the residuals and the
+ *    default state;
  *  - "ahead of `SQL_READ_ONLY` and `SQL_ROWS_AFFECTED_CAP`" names codes the SQL tool really emits (read from `sql.ts`);
  *  - "always on, with no setting" is derived: the built `iris_sql_execute` / `iris_sql_query` schemas have no privilege field, and the
  *    SQL environment variables `loadConfig` reads are exactly the four documented ones;
@@ -62,6 +63,10 @@ describe("Story 45.1: the dev README SQL privileges paragraph", () => {
       "EXECUTE on each SqlProc function or procedure it calls",
       "`SQL error` with `SQLCODE: -99`",
       "answers ahead of `SQL_READ_ONLY` and `SQL_ROWS_AFFECTED_CAP`, and nothing runs",
+      "each SQL administrative privilege a statement uses (for example `%CREATE_TABLE` for CREATE TABLE, `%NOTRIGGER` for TRUNCATE TABLE, `%NOJOURN` for a statement with `%NOJOURN`",
+      "This holds for the privileges IRIS checks at prepare",
+      "IRIS checks GRANT and some DDL (for example CREATE INDEX) only at execution",
+      "its database resources, not its SQL grants, bound the data",
       "`%Development` resource (`U`) and the namespace's database resource (`R` for reads, `RW` for writes), plus the SQL grants",
       "IRIS's own Atelier `action/query`",
       "prepares with checking off",
@@ -121,6 +126,8 @@ describe("Story 45.1: the CHANGELOG entry", () => {
       "`SQLCODE: -99`",
       "`User <name> is not privileged for the operation`",
       "SELECT (INSERT, UPDATE or DELETE for writes) on each table and EXECUTE on each SqlProc function or procedure",
+      "write and create tables through `iris_sql_execute`",
+      "each SQL administrative privilege a statement uses",
       "Nothing turns the check off.",
       "byte-identical requests and responses",
       "`SQL_READ_ONLY`, `SQL_ROWS_AFFECTED_CAP` or the `countOnly` message",
@@ -158,6 +165,7 @@ describe("Story 45.1: the changeset", () => {
       "`SQLCODE: -99`",
       "no setting, request field or environment variable that turns the check off",
       "`SQL_READ_ONLY`, `SQL_ROWS_AFFECTED_CAP`",
+      "IRIS checks GRANT and some DDL (for example CREATE INDEX) only at execution",
       "byte-identical",
       "Atelier `action/query`",
     ]) {

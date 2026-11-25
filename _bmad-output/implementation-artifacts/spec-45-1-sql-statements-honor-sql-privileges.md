@@ -106,6 +106,34 @@ Least-privilege account = role with `%Development:U` and the namespace database 
 - Given the throwaway after seeding, when `ExecuteMCPv2.Tests.BaseTest` runs, then `total` is 7 and all pass (AC 45.1.5 as amended).
 - Given the changed tree, when `pnpm gen:ipm:check`, `pnpm gen:governance-baseline:check` and `pnpm gen:tools-list-snapshot:check` run, then all pass unchanged.
 
+### Review Findings
+
+Code review 2026-11-25 (`bmad-code-review`, full mode, frozen diff `bbe42006..d6cac7c4` minus bookkeeping). Layers delivered: Blind Hunter (9), Edge Case Hunter (9, JSON), Verification Gap (3 gap blocks + other findings), Acceptance Auditor (5). Review outcome: CLEAN (no failed layer). 0 decision-needed, 7 patch, 2 defer, 12 rejected.
+
+- [x] [Review][Patch] (medium) The README and changeset said a missing grant answers -99 before every read-only or cap check with no qualifier; IRIS checks GRANT and some DDL (CREATE INDEX) only at execution (AC 45.1.1 "states the difference exactly", AC 45.1.7) [packages/iris-dev-mcp/README.md:197, .changeset/story-45-1-sql-statements-honor-sql-privileges.md:9]
+- [x] [Review][Patch] (medium) The README, CHANGELOG and changeset listed only table grants and EXECUTE; a statement also needs the SQL administrative privilege it uses (`%CREATE_TABLE`, `%NOTRIGGER` for TRUNCATE TABLE, `%NOJOURN`, per the probe record and the gate's `%NOJOURN` leg), so "byte-identical with the grants it needs" read as false for a table-granted account's `%NOJOURN` statement [README.md:197, CHANGELOG.md:35, changeset:10]
+- [x] [Review][Patch] (low) The CHANGELOG and changeset said the account "could read, write and create tables through both tools"; `iris_sql_query` was always read-only [CHANGELOG.md:35, changeset:8]
+- [x] [Review][Patch] (low) The live gate's comment claimed IRIS's default database resource is `%DB_<name>`; it is `%DB_%DEFAULT` (`irislib/%sySecurity.inc:95`), and the config route reports no resource at all, so the gate's value is a naming-convention guess that fails closed [packages/iris-dev-mcp/src/__tests__/sql-privileges-live-gate.test.ts:490]
+- [x] [Review][Patch] (low) The README named only Atelier `action/query` as the residual; the same `%Development` account reads globals and runs ObjectScript through other tools (AD-31 trust model) [README.md:197]
+- [x] [Review][Patch] (low) The root README back-compat bullet still promised unchanged SQL results with default settings; it now names the `S-45.1-sql-privileges` exception [README.md:741]
+- [x] [Review][Patch] (low, Rule 19) The last AC (generator checks unchanged) had no `mutation:` line; recorded as closed by decision under `## Verification`
+- [x] [Review][Defer] (medium) `/config/database` reports `resource: ""` for every database (Config.Databases has no Resource property; live read of the shared instance: 15 of 15 empty) [src/ExecuteMCPv2/REST/Config.cls:209] — deferred: out-of-footprint, pre-existing; ledger DW-765, routed owner=burndown
+- [x] [Review][Defer] (medium, unverified) The minimum account (`%Development:U` plus the namespace's database resource) is proven only where globals, routines and the ExecuteMCPv2 classes share one database [README.md:197] — deferred: a split or mapped database layout probed on a throwaway would settle it; ledger DW-766, routed owner=45-5-what-the-safety-settings-protect
+
+Rejected:
+- Edge: the harness import or `throwawayEnvProblems` throwing leaves `skipReason` unset, so `afterAll` cleans up on a non-throwaway target (low): unlikely, the fix adds a guard, and the cleanup only deletes names the gate alone creates, each behind an existence check.
+- Edge: a throwing `REVOKE EXECUTE` in `finally` skips the table REVOKE (low): throwaway only; the user holding the grant is deleted at teardown.
+- Edge: a refused CREATE TABLE that regresses to success leaks hashed extent globals (low): reachable only when that test is already red.
+- Edge: the `ReadControls` pin misses `%Get("x", default)` and `pBody.x` reads (low): any off-switch has to change the `%Prepare(.pQuery, 1)` literal, which is pinned exactly.
+- Edge + Blind: the doc-claims "no setting" oracle is a denylist (low): same literal pin; the tools-list snapshot pins the schemas exactly.
+- Edge: the gate header says nothing named QaStory451 is left, but grants are not checked (low): the grantee is deleted on a throwaway.
+- Blind: the "no role widening" pin scans only `Sql.cls`, not Dispatch, Utils or the web app's MatchRoles (low): the armed live gate (CI, `allowedSkips: []`) goes red on any elevation; DW-764 by-design.
+- Blind: no JOIN, subquery, `INSERT ... SELECT` or view legs (low): IRIS's own prepare-time check; new live legs are not a two-way door. wontfix-accepted, reopen_if a reported indirect-access bypass through `/dev/sql/execute`.
+- Blind + Auditor: the env-var controls (`IRIS_SQL_READ_ONLY`, `IRIS_SQL_MAX_ROWS_AFFECTED`, `IRIS_SQL_MAX_ROWS`) are not driven as the least-privilege account (low): `sql.ts:128,130` sends them as the same `readOnly`/`maxRowsAffected` body fields the parameter legs cover, and `IRIS_SQL_MAX_ROWS` is a TypeScript post-fetch clamp; IRIS sees no different path.
+- Blind: the spec's `deferred:` list and Auto Run Result are stale against QA's work (rule: a fix that edits the spec under review is rejected). DW-763 was fixed by QA and awaits the lead's adjudication.
+- Gap: `story-45-1-doc-claims.test.ts` reads the built dist, so a stale local dist fails open (low): CI builds first, and `gen:tools-list-snapshot:check` pins the schemas.
+- Gap: no live leg for a table-granted account's `%NOJOURN` statement (low): the docs now state the `%NOJOURN` privilege and the ungranted leg pins IRIS's text; a new live leg needs a throwaway cycle. wontfix-accepted, reopen_if an account with DELETE and `%NOJOURN` granted is refused by `/dev/sql/execute`.
+
 ## Spec Change Log
 
 - 2026-11-25 (lead, spec gate, decision #157): the plan's three `epics.md` amendments were applied, each tagged. AC 45.1.1: the role holds the `%Development` resource. AC 45.1.3: the ordering change covers every refusal check. AC 45.1.5: `BaseTest` on the throwaway, plus the TypeScript live gate. The spine's AD-15 `S-45.1-sql-privileges` text and AD-25 "SQL privileges" bullet were amended to match.
@@ -209,6 +237,11 @@ Mutations (Rule #19/#59; `mutation: <change> -> <red>`; the path each guards is 
 - AC 45.1.5 (embed regenerated): a comment line appended to `Sql.cls` with no `gen:bootstrap` -> `sql-privilege-mode.test.ts` embed-equals-tree red and `bootstrap.test.ts` "embedded class contents match disk .cls files" plus "the marker's hash is the SHA-256 hash of concatenated disk contents" red (2 of 109); restored. Path: default suite. `ExecuteMCPv2.Tests.BaseTest` on the throwaway: run 1, 7 passed of 7 (`BaseTest.cls` has 7 `Test*` methods, Rule #35).
 - AC 45.1.7 (docs): `S-45.1-sql-privileges` renamed in `CHANGELOG.md` -> CHANGELOG test red; the README "Default state" sentence removed -> README test red; the `@iris-mcp/shared` bump removed from the changeset -> changeset test red; a new `env.IRIS_SQL_CHECK_PRIV` read added to `config.ts` -> "always on, with no setting" test red; each restored with `git checkout --`. With the changeset file absent the changeset test skips and 9 pass (the release step consumes the file). Path: default suite.
 - DW-763: (1) `userExists` pointed at a route that 404s, with the NEW catch -> the gate fails in `beforeAll` (`IrisApiError: IRIS returned HTTP 404`, 17 skipped); (2) the same wrong route with the OLD catch -> 17 of 17 green (the vacuous pass DW-763 described, demonstrated); (3) `isMissingUserError` without its `statusCode !== 200` check -> `live-principal-helpers.test.ts` 1 of 5 red (the 401/403/404/500 case). Restored by file copy (`shasum -c` OK).
+
+Code review (2026-11-25):
+- mutation: the README's "This holds for the privileges IRIS checks at prepare ... applies first." sentence removed -> `story-45-1-doc-claims.test.ts` "states what the account needs ..." red (1 of 10); restored (`shasum -c` OK). Path: default suite.
+- mutation: the changeset's prepare/execution qualifier removed -> the changeset test red (1 of 10); restored (`shasum -c` OK). Path: default suite.
+- The last AC (`gen:ipm:check`, `gen:governance-baseline:check`, `gen:tools-list-snapshot:check` pass unchanged): no mutation, closed by decision. Each check was proven red by the story that owns it; this story changes no tool, IPM or governance surface, and mutating those generated files is forbidden here.
 
 Doc claims checked against behavior: the CHANGELOG, README and changeset agree with the probe record and the live gate on the error text, the ordering, the minimum account and the default state. One qualification is missing from the README paragraph only: "A missing grant is an `SQL error` with `SQLCODE: -99` before any read-only or cap check" holds for the statements IRIS checks at prepare (SELECT, INSERT, UPDATE, DELETE, CALL and SqlProc calls, CREATE TABLE, TRUNCATE, `%NOJOURN`), not for GRANT or CREATE INDEX (checked at execution); the `Sql.cls` banner and the CHANGELOG already say so. Not edited here (README text is the story's deliverable); flagged for the lead.
 

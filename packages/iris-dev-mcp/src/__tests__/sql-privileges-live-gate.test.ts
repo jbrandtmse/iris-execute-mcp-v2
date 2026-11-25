@@ -199,7 +199,9 @@ async function namespaceDatabaseResource(): Promise<string> {
   const databases = (await client.get(`${CONFIG_PATH}/database`)).result as Array<{ name: string; resource?: string }>;
   const database = databases.find((candidate) => candidate.name.toUpperCase() === entry.globals?.toUpperCase());
   if (!database) throw new Error(`the live configuration lists no database ${entry.globals}`);
-  // A database with no explicit Resource is protected by IRIS's default, %DB_<name>; the account's login and reads prove it.
+  // The config route reports no resource today (Config.Databases has no Resource property; IRIS keeps it in SYS.Database.ResourceName,
+  // whose default is %DB_%DEFAULT), so this falls back to the %DB_<name> convention the seeded throwaway uses. A wrong guess fails
+  // closed: the least-privilege login or the granted reads go red, never a false pass.
   return database.resource ? database.resource : `%DB_${database.name.toUpperCase()}`;
 }
 
