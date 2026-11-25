@@ -945,7 +945,10 @@ export function buildIrisSideRefusal(config: IrisConnectionConfig, result: Boots
     "nothing on IRIS; tools that use only the Atelier API keep working. " +
     `To use this tool, an operator installs or upgrades the IRIS side once: start one server against ${config.host}:${config.port} ` +
     `${autoInstallWayOut(source)}, or run zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}" in '${namespace}' as a user with %Admin_Manage. ` +
-    "An instance that only read-only servers use needs this once after every release that changes the IRIS-side classes.";
+    "Then restart this server: the refusal is decided when the profile connects. " +
+    "After every upgrade of the servers (each release stamps its version into the IRIS-side classes), an instance that only " +
+    "read-only servers, or servers with the automatic install off, connect to needs this once: upgrading the IRIS side is a " +
+    "deliberate admin step.";
   return {
     text,
     fields: {
@@ -969,7 +972,8 @@ function warnCustomRestRefused(config: IrisConnectionConfig, result: BootstrapRe
       "This server installs, upgrades and repairs nothing on IRIS, so its custom-REST tools refuse with IRIS_SIDE_NOT_INSTALLED " +
       "for this profile; tools that use only the Atelier API keep working. " +
       `To install or upgrade the IRIS side once, start one server against ${config.host}:${config.port} ${autoInstallWayOut(source)}, ` +
-      `or run zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}" in '${config.namespace}' as a user with %Admin_Manage.`,
+      `or run zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}" in '${config.namespace}' as a user with %Admin_Manage, ` +
+      "then restart this server.",
   );
 }
 

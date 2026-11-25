@@ -238,6 +238,7 @@ describe.each(SOURCES)("the install off from $source", ({ source, label: sourceL
       expect(warning).toContain("IRIS_SIDE_NOT_INSTALLED");
       expect(warning).toContain(`start one server against localhost:52773 ${wayOut}`);
       expect(warning).toContain(`zpm "install ${IPM_MODULE_NAME} ${SEMVER}" in 'USER'`);
+      expect(warning, "the refusal is decided at connect, so the way out ends with a restart").toContain("then restart this server.");
       expect(lines("[INFO] Bootstrap: the automatic install is off"), "the INFO line is for the other branches").toEqual([]);
     },
   );
@@ -402,7 +403,10 @@ describe("buildIrisSideRefusal", () => {
         "tools that use only the Atelier API keep working. " +
         "To use this tool, an operator installs or upgrades the IRIS side once: start one server against localhost:52773 without the read-only preset, " +
         `or run zpm "install ${IPM_MODULE_NAME} ${SEMVER}" in 'USER' as a user with %Admin_Manage. ` +
-        "An instance that only read-only servers use needs this once after every release that changes the IRIS-side classes.",
+        "Then restart this server: the refusal is decided when the profile connects. " +
+        "After every upgrade of the servers (each release stamps its version into the IRIS-side classes), an instance that only " +
+        "read-only servers, or servers with the automatic install off, connect to needs this once: upgrading the IRIS side is a " +
+        "deliberate admin step.",
     );
   });
 
@@ -411,6 +415,13 @@ describe("buildIrisSideRefusal", () => {
     expect(fields).toMatchObject({ found: "stale", deployedVersion: OLD_MARKER, profile: "default" });
     expect(text).toContain(`are from an older build (${OLD_MARKER}; this server needs ${BOOTSTRAP_VERSION})`);
     expect(text).toContain("with IRIS_AUTO_INSTALL unset or true");
+    // C-2: a stale reader learns that a server upgrade needs one IRIS-side upgrade by an operator.
+    expect(text).toContain(
+      "After every upgrade of the servers (each release stamps its version into the IRIS-side classes), an instance that only " +
+        "read-only servers, or servers with the automatic install off, connect to needs this once",
+    );
+    expect(text).toContain("an operator installs or upgrades the IRIS side once");
+    expect(text).toContain("Then restart this server: the refusal is decided when the profile connects.");
   });
 
   it("unconfigured: the finding adds the Configure one-liner; no deployedVersion", () => {

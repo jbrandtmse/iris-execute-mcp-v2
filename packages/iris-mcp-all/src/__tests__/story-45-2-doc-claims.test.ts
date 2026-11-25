@@ -10,9 +10,9 @@
  *    `applyAutoInstall` can write;
  *  - the section links the new text uses point at headings that exist (GitHub's slug rule);
  *  - the CHANGELOG section (found by title) names the sanction id, the code, the discovery fields, the upgrade note, the unknown
- *    residual and the unchanged `BOOTSTRAP_VERSION`; the changeset (asserted only while it exists) is a patch bump of the shared package
+ *    residual and the unchanged `BOOTSTRAP_VERSION`; the changeset (asserted only while it exists) is a minor bump of the shared package
  *    and the five servers and names the sanction id.
- * Needs no IRIS. The built shared dist is the oracle; a stale dist fails the gate tests that own it.
+ * Needs no IRIS. The built shared dist is the oracle, and this file fails when it is stale.
  */
 
 import { describe, it, expect } from "vitest";
@@ -20,6 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { REPO_ROOT } from "./pack-fixture";
+import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
 
 const read = (relative: string): string => readFileSync(path.join(REPO_ROOT, relative), "utf8");
 const squash = (text: string): string => text.replace(/\s+/g, " ");
@@ -31,6 +32,14 @@ const SANCTION = "`S-45.2-read-only-no-install`";
 
 type SharedApi = typeof import("../../../shared/dist/index.js");
 const shared = (await import(pathToFileURL(path.join(REPO_ROOT, "packages/shared/dist/index.js")).href)) as SharedApi;
+
+describe("Story 45.2 doc claims: the oracle", () => {
+  it("is a fresh build of the shared package (a stale dist would check the documents against old code)", () => {
+    const fresh = checkDistFresh(path.join(REPO_ROOT, "packages", "shared"), "shared");
+    expect(fresh.ok ? undefined : fresh.reason).toBeUndefined();
+    expect(fresh.skipped, "the shared package declares its dist output").toBeFalsy();
+  });
+});
 
 /** The README table row (a single line) whose first cell is exactly `cell`. */
 function tableRow(cell: string): string {
@@ -189,7 +198,7 @@ describe("Story 45.2: the README roster bullet and the real roster entry", () =>
 describe("Story 45.2: the README read-only section, the Quick Start line and the back-compat list", () => {
   it("the Quick Start line says the install can be off, and the read-only section says what it installs and what it leaves", () => {
     const quick = squash(readme.split("\n").find((line) => line.startsWith("**The IRIS side installs itself.**")) ?? "");
-    expect(quick).toContain("unless the automatic install is off (`IRIS_AUTO_INSTALL=false`, or the [read-only preset]");
+    expect(quick).toContain("unless the automatic install is off (`IRIS_AUTO_INSTALL=false`, a profile's `autoInstall: false`, or the [read-only preset]");
     const section = squash(readme.split("\n").find((line) => line.startsWith("- **Installs nothing on IRIS (Story 45.2).**")) ?? "");
     for (const needle of [
       "never uploads or compiles the `ExecuteMCPv2` classes",
@@ -198,7 +207,8 @@ describe("Story 45.2: the README read-only section, the Quick Start line and the
       "The default state is on; the preset forces it off",
       "**Upgrading is a deliberate admin step.**",
       "restart the refusing server",
-      "After upgrading the servers to a release that changes the IRIS-side classes (1.3.0 is one)",
+      // Every release restamps the marker's semver (gen-bootstrap.mjs at the version step), so every upgrade reads as stale.
+      "After every upgrade of the servers (each release stamps its version into the IRIS-side classes",
       "an `unknown` IRIS side whose marker reads older",
       "`iris_execute_tests` and `iris_test_coverage` refuse on a profile whose IRIS side is not installed while the install is off",
     ]) {
@@ -244,7 +254,7 @@ describe("Story 45.2: the CHANGELOG entry", () => {
       "`IRIS_AUTO_INSTALL`",
       "`autoInstall` and `autoInstallSource`",
       "after `dataPolicySource`",
-      "After upgrading the servers to a release that changes the IRIS-side classes (1.3.0 is one)",
+      "After every upgrade of the servers (each release stamps its version into the IRIS-side classes",
       "Upgrading is a deliberate admin step.",
       "An `unknown` IRIS side is not refused.",
       "`iris_execute_tests` and `iris_test_coverage` refuse on such a profile",
@@ -261,11 +271,12 @@ describe("Story 45.2: the changeset", () => {
   // `changeset version` consumes (deletes) the file and moves its text into the generated package changelogs, so it is checked while it exists.
   const present = existsSync(path.join(REPO_ROOT, changesetPath));
 
-  it.skipIf(!present)("bumps @iris-mcp/shared and the five servers patch, and nothing else, and names the sanction id and the upgrade note", () => {
+  // Decision #160: a new setting is a feature, so the bump is minor (the `fixed` group makes one minor changeset the release's 1.3.0).
+  it.skipIf(!present)("bumps @iris-mcp/shared and the five servers minor, and nothing else, and names the sanction id and the upgrade note", () => {
     const text = read(changesetPath);
     const front = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? "";
     expect(front.split("\n").map((line) => line.trim()).sort()).toEqual(
-      ["admin", "data", "dev", "interop", "ops", "shared"].map((name) => `"@iris-mcp/${name}": patch`).sort(),
+      ["admin", "data", "dev", "interop", "ops", "shared"].map((name) => `"@iris-mcp/${name}": minor`).sort(),
     );
     const body = squash(text);
     for (const needle of [
@@ -274,6 +285,7 @@ describe("Story 45.2: the changeset", () => {
       "`IRIS_AUTO_INSTALL`",
       "`IRIS_SIDE_NOT_INSTALLED`",
       "Upgrading is a deliberate admin step.",
+      "after every upgrade of the servers (each release stamps its version into the IRIS-side classes",
       "No `.cls` changed, so `BOOTSTRAP_VERSION` is unchanged.",
     ]) {
       expect(body, needle).toContain(needle);

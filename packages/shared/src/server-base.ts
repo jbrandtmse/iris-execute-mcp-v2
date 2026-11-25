@@ -2032,7 +2032,8 @@ export class McpServerBase {
     // (AD-1, Story 45.2). The recorder keeps the first such refusal of this call, refuses every later request of the call,
     // and lets the framework answer with the refusal whatever the handler did with the error.
     const sideRefusal: SideRefusalRecorder = {};
-    // One view per client for the whole call, so asking for the same profile twice returns the same object.
+    // One view per client object the call is handed. On a wire call each profile lookup returns a fresh signal-bound client, so
+    // it gets its own view; every view shares the one recorder, so the refusal holds across all of them.
     const recorded = new Map<IrisHttpClient, IrisHttpClient>();
     const record = (client: IrisHttpClient): IrisHttpClient => {
       let view = recorded.get(client);

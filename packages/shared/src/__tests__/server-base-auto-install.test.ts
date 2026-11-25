@@ -10,16 +10,34 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 import type { BootstrapResult } from "../bootstrap.js";
 import type { IrisConnectionConfig } from "../config.js";
 import { makeEnvHarness } from "./env-harness.js";
+import { auditLines } from "./test-helpers.js";
 
-const refusedFor = (probeStatus: "missing" | "stale" | "unconfigured"): BootstrapResult => ({
+/**
+ * The result the real bootstrap returns for a refused profile (Rule #54): only with the install off, and naming the channel the
+ * resolution handed it in `config.autoInstallSource`.
+ */
+const refusedFor = (probeStatus: "missing" | "stale" | "unconfigured", config: IrisConnectionConfig): BootstrapResult => {
+  if (config.autoInstall !== false || config.autoInstallSource === undefined) {
+    throw new Error("the real bootstrap refuses only a profile whose install the resolution turned off");
+  }
+  return refusedShape(probeStatus, config.autoInstallSource);
+};
+
+const refusedShape = (
+  probeStatus: "missing" | "stale" | "unconfigured",
+  source: NonNullable<BootstrapResult["autoInstallOff"]>,
+): BootstrapResult => ({
   probeFound: probeStatus !== "missing",
   probeStatus,
   ...(probeStatus === "stale" ? { deployedVersion: "abcdef123456" } : {}),
-  autoInstallOff: "IRIS_GOVERNANCE_PRESET",
+  autoInstallOff: source,
   customRestRefused: true,
   deployed: false,
   compiled: false,
@@ -195,7 +213,8 @@ describe("startup fails fast, before any request to IRIS", () => {
 
 describe("a refused profile (the install is off and the IRIS side is not installed)", () => {
   async function started(extra: ToolDefinition[]) {
-    answer = () => refusedFor("missing");
+    process.env.IRIS_GOVERNANCE_PRESET = "read-only";
+    answer = (config) => refusedFor("missing", config);
     stageStartup(env.fetchMock);
     const server = new McpServerBase(opts(extra));
     await server.start("stdio");
@@ -297,8 +316,8 @@ describe("a refused profile (the install is off and the IRIS side is not install
   });
 
   it("the refusal is per profile: only p2 is refused, and the caller's own profile (default) is not", async () => {
-    process.env.IRIS_PROFILES = JSON.stringify({ p2: { host: "p2.example.com" } });
-    answer = (config) => (config.name === "p2" ? refusedFor("stale") : currentResult);
+    process.env.IRIS_PROFILES = JSON.stringify({ p2: { host: "p2.example.com", autoInstall: false } });
+    answer = (config) => (config.name === "p2" ? refusedFor("stale", config) : currentResult);
     stageStartup(env.fetchMock);
     const server = new McpServerBase(
       opts([
@@ -333,7 +352,7 @@ describe("a refused profile (the install is off and the IRIS side is not install
 
   it("a lazy profile (not default) is armed through the same path: server selects p2", async () => {
     process.env.IRIS_PROFILES = JSON.stringify({ p2: { host: "p2.example.com", autoInstall: false } });
-    answer = (config) => (config.name === "p2" ? refusedFor("unconfigured") : currentResult);
+    answer = (config) => (config.name === "p2" ? refusedFor("unconfigured", config) : currentResult);
     stageStartup(env.fetchMock);
     const server = new McpServerBase(opts([tool("iris_custom", async (_a, ctx) => text(JSON.stringify(await ctx.http.get("/api/executemcp/v2/x"))))]));
     await server.start("stdio");
@@ -358,7 +377,7 @@ describe("the default profile whose start-time health check failed (the lazy pat
 
   it("is told its resolved setting and armed by the lazy establishment, then refuses a custom-REST call with nothing sent for it", async () => {
     process.env.IRIS_AUTO_INSTALL = "false";
-    answer = () => refusedFor("missing");
+    answer = (config) => refusedFor("missing", config);
     const reachable = { up: false };
     unreachableUntil(reachable);
     const server = new McpServerBase(opts([tool("iris_custom", async (_a, ctx) => text(JSON.stringify(await ctx.http.get("/api/executemcp/v2/x"))))]));
@@ -372,14 +391,15 @@ describe("the default profile whose start-time health check failed (the lazy pat
     expect(bootstrapSpy).toHaveBeenCalledTimes(1);
     expect(configArg()).toMatchObject({ name: "default", autoInstall: false, autoInstallSource: "IRIS_AUTO_INSTALL" });
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ code: "IRIS_SIDE_NOT_INSTALLED", profile: "default", found: "missing", autoInstallSource: "IRIS_GOVERNANCE_PRESET" });
+    // The channel the resolution handed bootstrap is the one the refusal names.
+    expect(result.structuredContent).toMatchObject({ code: "IRIS_SIDE_NOT_INSTALLED", profile: "default", found: "missing", autoInstallSource: "IRIS_AUTO_INSTALL" });
     expect(paths(env.fetchMock, before).filter((p) => p.includes("/api/executemcp/")), "no request to the custom REST service").toEqual([]);
     expect(JSON.stringify(result)).not.toContain(SECRET);
   });
 
   it("an Atelier-only call on that armed default profile still works", async () => {
     process.env.IRIS_GOVERNANCE_PRESET = "read-only";
-    answer = () => refusedFor("stale");
+    answer = (config) => refusedFor("stale", config);
     const reachable = { up: false };
     unreachableUntil(reachable);
     const server = new McpServerBase(
@@ -434,6 +454,29 @@ describe("a profile that is not refused", () => {
       expect(paths(env.fetchMock, before)).toEqual(["GET http://default.example.com:52773/api/executemcp/v2/x"]);
     },
   );
+});
+
+describe("the audit entry of a refused call", () => {
+  // Decision #160 (DW-769): the refusal can follow a handler's earlier Atelier calls, so it is audited as `error`, with its text.
+  it("records outcome error, the refusal text, and never the password", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "iris-45-2-audit-"));
+    const auditPath = join(dir, "audit.log");
+    try {
+      process.env.IRIS_AUDIT_LOG = auditPath;
+      process.env.IRIS_GOVERNANCE_PRESET = "read-only";
+      answer = (config) => refusedFor("missing", config);
+      stageStartup(env.fetchMock);
+      const server = new McpServerBase(opts([tool("iris_custom", async (_a, ctx) => text(JSON.stringify(await ctx.http.get("/api/executemcp/v2/x"))))]));
+      await server.start("stdio");
+      expect((await callTool(server, "iris_custom")).structuredContent.code).toBe("IRIS_SIDE_NOT_INSTALLED");
+      const entry = (await auditLines(auditPath, 2)).find((line) => line.tool === "iris_custom");
+      expect(entry?.outcome).toBe("error");
+      expect(entry?.error).toContain('The ExecuteMCPv2 service on IRIS is not available to server profile "default"');
+      expect(readFileSync(auditPath, "utf8")).not.toContain(SECRET);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("discovery", () => {

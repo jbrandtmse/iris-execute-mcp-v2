@@ -25,6 +25,13 @@ deferred:
     location: >-
       packages/shared/src/server-base.ts deriveAuditOutcome
     severity: medium
+  - summary: >-
+      Install-off profiles refuse after EVERY server upgrade, not only after a release that changes the IRIS-side classes: owner decision whether that is the intended C-2 trade.
+    evidence: |-
+      Code review (Blind Hunter, verified): the marker is `<semver>+<sequence>.<hash>` and its semver follows packages/shared/package.json; the release version step restamps it (release 1.2.0 moved BOOTSTRAP_VERSION 1.1.0+5.6cbac260e73f -> 1.2.0+5.6cbac260e73f with the same hash, commit 4fcb0706). Markers order by semver first, so after any release the deployed side reads `stale` and an install-off profile refuses until an operator upgrades once. The docs and the refusal now say "after every upgrade"; the behavior is the spec's (`stale` refuses). C-2 was accepted on the premise that 1.3.0 changes the classes. Options: accept (docs already true), or have install-off profiles treat a semver-only difference (same sequence and hash) as current (an AD-14 amendment). Recommended: decision-pending for the owner at the epic decision sheet.
+    location: >-
+      packages/shared/src/bootstrap.ts probe/stale branch; scripts/gen-bootstrap.mjs marker stamping; AD-14 version marker
+    severity: medium
 ---
 
 <intent-contract>
@@ -127,6 +134,35 @@ deferred:
 - Given an unseeded throwaway, when the recorded live proof runs, then the read-only start leaves the snapshot identical, `iris_global_get` answers `IRIS_SIDE_NOT_INSTALLED`, `iris_server_info` succeeds, and the later normal start installs (AC 45.2.4 live).
 - Given a server whose stderr is captured with a known password in the env, when any matrix row runs, then the password never appears in stderr or in a refusal (AC 45.2.3).
 - Given the changed tree, when `pnpm gen:ipm:check`, `pnpm gen:governance-baseline:check`, `pnpm gen:tools-list-snapshot:check` and `pnpm gen:bootstrap` (no diff) run, then all pass unchanged.
+
+### Review Findings
+
+Code review 2026-11-25 (`bmad-code-review`, full mode, frozen diff `fd7a20cb..825f341e`; layers Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor all DELIVERED; review CLEAN). 25 raw rows, 12 patched root causes, 1 deferred (owner decision), 9 rejected; high 0.
+
+- [x] [Review][Patch] Changeset bumps `patch`, decision #160 says `minor` for all six packages (Edge+Blind+VG) [.changeset/story-45-2-auto-install-setting-off-under-read-only.md:2-7; doc-claims pin updated]
+- [x] [Review][Patch] Refusal's upgrade sentence named only read-only servers, not servers with the install off (C-2) (Auditor) [packages/shared/src/bootstrap.ts buildIrisSideRefusal]
+- [x] [Review][Patch] Upgrade note said "a release that changes the IRIS-side classes (1.3.0 is one)"; every release restamps the marker semver, so every upgrade reads `stale` (Blind) [bootstrap.ts refusal text; README.md read-only bullet; CHANGELOG.md upgrade note; changeset]
+- [x] [Review][Patch] Refusal text and the startup `[WARN]` never said to restart this server after the IRIS side is installed (the refusal is armed at connect) (Edge+Blind) [bootstrap.ts buildIrisSideRefusal, warnCustomRestRefused]
+- [x] [Review][Patch] CHANGELOG and changeset said `current` logs "one warning"; it logs none (Auditor) [CHANGELOG.md:12; changeset:14]
+- [x] [Review][Patch] Comment "asking for the same profile twice returns the same object" is false on the wire path (Edge+Blind) [packages/shared/src/server-base.ts handleToolCall]
+- [x] [Review][Patch] README install-on sections (marker table, self-heal) did not say what happens with the install off; Quick Start and IPM sentences omitted the profile field (Blind) [README.md]
+- [x] [Review][Patch] `readProductionGuard` `@returns` did not mention the rethrown `IrisSideNotInstalledError` (Blind) [packages/iris-dev-mcp/src/tools/test-production-guard.ts:65]
+- [x] [Review][Patch] Nothing pinned the audit entry of a refused call (`error`, decision #160) (VG gap) [server-base-auto-install.test.ts "the audit entry of a refused call"]
+- [x] [Review][Patch] `refusedFor()` fake returned `autoInstallOff: IRIS_GOVERNANCE_PRESET` for every profile, including ones whose install was on, and the lazy test asserted that impossible channel (Rule #54) (VG) [server-base-auto-install.test.ts]
+- [x] [Review][Patch] `story-45-2-doc-claims.test.ts` did not check that its dist oracle is fresh (VG) [story-45-2-doc-claims.test.ts]
+- [x] [Review][Patch] Missing `mutation:` lines for AC 45.2.6 (doc claims), AC 45.2.5 ledger checker and AC 45.2.3 stderr half (VG) [## Verification below]
+- [x] [Review][Defer] Install-off profiles refuse after every server upgrade, not only class-changing ones [bootstrap.ts stale branch; gen-bootstrap.mjs] — deferred: owner decision (frontmatter `deferred:`), the code follows the spec
+
+Rejected:
+- low, spec-bound: `unknown` with an older marker logs both the `[WARN]` (which says the install is off) and the `[INFO]` off line; the matrix row requires the INFO line (Auditor).
+- low: with the install off, the `newer`/`foreign`/`unknown`/IPM warnings still suggest "delete Setup and restart"; rare, the INFO line beside it says the install is off, and the README table now qualifies the remedies; a fix threads `off` into every remedy (Edge). reopen_if: a user report of following that remedy on an install-off server.
+- spec-bound: `missing`/`unconfigured` plus a non-404 InstallGuard read ends `unknown` and is not refused (decisions #158(b), #159; matrix row `unknown`) (Edge).
+- low, theoretical: `stop()` then `start()` in one process keeps non-default `profileMeta`, so a rebuilt client is not re-armed; no production caller re-enters `start()` (Edge).
+- low, theoretical: an injected `options.config` carrying `autoInstall: false` without a source disagrees with the registry; `loadConfig` never sets the field (Edge).
+- low, theoretical: exported `buildIrisSideRefusal` casts `probeStatus`; its one caller checks `customRestRefused` (Edge).
+- low, spec-bound: the `[INFO]` text "found X, nothing to install." is the Design Notes wording (Blind).
+- by-design: the discovery description does not list the new fields (decision #158(c)); exposing the armed state is new scope (Blind).
+- by-design: the changeset test skips once `changeset version` consumes the file, as documented (VG).
 
 ## Spec Change Log
 
@@ -240,6 +276,17 @@ Shared surfaces: `REFUSAL_CODES` (catalog test, README refusal table), the disco
 - `mutation: config.password added to the refusal text -> red`: `bootstrap-auto-install.test.ts` 4 failed (the three `the password never reaches ...` rows and the exact-text row) and `server-base-auto-install.test.ts` 1 failed.
 - `mutation: ctx.resolveProfileClient builds its own IrisHttpClient -> red`: `resolve-profile-client.test.ts` 2 failed.
 - Every mutation was reverted with `cp` from a copy taken before and checked with `cmp` (identical); `git status` shows no change to those source files beyond the story's own.
+
+**Code review (2026-11-25), additions.** Each mutation applied with the Edit tool, run, restored from a copy and checked with `cmp` (identical); the dists rebuilt (`pnpm turbo run build --force`) after the last restore. The refusal text now differs from the Design Notes C-2 template in two sentences (lead directive: the C-2 note must reach a `stale` reader): "Then restart this server: the refusal is decided when the profile connects." and "After every upgrade of the servers (each release stamps its version into the IRIS-side classes), an instance that only read-only servers, or servers with the automatic install off, connect to needs this once: upgrading the IRIS side is a deliberate admin step."; the `[WARN]` way out ends "then restart this server.".
+- `mutation: the refusal's last sentence back to "An instance that only read-only servers use needs this once after every release that changes the IRIS-side classes." -> red`: `bootstrap-auto-install.test.ts` 2 failed (`missing: the fields ... and the upgrade note`, `stale: ... older-build finding`).
+- `mutation: drop "Then restart this server ..." from the refusal and ", then restart this server." from the [WARN] line -> red`: `bootstrap-auto-install.test.ts` 11 failed (the 9 OFF-branch legs x channel, and both `buildIrisSideRefusal` rows).
+- `mutation: buildIrisSideRefusal names IRIS_GOVERNANCE_PRESET whatever the channel -> red`: `server-base-auto-install.test.ts` lazy-default leg (expects `IRIS_AUTO_INSTALL`; it was green before the review because the fake returned the preset).
+- `mutation: deriveAuditOutcome maps IRIS_SIDE_NOT_INSTALLED to denied -> red`: `server-base-auto-install.test.ts` `the audit entry of a refused call` (AC 45.2.2 audit pin, decision #160).
+- `mutation: the changeset's ops bump back to patch -> red`: `story-45-2-doc-claims.test.ts` `the changeset ... minor` (AC 45.2.6, decision #160).
+- `mutation: the README upgrade note back to "After upgrading the servers to a release that changes the IRIS-side classes (1.3.0 is one)" -> red`: `story-45-2-doc-claims.test.ts` README read-only section row (AC 45.2.6).
+- `mutation: the 45.2/discovery-roster/dev ledger entry's new value without autoInstallSource -> red`: `story-43-4-sanctioned-golden-changes.test.ts` `the ledger > every sanction is registered with a shape ...` (AC 45.2.5, the `S-45.2-read-only-no-install` shape checker).
+- `mutation: touch packages/shared/src/refusals.ts after the build (content unchanged) -> red`: `story-45-2-doc-claims.test.ts` `the oracle > is a fresh build of the shared package`.
+- `mutation: the [WARN] line appends config.password (the log half of AC 45.2.3; the refusal half was pinned before) -> red`: `bootstrap-auto-install.test.ts` `the password never reaches a log line, the result or the refusal` x3 channels.
 
 ## Auto Run Result
 
