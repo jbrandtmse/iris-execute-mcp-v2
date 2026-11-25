@@ -2,14 +2,29 @@
 title: 'Story 45.1: SQL Statements Honor SQL Privileges'
 type: 'bugfix'
 created: '2026-11-25'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'bbe42006f5bb09e46732b4c295f3260ad8d68fe9'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-45-context.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      The live gate's `userExists` treats any IrisApiError as "user absent", so a teardown assertion could pass vacuously on a 401/500.
+    evidence: |-
+      sql-privileges-live-gate.test.ts userExists catches every IrisApiError and returns false; the status the Security route gives for a missing user was not probed. Throwaway-only.
+    location: >-
+      packages/iris-dev-mcp/src/__tests__/sql-privileges-live-gate.test.ts:165
+    severity: low
+  - summary: >-
+      The default-suite privilege pin reads source text only; a bypass that keeps the literal 1 (for example a changed $Roles before Perform) is caught only by the armed live gate in CI.
+    evidence: |-
+      sql-privilege-mode.test.ts never executes the handler; the spec records that no ObjectScript test host exists for Sql.cls by Story 38.5 design.
+    location: >-
+      packages/iris-dev-mcp/src/__tests__/sql-privilege-mode.test.ts
+    severity: low
 ---
 
 <intent-contract>
@@ -97,6 +112,28 @@ Least-privilege account = role with `%Development:U` and the namespace database 
 
 ## Review Triage Log
 
+### 2026-11-25 — Review pass
+- verdicts: 18 rows (a row groups findings from several layers that make the same claim) — high 0, medium 0, low 18, false 0, maybe-false 0; routes: patch 3, defer 2, reject 13
+- findings:
+  - `[low]` `[reject]` Blind-1 / Edge-2 / Gap-other: live gate skips green under `IRIS_REQUIRE_LIVE` against a non-throwaway IRIS — the spec orders exactly this ("principal legs skip with that reason" off a throwaway); CI `prepublish-dev` has `allowedSkips: []` and runs on the seeded throwaway, so a skip is red there. Spec-bound.
+  - `[low]` `[reject]` Blind-2 / Gap-2: ordering outcomes for `countOnly` and `%NOJOURN` not pinned live — `Decline` needs the prepared statement type, so the order is structural; closing it needs new live legs (not a two-way door). `reopen_if`: a change moves `Decline` ahead of the prepare.
+  - `[low]` `[reject]` Blind-3: `R`-only read path untested — the spec's probe record shows `R` suffices for SELECT through both read paths.
+  - `[low]` `[reject]` Blind-4: `tool_support.md` and the root README back-compat bullet not updated — spec scopes docs to the dev README, CHANGELOG and changeset (Rule #43 minimum met); the closing rollup (Story 45.5) enriches. The root bullet speaks of fields returned, which is unchanged for a granted account.
+  - `[low]` `[reject]` Blind-5: tool descriptions do not mention the privilege requirement — the spec's Never list forbids tool-description changes.
+  - `[low]` `[patch]` Blind-6 / Edge-4 / Edge-5: `sql-privilege-mode.test.ts` passed vacuously for a renamed method and ignored `%ExecDirect`/`%PrepareClassQuery` — patched: non-empty body assertion, entry-point pattern; re-run green.
+  - `[low]` `[reject]` Blind-7a: README/CHANGELOG cite Story 45.5, not yet shipped — it is a planned story of this epic (`epics.md`).
+  - `[low]` `[patch]` Blind-7b: over-long reflowed line in the `Perform` doc comment — rewrapped; embed regenerated.
+  - `[low]` `[defer]` Edge-1: `userExists` in the live gate treats any `IrisApiError` as "absent" — throwaway-only teardown assertion; the status the route gives for a missing user was not probed here (needs a live check before narrowing to 404).
+  - `[low]` `[reject]` Edge-3: English/casing assertion in `expectPrivilegeError` — instance locale is `enuw` (Rule #13); the text is IRIS's SQL message and the throwaway is English.
+  - `[low]` `[patch]` Edge-6 / Edge-7: "answers ahead of every decline" is overbroad for GRANT and some DDL (IRIS checks them at execution, per the probe record) — qualified in the `Sql.cls` banner and `Perform` comment (embed regenerated) and in the CHANGELOG; nothing runs either way.
+  - `[low]` `[defer]` Gap-1: the default-suite pin reads source text only; a literal-1 bypass elsewhere is caught only by the armed live gate in CI — the spec's chosen design (no ObjectScript test host for `Sql.cls`).
+  - `[low]` `[reject]` Gap-3: AC 45.1.2 second clause, 45.1.3 and 45.1.6 lacked `mutation:` lines — recorded under `## Verification` (the second-clause mutation was applied and observed red; 45.1.6 is closed by decision).
+  - `[low]` `[reject]` Gap-4 / Gap-5: `REQUIRE_LIVE` accepts `"true"` while `throwawayEnvProblems` accepts only `"1"` — the harness always exports `1`; the mismatch only yields a skip reason, never a false pass.
+  - `[low]` `[reject]` Gap-6: the Atelier residual leg goes red if IRIS closes the gap — that is its stated purpose.
+  - `[low]` `[reject]` Gap-7: the embed-equality test needs a prior `pnpm build` — fails closed; same as `test-production-guard.test.ts`.
+  - `[low]` `[reject]` Gap-8: README/CHANGELOG privilege claims pinned by no test — spec leaves `story-38-5-qa-doc-claims.test.ts` untouched by design.
+  - `[low]` `[reject]` Intent-alignment: descriptive audit; reading 1 (statement-level) implemented, the Atelier residual (reading 3) is documented and deferred to Story 45.5 by the epic. No actionable finding.
+
 ## Design Notes
 
 **Governing ADs:** AD-25 (SQL privileges rule, supersedes 38.5 parity), AD-31 (IRIS authorizes; errors via `SanitizeError`; trust model), AD-15 (`S-45.1-sql-privileges`), AD-14 (embed regen, IPM frozen), AD-11 (one envelope), AD-33 (route request shape unchanged).
@@ -145,7 +182,23 @@ Shared surfaces: the bootstrap embed and `BOOTSTRAP_VERSION` (`bootstrap.test.ts
 - AC 45.1.4: the same mutation PUT + compiled on the throwaway only (Atelier `PUT /doc` + `action/compile` as `_SYSTEM`) -> live gate ungranted-refusal tests red via the tool over `/dev/sql/execute`; redeploy the original and re-run green.
 - AC 45.1.6: none needed beyond the 38.5 gates' own mutations; their expectation files are untouched.
 
+Recorded results (Rule 19; `mutation: <change> -> <red>`):
+- mutation: `Sql.cls` `%Prepare(.pQuery, 1)` -> `0` -> `sql-privilege-mode.test.ts` 2 of 8 red (the one-literal-`1` test and the embed-equals-tree test); restored. Path: default suite, no IRIS.
+- mutation: a seventh control read added to `ReadControls` (`ReadFlag(pBody, "checkPriv", ...)`) -> `sql-privilege-mode.test.ts` "ReadControls reads exactly the six documented controls" and the embed-equals-tree test red; restored, `gen:bootstrap` Unchanged. Path: default suite.
+- mutation: `%Prepare(.pQuery, 0)` PUT + compiled on the throwaway only (host 127.0.0.1:52792) -> `sql-privileges-live-gate.test.ts` 12 of 15 red through the tool over `/dev/sql/execute` (3 stayed green by design: fixture check, Atelier residual, `_SYSTEM`); original redeployed, 15 of 15 green. Path: the armed gate on a seeded throwaway.
+- `BOOTSTRAP_VERSION` from `1.2.0+5.6cbac260e73f` to `1.2.0+8.5cedcac20ae9` (the live-gate run above was on `1.2.0+6.e7d03d3558ce`; the later changes are `Sql.cls` doc comments only and `gen:bootstrap` run twice reports Unchanged).
+
 ## Auto Run Result
 
-Status: ready-for-dev
-Blocking condition: none. Halted after planning as directed. Probes for AC 45.1.1 ran on throwaway `iris-mcp-throwaway-372894a1e1b7` (127.0.0.1:52792), which was removed; no throwaway remains. The shared instance was not touched. Three epics.md amendments are recorded under Design Notes for the lead (the `%Development` resource-vs-role wording, the missing `Sql.cls` ObjectScript test host, and the ordering change covering every decline).
+Status: done
+Blocking condition: none.
+
+Implementation pass (2026-11-25):
+- **Change:** `Sql.cls` `Perform` prepares with `%Prepare(.pQuery, 1)` (literal, no off-switch); banner and `Perform` comments updated; embed regenerated, `BOOTSTRAP_VERSION` `1.2.0+5.6cbac260e73f` to `1.2.0+8.5cedcac20ae9` (`gen:bootstrap` run twice: Unchanged; `scripts/bootstrap-sequence.json` moved with it).
+- **Files:** `src/ExecuteMCPv2/REST/Sql.cls`; `packages/shared/src/bootstrap-classes.ts`, `scripts/bootstrap-sequence.json` (generated); new `packages/iris-dev-mcp/src/__tests__/sql-privilege-mode.test.ts` (8 default-suite tests) and `sql-privileges-live-gate.test.ts` (15 armed tests, throwaway-only principals); `packages/iris-dev-mcp/scripts/prepublish-gate.mjs` (roster); `packages/iris-dev-mcp/README.md`, `CHANGELOG.md`, `.changeset/story-45-1-sql-statements-honor-sql-privileges.md`.
+- **Review:** 18 triage rows, all low: patches 3 (static-pin vacuity and entry points, comment rewrap, GRANT/DDL ordering qualifier), deferred 2 (see frontmatter `deferred:`), rejected 13 with reasons in the log. No high or medium.
+- **Follow-up review recommended:** false (no high, no medium patched).
+- **Verification:** throwaway (digest-pinned image, port 52792, seeded as CI): privilege gate 15/15, `sql-safety-live-gate` 90/90 and `story-38-5-qa-sql-wire-gate` 28/28 (files unchanged), `ExecuteMCPv2.Tests.BaseTest` 7/7 (7 `Test*` methods), `down` run, `docker ps -a --filter label=iris-mcp.owner=throwaway` empty. After the review patches (doc comments, tests, docs only): full `@iris-mcp/all` on the closed port 242 files, 6488 passed / 737 skipped; `@iris-mcp/dev` 1569 passed / 342 skipped; `@iris-mcp/shared` 2701 passed; lint, type-check, `check:live-guards` (75 armed, 0 findings), `gen:governance-baseline:check`, `gen:ipm:check`, `gen:tools-list-snapshot:check`, `check-epics-sync` all OK. Mutations recorded under `## Verification`.
+- **Residual risks:** the live gate was last run on the pre-patch embed (`1.2.0+6.e7d03d3558ce`); the later embed changes are comments only. The Atelier `action/query` residual is pinned and left to Story 45.5. The live gate skips (green) under `IRIS_REQUIRE_LIVE` on a non-throwaway IRIS by spec; CI `allowedSkips: []` makes that red there.
+
+Planning pass note: Halted after planning as directed. Probes for AC 45.1.1 ran on throwaway `iris-mcp-throwaway-372894a1e1b7` (127.0.0.1:52792), which was removed; no throwaway remains. The shared instance was not touched. Three epics.md amendments are recorded under Design Notes for the lead (the `%Development` resource-vs-role wording, the missing `Sql.cls` ObjectScript test host, and the ordering change covering every decline).

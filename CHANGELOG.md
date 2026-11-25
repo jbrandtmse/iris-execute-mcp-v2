@@ -2,6 +2,23 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] - Story 45.1: SQL Statements Honor SQL Privileges
+
+Epic 45 Security Boundaries, answering GitHub issue #1 point 4. One sanctioned behavior change (AD-15), `S-45.1-sql-privileges`.
+
+### Behavior changes
+
+- **`iris_sql_execute` and `iris_sql_query` check SQL privileges (`S-45.1-sql-privileges`).** The `/dev/sql/execute` route prepares every statement with SQL privilege checking on, as the calling account. An account with `%Development` and no SQL grants could read, write and create tables through both tools. Now a statement it has no grant for is an `SQL error` with IRIS's `SQLCODE: -99` and `User <name> is not privileged for the operation`, and nothing runs. The account needs SELECT (INSERT, UPDATE or DELETE for writes) on each table and EXECUTE on each SqlProc function or procedure it calls. Nothing turns the check off. An account with `%All`, or with the grants the statement needs, sees byte-identical requests and responses.
+- **Ordering: the privilege error answers before every decline.** Prepare now runs the check before the read-only, `countOnly`, `maxRowsAffected` and `%NOJOURN` checks. An ungranted INSERT with `readOnly`, an ungranted UPDATE through `iris_sql_query`, or an ungranted CALL under `maxRowsAffected: 0` answers the privilege error instead of `SQL_READ_ONLY`, `SQL_ROWS_AFFECTED_CAP` or the `countOnly` message. Nothing runs in either case. This holds for the statements whose privileges IRIS checks at prepare; IRIS checks GRANT and some DDL (for example CREATE INDEX) only at execution, so those are refused there, or by a decline that applies first.
+
+### Known limitation
+
+- **IRIS's Atelier `action/query` is unchanged.** It prepares with privilege checking off. It is IRIS's own API, used by other tools of the suite and reachable by the same account, so an account that can call it still reads tables it has no SQL grant for. The IRIS account's privileges are the boundary; the full trust model is documented in Story 45.5.
+
+### IRIS side
+
+- `BOOTSTRAP_VERSION` moves from `1.2.0+5.6cbac260e73f` to `1.2.0+8.5cedcac20ae9`: `ExecuteMCPv2.REST.Sql` prepares with `%Prepare(.pQuery, 1)`. The server redeploys its IRIS classes on the next connect.
+
 ## [1.2.0] — 2026-11-24
 
 Epic 44 Correctness & Safety Fixes, a minor release (approved by the owner on 2026-11-23) because it makes sanctioned behaviour changes. The `[1.2.0 detail]` story sections below have the details. Every behaviour change here is a sanctioned AD-15 change, recorded with its wave-9 decision.
