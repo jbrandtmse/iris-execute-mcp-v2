@@ -57,3 +57,4 @@
 2026-11-25T23:17:32Z	Story 45.2	smoke_complete	rework=1 rerun_on_patched_build=24/24 teardown=clean
 2026-11-25T23:17:32Z	Story 45.2	fresh_check	rework=1 files=shared8+all3 in_order=pass shuffle_seed7=pass tests=271 full_all=245f/6557p/737s live-guards=75/0
 2026-11-25T23:17:32Z	Story 45.2	story_cycle	rework=1 commits=c3586e96(rework),bc8e3861(re-review) ledger=DW-772(resolved),DW-773(burndown) decisions=165,166
+2026-11-25T23:18:06Z	Story 45.2	committed	rework=1 sha=b11f51c2 ci=pending run=45720213241
