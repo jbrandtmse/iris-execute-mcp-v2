@@ -106,6 +106,7 @@ deferred:
      - an explicit warning that deleting `%ALL` removes every mapping in it, so check for other mappings first.
 
   Throwaways only: the uninstall is never run on the shared instance (localhost:52773).
+- 2026-11-25 (lead, decision #166; BINDING): **least-privilege axis.** The uninstall's refusal and report legs also run under an account without `%Admin_Manage` (e.g. `%Development:U` plus the namespace's database resource). The one-liner must refuse cleanly: each step it cannot do is a `failed` item with IRIS's own text, the records stay, the status is an error, and the snapshot is unchanged (nothing removed). Pin it in the live gate and in the lead smoke. The README must not claim that `EXECUTE` protects the `Setup` procedures; the boundary is the IRIS account's privileges (DW-771).
 
 ## Review Triage Log
 
