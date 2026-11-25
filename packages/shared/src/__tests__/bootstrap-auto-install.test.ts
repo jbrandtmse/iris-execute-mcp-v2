@@ -312,6 +312,10 @@ describe("the install on is today's behavior: ON equals unset, byte for byte, on
     expect(requests(on.fetchMock)).toEqual(requests(unset.fetchMock));
     expect(on.result).toStrictEqual(unset.result);
     expect(onLog, "no new log line").toBe(unsetLog);
+    // The relative pin above cannot see a line that BOTH runs emit: the install on says nothing about the setting, absolutely.
+    expect(unsetLog, "unset: no line about the automatic install").not.toContain("automatic install");
+    expect(onLog, "on: no line about the automatic install").not.toContain("automatic install");
+    expect(onLog).not.toContain("IRIS_SIDE_NOT_INSTALLED");
     expect(on.result).not.toHaveProperty("autoInstallOff");
     expect(on.result).not.toHaveProperty("customRestRefused");
   });

@@ -6,7 +6,10 @@
  * conflicts with the read-only preset, the malformed values, and the `IRIS_PROFILES` field.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   applyAutoInstall,
   parseOperatorAutoInstall,
@@ -206,5 +209,61 @@ describe("the IRIS_PROFILES autoInstall field", () => {
     for (const bad of [1, 0, null, {}, []]) {
       expect(() => mergeProfile("p2", base, { autoInstall: bad }), JSON.stringify(bad)).toThrow(/"autoInstall" must be a boolean/);
     }
+  });
+});
+
+describe("a profile imported by the real Server Manager source", () => {
+  let dirs: string[] = [];
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+    dirs = [];
+  });
+
+  /** The registry `loadProfileRegistry` builds from a real settings file whose server entry even carries an `autoInstall` key. */
+  async function smRegistry() {
+    const dir = mkdtempSync(join(tmpdir(), "iris-auto-install-sm-"));
+    dirs.push(dir);
+    mkdirSync(join(dir, ".vscode"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vscode", "settings.json"),
+      JSON.stringify({
+        "intersystems.servers": {
+          smserver: {
+            webServer: { scheme: "http", host: "sm.example.com", port: 52773 },
+            username: "smuser",
+            password: "smpass",
+            autoInstall: false,
+          },
+        },
+      }),
+      "utf8",
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const env = {
+      ...CONNECTION_ENV,
+      IRIS_SERVER_MANAGER: "auto",
+      IRIS_SM_SETTINGS_PATHS: join(dir, ".vscode", "settings.json"),
+    };
+    const { loadProfileRegistry } = await import("../profiles.js");
+    const registry = await loadProfileRegistry(env, process.platform, { getKeychainPassword: async () => undefined });
+    expect(registry.get("smserver")).toMatchObject({ source: "server-manager", host: "sm.example.com" });
+    return registry;
+  }
+
+  it("never carries the field: a key in the settings file is not read, so with nothing set the profile installs (default)", async () => {
+    const registry = await smRegistry();
+    expect(registry.get("smserver")).not.toHaveProperty("autoInstall");
+    applyAutoInstall(registry, undefined, undefined);
+    expect(registry.get("smserver")).toMatchObject({ autoInstall: true, autoInstallSource: "default" });
+  });
+
+  it("takes the variable: IRIS_AUTO_INSTALL=false turns it off (source IRIS_AUTO_INSTALL), and the read-only preset turns it off (source preset)", async () => {
+    const withVariable = await smRegistry();
+    applyAutoInstall(withVariable, false, undefined);
+    expect(withVariable.get("smserver")).toMatchObject({ autoInstall: false, autoInstallSource: "IRIS_AUTO_INSTALL" });
+    const withPreset = await smRegistry();
+    applyAutoInstall(withPreset, undefined, "read-only");
+    expect(withPreset.get("smserver")).toMatchObject({ autoInstall: false, autoInstallSource: "IRIS_GOVERNANCE_PRESET" });
   });
 });

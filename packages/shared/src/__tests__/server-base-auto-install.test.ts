@@ -345,6 +345,61 @@ describe("a refused profile (the install is off and the IRIS side is not install
   });
 });
 
+describe("the default profile whose start-time health check failed (the lazy path, not the inline startup bootstrap)", () => {
+  /** A fetch that refuses the connection until `reachable.up` is set, then answers by route (never by order). */
+  function unreachableUntil(reachable: { up: boolean }): void {
+    env.fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+      if (!reachable.up) throw new TypeError("fetch failed");
+      if (init.method === "HEAD") return new Response(null, { status: 200 });
+      if (String(url).endsWith("/api/atelier/")) return versionResponse();
+      return okResponse();
+    });
+  }
+
+  it("is told its resolved setting and armed by the lazy establishment, then refuses a custom-REST call with nothing sent for it", async () => {
+    process.env.IRIS_AUTO_INSTALL = "false";
+    answer = () => refusedFor("missing");
+    const reachable = { up: false };
+    unreachableUntil(reachable);
+    const server = new McpServerBase(opts([tool("iris_custom", async (_a, ctx) => text(JSON.stringify(await ctx.http.get("/api/executemcp/v2/x"))))]));
+    await server.start("stdio");
+    expect(bootstrapSpy, "the inline startup bootstrap did not run: the default profile was not established").not.toHaveBeenCalled();
+
+    reachable.up = true;
+    const before = env.fetchMock.mock.calls.length;
+    const result = await callTool(server, "iris_custom");
+
+    expect(bootstrapSpy).toHaveBeenCalledTimes(1);
+    expect(configArg()).toMatchObject({ name: "default", autoInstall: false, autoInstallSource: "IRIS_AUTO_INSTALL" });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ code: "IRIS_SIDE_NOT_INSTALLED", profile: "default", found: "missing", autoInstallSource: "IRIS_GOVERNANCE_PRESET" });
+    expect(paths(env.fetchMock, before).filter((p) => p.includes("/api/executemcp/")), "no request to the custom REST service").toEqual([]);
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it("an Atelier-only call on that armed default profile still works", async () => {
+    process.env.IRIS_GOVERNANCE_PRESET = "read-only";
+    answer = () => refusedFor("stale");
+    const reachable = { up: false };
+    unreachableUntil(reachable);
+    const server = new McpServerBase(
+      opts([
+        tool("iris_custom", async (_a, ctx) => text(JSON.stringify(await ctx.http.get("/api/executemcp/v2/x")))),
+        tool("iris_atelier_only", async (_a, ctx) => {
+          await ctx.http.get("/api/atelier/v8/DEFAULTNS/doc/X.cls");
+          return text("atelier ok");
+        }),
+      ]),
+    );
+    await server.start("stdio");
+    reachable.up = true;
+    expect((await callTool(server, "iris_custom")).structuredContent).toMatchObject({ code: "IRIS_SIDE_NOT_INSTALLED", found: "stale" });
+    const atelier = await callTool(server, "iris_atelier_only");
+    expect(atelier.isError).toBeFalsy();
+    expect(atelier.content[0].text).toBe("atelier ok");
+  });
+});
+
 describe("a profile that is not refused", () => {
   // The shapes the real bootstrap returns with the install off: `current` as bootstrap-auto-install.test.ts produces it, and `unknown`
   // with nothing deployed, flagged or compiled and the read failure named (Rule #54).

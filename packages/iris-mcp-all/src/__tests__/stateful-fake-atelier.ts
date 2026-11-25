@@ -144,6 +144,12 @@ export interface StatefulFakeAtelier {
    * or the `docnames` read), so a test can show what a check that cannot run does.
    */
   failCompileCheck: "query" | "docnames" | undefined;
+  /**
+   * Set to `true` to make the read of the IPM-only `ExecuteMCPv2.InstallGuard` document (the bootstrap's ownership read) fail with an
+   * HTTP 500 error envelope instead of the 404 or 200 it would otherwise answer (Story 45.2 QA: the ownership of an older deployment
+   * cannot be read).
+   */
+  failGuardRead: boolean;
   close: () => Promise<void>;
 }
 
@@ -245,6 +251,7 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
   let failVersionQuery: StatefulFakeAtelier["failVersionQuery"];
   let compileFailure: StatefulFakeAtelier["compileFailure"];
   let failCompileCheck: StatefulFakeAtelier["failCompileCheck"];
+  let failGuardRead = false;
   let versionQueries = 0;
   const visibleClasses = new Set(options.visibleClasses ?? []);
 
@@ -458,6 +465,10 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
         return;
       }
       if (method === "GET") {
+        if (failGuardRead && name === "ExecuteMCPv2.InstallGuard.cls") {
+          reply(res, 500, errorEnvelope("ERROR #5002: ObjectScript error: <STORE>", 5002));
+          return;
+        }
         const stored = state.docs.get(name);
         if (!stored) {
           reply(res, 404, errorEnvelope(`ERROR #16005: Document '${name}' does not exist`, 16005));
@@ -529,6 +540,12 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
     },
     set failCompileCheck(which) {
       failCompileCheck = which;
+    },
+    get failGuardRead() {
+      return failGuardRead;
+    },
+    set failGuardRead(fail) {
+      failGuardRead = fail;
     },
     close: () =>
       new Promise<void>((resolve) => {

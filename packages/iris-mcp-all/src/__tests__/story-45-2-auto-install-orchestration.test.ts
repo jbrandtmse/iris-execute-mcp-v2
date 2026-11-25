@@ -242,6 +242,22 @@ describe("Story 45.2: the install off, on a missing and on a stale IRIS side", (
     expect(summarizeRequests(window).puts).toHaveLength(embedded.classes.size);
     expect(fake.state.compiledMarker).toBe(embedded.marker);
     expect(warnLines(run.stderr)).toEqual([]);
+    expect(run.stderr, "the install on says nothing about the setting").not.toContain("automatic install");
+  }, TEST_TIMEOUT_MS);
+
+  it("the install ON (unset, and IRIS_AUTO_INSTALL=true) on a current side: no refusal, no line about the automatic install, no write", async () => {
+    for (const env of [{}, { IRIS_AUTO_INSTALL: "true" }]) {
+      const fake = await startFake();
+      await seedInstance(targetOf(fake), embedded, { marker: embedded.marker, perturb: false });
+      const start = fake.requests.length;
+      const run = await runServerCalls("startup", { repoRoot: REPO_ROOT, sdkEsmDir, target: targetOf(fake) }, env, [GLOBAL_GET]);
+      const window = fake.requests.slice(start);
+      expect(writesIn(window), JSON.stringify(env)).toEqual([]);
+      expect(run.stderr, JSON.stringify(env)).not.toContain("automatic install");
+      expect(run.stderr, JSON.stringify(env)).not.toContain("IRIS_SIDE_NOT_INSTALLED");
+      expect(run.results[0]?.structuredContent?.["code"]).not.toBe("IRIS_SIDE_NOT_INSTALLED");
+      expect(customRestIn(window).length, "the custom-REST call went out").toBeGreaterThan(0);
+    }
   }, TEST_TIMEOUT_MS);
 });
 
@@ -297,6 +313,60 @@ describe("Story 45.2: the other branches with the install off", () => {
     expect(run.results[0]?.structuredContent?.["code"]).not.toBe("IRIS_SIDE_NOT_INSTALLED");
     expect(run.stderr).toContain("found unknown, nothing to install.");
   }, TEST_TIMEOUT_MS);
+});
+
+// -- unknown, an older marker whose ownership cannot be read (Planner ruling on decision #158, 3a) ---------------------
+
+describe("Story 45.2: an older marker whose ownership read fails, with the install off (QA, on the built server)", () => {
+  /** What each channel's warning gives as the way out. */
+  const WAY_OUT: Record<Channel, string> = {
+    preset: "without the read-only preset",
+    variable: "with IRIS_AUTO_INSTALL unset or true",
+    profile: "with the profile's autoInstall removed or true",
+  };
+
+  for (const channel of CHANNELS) {
+    for (const via of ["startup", "other"] as const) {
+      it(
+        `${channel.channel} via ${via}: no write, exactly one warning that says the classes are older and gives the way out, tools go on unrefused`,
+        async () => {
+          const fake = await startFake();
+          const parsed = stampedEmbedded(embedded);
+          const seededMarker = `${parsed.semver.join(".")}+${parsed.sequence - 1n}.${parsed.hash}`;
+          await seedInstance(targetOf(fake), embedded, { marker: seededMarker, perturb: true });
+          fake.failGuardRead = true;
+          const docsBefore = new Map([...fake.state.docs].map(([name, doc]) => [name, doc.lines.join("\n")]));
+
+          const { run, window } = await runOff(fake, via, channel);
+
+          expect(writesIn(window)).toEqual([]);
+          expect(new Map([...fake.state.docs].map(([name, doc]) => [name, doc.lines.join("\n")]))).toEqual(docsBefore);
+          expect(fake.state.compiledMarker).toBe(seededMarker);
+
+          // Every warning of the run, apart from the unrelated notice that IRIS_PROFILES defines the reserved `default` profile.
+          const warnings = run.stderr
+            .split(/\r?\n/)
+            .filter((line) => line.startsWith("[WARN]") && !line.includes('IRIS_PROFILES defines the reserved "default" profile'));
+          expect(warnings, "exactly one warning").toHaveLength(1);
+          expect(warnings[0]).toContain("[WARN] Bootstrap:");
+          const warning = warnings[0] as string;
+          expect(warning).toContain("older than this server");
+          expect(warning).toContain("may behave differently");
+          expect(warning).toContain(JSON.stringify(seededMarker));
+          expect(warning).toContain(`(${channel.label})`);
+          expect(warning).toContain(`start one server against 127.0.0.1:${fake.port} ${WAY_OUT[channel.channel]}`);
+          expect(warning).toContain("zpm \"install ");
+
+          const [globalGet, serverInfo] = run.results;
+          expect(customRestIn(window).length, "the custom-REST call ran: it reached the instance").toBeGreaterThan(0);
+          expect(globalGet?.structuredContent?.["code"]).not.toBe("IRIS_SIDE_NOT_INSTALLED");
+          expect(serverInfo?.isError).toBeFalsy();
+          assertNoPassword(run);
+        },
+        TEST_TIMEOUT_MS,
+      );
+    }
+  }
 });
 
 // -- per profile ---------------------------------------------------------------------------
