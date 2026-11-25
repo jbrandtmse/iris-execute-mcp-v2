@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { BOOTSTRAP_CLASSES, IrisApiError, IrisConnectionError, REFUSAL_CODES, type IrisHttpClient } from "@iris-mcp/shared";
+import { BOOTSTRAP_CLASSES, IrisApiError, IrisConnectionError, IrisSideNotInstalledError, REFUSAL_CODES, type IrisHttpClient } from "@iris-mcp/shared";
 import { createExecuteTestsHandler, executeTestsTool } from "../tools/execute.js";
 import { testCoverageTool } from "../tools/test-coverage.js";
 import {
@@ -100,6 +100,14 @@ describe("readProductionGuard (Story 40.3)", () => {
       }));
       await expect(readProductionGuard(ctx, "USER", "A.B", "class")).rejects.toBe(failure);
     }
+  });
+
+  it("a refusal of a profile whose IRIS side is not installed (Story 45.2) is thrown, never read as 'no guard route'", async () => {
+    const refusal = new IrisSideNotInstalledError({ text: "not installed", fields: { found: "missing" } });
+    const { ctx } = ctxWith(vi.fn(async () => {
+      throw refusal;
+    }));
+    await expect(readProductionGuard(ctx, "USER", "A.B", "class")).rejects.toBe(refusal);
   });
 
   it("only an explicit proceed lets a run go ahead: a missing or unknown decision is busy", async () => {
@@ -263,6 +271,15 @@ describe("iris_execute_tests and the guard (Story 40.3, matrix row 16)", () => {
     const result = await createExecuteTestsHandler()({ target: "Story403.PassTest", level: "class" }, h.ctx);
     expect(result.isError).toBe(true);
     expect((result.content[0] as { text: string }).text).toContain("Error executing tests for 'Story403.PassTest': The guard failed.");
+    expect(h.calls.map((call) => `${call.method} ${call.path.replace(/\?.*$/, "")}`)).toEqual([`GET ${GUARD_PATH}`]);
+    expect(h.calls.some((call) => call.method === "POST")).toBe(false);
+  });
+
+  it("a refused profile (Story 45.2): the refusal is thrown at the guard read, and ensureUnitTestRoot, the counter read and /work are never called", async () => {
+    const refusal = new IrisSideNotInstalledError({ text: "not installed", fields: { found: "missing" } });
+    const h = harness(() => refusal);
+    // The handler rethrows what is not an IrisApiError; the framework answers the call with the refusal (server-base-auto-install.test.ts).
+    await expect(createExecuteTestsHandler()({ target: "Story403.PassTest", level: "class" }, h.ctx)).rejects.toBe(refusal);
     expect(h.calls.map((call) => `${call.method} ${call.path.replace(/\?.*$/, "")}`)).toEqual([`GET ${GUARD_PATH}`]);
     expect(h.calls.some((call) => call.method === "POST")).toBe(false);
   });

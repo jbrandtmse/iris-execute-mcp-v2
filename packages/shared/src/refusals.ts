@@ -37,6 +37,8 @@ export const REFUSAL_CODES = {
   CONFIRMATION_DECLINED: "CONFIRMATION_DECLINED",
   /** The scope of a confirmation gate changed again after the person was asked again, so the call was not run and nothing was changed. */
   CONFIRMATION_SCOPE_CHANGED: "CONFIRMATION_SCOPE_CHANGED",
+  /** The profile's IRIS side is missing, older or unconfigured and its automatic install is off, so a custom-REST call was not sent. */
+  IRIS_SIDE_NOT_INSTALLED: "IRIS_SIDE_NOT_INSTALLED",
 } as const;
 
 /** One of the {@link REFUSAL_CODES} values. */

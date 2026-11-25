@@ -6,7 +6,7 @@
  */
 
 import { DEFAULT_ACCEPT_LANGUAGE, IrisConnectionConfig } from "./config.js";
-import { IrisApiError, IrisConnectionError } from "./errors.js";
+import { IrisApiError, IrisConnectionError, IrisSideNotInstalledError, type IrisSideRefusal } from "./errors.js";
 import { logger } from "./logger.js";
 
 /** Response shape from HEAD requests — status code and response headers. */
@@ -27,6 +27,9 @@ export interface RequestOptions {
    */
   signal?: AbortSignal;
 }
+
+/** The path prefix of the custom REST service (`/api/executemcp/v2...`), lowercase. */
+const CUSTOM_REST_PREFIX = "/api/executemcp/";
 
 /** Shape of the Atelier-style JSON response envelope. */
 export interface AtelierEnvelope<T = unknown> {
@@ -55,6 +58,11 @@ export class IrisHttpClient {
   private sessionEstablished = false;
   /** Active AbortControllers for in-flight requests. */
   private activeControllers: Set<AbortController> = new Set();
+  /**
+   * Set when this profile's IRIS side is not installed and its automatic install is off (Story 45.2): every
+   * request to the custom REST service is refused before any I/O.
+   */
+  private sideRefusal: IrisSideRefusal | undefined;
 
   constructor(config: IrisConnectionConfig, defaultTimeout = 60_000) {
     this.config = config;
@@ -73,6 +81,22 @@ export class IrisHttpClient {
    */
   get namespace(): string {
     return this.config.namespace;
+  }
+
+  /**
+   * Refuse every request whose path starts with `/api/executemcp/` (case-insensitive) from now on: it throws an
+   * {@link IrisSideNotInstalledError} carrying `refusal` before any I/O (not even the CSRF `HEAD`). Every other
+   * path, the Atelier API included, is unaffected. Called once per profile, from the bootstrap's result (AD-1, AD-14).
+   */
+  refuseCustomRest(refusal: IrisSideRefusal): void {
+    this.sideRefusal = refusal;
+  }
+
+  /** Throws the armed refusal when `path` belongs to the custom REST service. */
+  private assertCustomRestAllowed(path: string): void {
+    if (this.sideRefusal !== undefined && path.toLowerCase().startsWith(CUSTOM_REST_PREFIX)) {
+      throw new IrisSideNotInstalledError(this.sideRefusal);
+    }
   }
 
   // ── Public typed methods ──────────────────────────────────────────
@@ -325,6 +349,8 @@ export class IrisHttpClient {
     options?: RequestOptions,
     isRetry = false,
   ): Promise<AtelierEnvelope<T>> {
+    // A refused profile sends nothing to the custom REST service: the gate comes before any I/O, the CSRF HEAD included.
+    this.assertCustomRestAllowed(path);
     // Ensure CSRF token is available for mutating methods
     if (["POST", "PUT", "DELETE"].includes(method) && !this.csrfToken && !isRetry) {
       await this.ensureCsrfToken(options?.signal);
@@ -450,6 +476,7 @@ export class IrisHttpClient {
     options?: RequestOptions,
     isRetry = false,
   ): Promise<HeadResponse> {
+    this.assertCustomRestAllowed(path);
     const response = await this.executeFetch(
       "HEAD",
       path,
@@ -543,6 +570,52 @@ export function bindSignal(client: IrisHttpClient, signal: AbortSignal): IrisHtt
           const method = target[property] as (path: string, body: unknown, options?: RequestOptions) => unknown;
           return (path: string, body: unknown, options?: RequestOptions) =>
             method.call(target, path, body, withSignal(options));
+        }
+        default: {
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+      }
+    },
+  });
+}
+
+/** What one tool call saw of a refused profile (Story 45.2): the first refusal any of its requests raised. */
+export interface SideRefusalRecorder {
+  /** The first {@link IrisSideNotInstalledError} a request of the call raised; absent while none was. */
+  refusal?: IrisSideNotInstalledError;
+}
+
+/**
+ * A view of `client` that records, in `recorder`, the first {@link IrisSideNotInstalledError} one of its requests
+ * raises, and from then on refuses every later request of the call, whatever its path, before it is sent. A handler
+ * that catches the error and goes on therefore sends nothing more, and the framework can still answer the call with
+ * the refusal. Every other member is the client's own. The recorder is per call and shared by every client the
+ * call uses; the client itself is never changed.
+ */
+export function recordSideRefusal(client: IrisHttpClient, recorder: SideRefusalRecorder): IrisHttpClient {
+  const guard = <A extends unknown[], R>(method: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      if (recorder.refusal !== undefined) throw recorder.refusal;
+      try {
+        return await method(...args);
+      } catch (error: unknown) {
+        if (error instanceof IrisSideNotInstalledError && recorder.refusal === undefined) recorder.refusal = error;
+        throw error;
+      }
+    };
+  return new Proxy(client, {
+    get(target, property) {
+      switch (property) {
+        case "get":
+        case "post":
+        case "put":
+        case "delete":
+        case "head": {
+          const method = target[property] as unknown;
+          // A hand-built client (a test double) may not have every method: hand back what it has.
+          if (typeof method !== "function") return method;
+          return guard((method as (...args: unknown[]) => Promise<unknown>).bind(target));
         }
         default: {
           const value: unknown = Reflect.get(target, property, target);

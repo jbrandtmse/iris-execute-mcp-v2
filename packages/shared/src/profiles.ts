@@ -167,6 +167,12 @@ export interface ProfileOverride {
    * belongs to this entry alone and is never inherited from `base`.
    */
   dataPolicy?: unknown;
+  /**
+   * Whether this profile installs, upgrades and repairs the IRIS side on connect (Story 45.2): a JSON
+   * boolean. It belongs to this entry alone and is never inherited from `base`. Server Manager profiles
+   * never set it.
+   */
+  autoInstall?: unknown;
 }
 
 /** Recompute the base URL from connection parts (mirrors {@link loadConfig}). */
@@ -362,6 +368,19 @@ export function mergeProfile(
     }
   }
 
+  // autoInstall (Story 45.2): a safety control like dataPolicy, read from the override only and never
+  // inherited from `base` (AD-9). A JSON boolean, like `https`.
+  let autoInstall: boolean | undefined;
+  if (override.autoInstall !== undefined) {
+    if (typeof override.autoInstall !== "boolean") {
+      throw profilesError(
+        `profile "${name}": "autoInstall" must be a boolean (true/false).`,
+        sourceLabel,
+      );
+    }
+    autoInstall = override.autoInstall;
+  }
+
   return {
     name,
     host,
@@ -408,6 +427,7 @@ export function mergeProfile(
     source,
     ...(pathPrefix !== undefined ? { pathPrefix } : {}),
     ...(dataPolicy !== undefined ? { dataPolicy, dataPolicySource: "IRIS_PROFILES" as const } : {}),
+    ...(autoInstall !== undefined ? { autoInstall, autoInstallSource: "IRIS_PROFILES" as const } : {}),
   };
 }
 

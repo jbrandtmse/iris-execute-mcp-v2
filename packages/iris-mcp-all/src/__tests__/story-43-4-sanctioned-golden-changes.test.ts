@@ -142,6 +142,9 @@ const STORY_44_7_IDS = [
   "44.7/database-delete-prompt/provision-project-environment@admin-main",
 ];
 
+/** The Story 45.2 entries (S-45.2-read-only-no-install): per server, the roster entry of `structuredContent` and the text block of the `call:server-profiles` row. */
+const STORY_45_2_IDS = ["dev", "admin", "interop", "ops", "data"].flatMap((server) => [`45.2/discovery-roster/${server}`, `45.2/discovery-text/${server}`]);
+
 /** The entry ids of each story, in the order the ledger lists the stories (landing order). */
 const STORIES: Array<[string, string[]]> = [
   ["43.4", STORY_43_4_IDS],
@@ -150,6 +153,7 @@ const STORIES: Array<[string, string[]]> = [
   ["44.1", STORY_44_1_IDS],
   ["44.4", STORY_44_4_IDS],
   ["44.7", STORY_44_7_IDS],
+  ["45.2", STORY_45_2_IDS],
 ];
 
 /** The 13 tools Story 42.10 flips to `destructiveHint: true` (decision #39), by server. Written from the spec, never read from the ledger. */
@@ -363,7 +367,51 @@ function currentCheckProblems(change: Change): string[] {
 
 const hasOwn = (object: object, key: string): boolean => Object.prototype.hasOwnProperty.call(object, key);
 
-/** The twelve sanctions the ledger registers, written from the specs of Stories 43.4, 42.10, 42.11, 44.1, 44.4 and 44.7. */
+/** The two members Story 45.2 adds to a roster entry of `iris_server_profiles`, in the order the server writes them (right after `dataPolicySource`). */
+function rosterWithAutoInstall(entry: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(entry)) {
+    out[key] = value;
+    if (key === "dataPolicySource") {
+      out["autoInstall"] = true;
+      out["autoInstallSource"] = "default";
+    }
+  }
+  return out;
+}
+
+/**
+ * What is wrong with a Story 45.2 entry, written from the spec (AC 45.2.1): the discovery tool's roster entry gains `autoInstall` (a boolean)
+ * and `autoInstallSource`, right after `dataPolicySource`, and nothing else changes. A built server with nothing configured reports `true` from
+ * `default`. The change is in the `call:server-profiles` row, twice: the roster entry of `structuredContent` and the text block that carries the
+ * same document (the document's text is `JSON.stringify(document, null, 2)`).
+ */
+function discoveryRosterProblems(change: Change): string[] {
+  const problems = [
+    ...unmet(change.session !== "main" || change.label !== "call:server-profiles", `${change.id}: must change the call:server-profiles row of the main session`),
+    ...unmet(!/^45\.2\/discovery-(roster|text)\/[a-z]+$/.test(change.id), `${change.id}: the id must be 45.2/discovery-roster/<server> or 45.2/discovery-text/<server>`),
+  ];
+  if (change.pointer === "/result/structuredContent/profiles/0") {
+    if (!isPlainRecord(change.old) || !isPlainRecord(change.new)) return [...problems, `${change.id}: old and new must be roster entries`];
+    return [
+      ...problems,
+      ...unmet(hasOwn(change.old, "autoInstall"), `${change.id}: the frozen roster entry has no autoInstall`),
+      ...unmet(JSON.stringify(change.new) !== JSON.stringify(rosterWithAutoInstall(change.old)), `${change.id}: new must be the frozen entry with autoInstall: true and autoInstallSource: "default" right after dataPolicySource`),
+    ];
+  }
+  if (change.pointer === "/result/content/0/text") {
+    try {
+      const document = JSON.parse(String(change.old)) as { profiles: Array<Record<string, unknown>> };
+      document.profiles = document.profiles.map(rosterWithAutoInstall);
+      return [...problems, ...unmet(change.new !== JSON.stringify(document, null, 2), `${change.id}: new must be the frozen document text with each roster entry gaining the two members`)];
+    } catch {
+      return [...problems, `${change.id}: old must be the discovery document's JSON text`];
+    }
+  }
+  return [...problems, `${change.id}: the pointer must be the roster entry of structuredContent or the text block`];
+}
+
+/** The thirteen sanctions the ledger registers, written from the specs of Stories 43.4, 42.10, 42.11, 44.1, 44.4, 44.7 and 45.2. */
 const SANCTIONS: Record<string, Shape> = {
   "S-43.4-descriptions": {
     story: "43.4",
@@ -495,6 +543,14 @@ const SANCTIONS: Record<string, Shape> = {
       ...unmet(String(change.new).includes("property definitions") || !String(change.new).includes("'create' creates an empty document database; define its properties with iris_docdb_property."), `${change.id}: the corrected text says create makes an empty database whose properties iris_docdb_property defines`),
       ...unmet(!String(change.new).includes(DOCDB_REGISTER_SENTENCE), `${change.id}: the Story 44.1 sentence stays`),
     ],
+  },
+  "S-45.2-read-only-no-install": {
+    story: "45.2",
+    count: 10,
+    golden: "wire",
+    op: "replace",
+    text: "correction",
+    check: (change) => discoveryRosterProblems(change),
   },
   "S-44.7-database-delete": {
     story: "44.7",
@@ -658,7 +714,7 @@ describe("the ledger", () => {
     expect(readSanctionedChanges(REPO_ROOT)).toHaveLength(changes.length);
   });
 
-  it("holds the entries of Story 43.4, then Story 42.10, then Story 42.11, then Story 44.1, then Story 44.4, then Story 44.7, each story's ids in order, and no other entry", () => {
+  it("holds the entries of Story 43.4, then Story 42.10, then Story 42.11, then Story 44.1, then Story 44.4, then Story 44.7, then Story 45.2, each story's ids in order, and no other entry", () => {
     expect(changes.map((change) => change.id)).toEqual(STORIES.flatMap(([, ids]) => ids));
     for (const [story, ids] of STORIES) {
       expect(changes.filter((change) => change.story === story).map((change) => change.id), `Story ${story}`).toEqual(ids);
@@ -669,6 +725,7 @@ describe("the ledger", () => {
     expect(STORY_44_1_IDS).toHaveLength(1);
     expect(STORY_44_4_IDS).toHaveLength(15);
     expect(STORY_44_7_IDS).toHaveLength(5);
+    expect(STORY_45_2_IDS).toHaveLength(10);
     expect(SANCTIONED_CHANGES_RELATIVE_PATH).toBe("packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json");
   });
 
@@ -938,6 +995,7 @@ describe("the CHANGELOG names every sanction", () => {
       "44.7 S-44.7-database-delete",
       "44.7 S-44.7-docdb-manage-text",
       "44.7 S-44.7-docdb-property",
+      "45.2 S-45.2-read-only-no-install",
     ]);
     expect(changelogProblems(changes, changelog)).toEqual([]);
   });

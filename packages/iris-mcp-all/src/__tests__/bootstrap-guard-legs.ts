@@ -488,7 +488,36 @@ export async function runServer(
   ctx: Pick<LegContext, "repoRoot" | "sdkEsmDir" | "target">,
   extraEnv: Record<string, string> = {},
 ): Promise<string> {
+  return (await runServerCalls(via, ctx, extraEnv)).stderr;
+}
+
+/** One extra tool call of {@link runServerCalls}, made after the `iris_server_info` read, with `server` added for the `other` path. */
+export interface ExtraCall {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+/** What {@link runServerCalls} produced: the server's stderr, and each extra call's result as the client received it. */
+export interface ServerRun {
+  stderr: string;
+  results: Array<{ isError?: boolean; structuredContent?: Record<string, unknown>; content?: Array<{ text?: string }> }>;
+}
+
+/**
+ * {@link runServer} that also makes `calls` (in order, after the read) before the server closes (Story 45.2). `extraEnv` is added
+ * to the server's environment, and `otherFields` to the `other` profile's `IRIS_PROFILES` entry on the `other` path (for
+ * example `autoInstall: false`). A call's result is returned whatever it is (an error result included); only a failed
+ * `iris_server_info` read throws.
+ */
+export async function runServerCalls(
+  via: LegSpec["via"],
+  ctx: Pick<LegContext, "repoRoot" | "sdkEsmDir" | "target">,
+  extraEnv: Record<string, string> = {},
+  calls: readonly ExtraCall[] = [],
+  otherFields: Record<string, unknown> = {},
+): Promise<ServerRun> {
   let stderr = "";
+  const results: ServerRun["results"] = [];
   const options = {
     sdkEsmDir: ctx.sdkEsmDir,
     entry: distEntry(ctx.repoRoot, "iris-dev-mcp"),
@@ -497,15 +526,21 @@ export async function runServer(
       stderr += chunk;
     },
   };
+  const extraCalls = async (session: Awaited<ReturnType<typeof openWireSession>>, extraArgs: Record<string, unknown>): Promise<void> => {
+    for (const call of calls) {
+      results.push((await session.raw(call.tool, { ...extraArgs, ...call.args })) as ServerRun["results"][number]);
+    }
+  };
   if (via === "startup") {
     const session = await openWireSession({ ...options, target: ctx.target }, extraEnv);
     try {
       const result = await session.raw("iris_server_info", {});
       if (result.isError) throw new Error(`iris_server_info failed: ${JSON.stringify(result.content)}`);
+      await extraCalls(session, {});
     } finally {
       await session.close();
     }
-    return stderr;
+    return { stderr, results };
   }
   const session = await openWireSession(
     { ...options, target: closedDefaultTarget(ctx.target.namespace) },
@@ -518,6 +553,7 @@ export async function runServer(
           username: ctx.target.username,
           password: ctx.target.password,
           namespace: ctx.target.namespace,
+          ...otherFields,
         },
       }),
     },
@@ -525,10 +561,11 @@ export async function runServer(
   try {
     const result = await session.raw("iris_server_info", { server: "other" });
     if (result.isError) throw new Error(`iris_server_info on "other" failed: ${JSON.stringify(result.content)}`);
+    await extraCalls(session, { server: "other" });
   } finally {
     await session.close();
   }
-  return stderr;
+  return { stderr, results };
 }
 
 /**

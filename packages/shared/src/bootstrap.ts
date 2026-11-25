@@ -25,6 +25,8 @@ import { IrisApiError } from "./errors.js";
 import { logger } from "./logger.js";
 import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION, IPM_INSTALL_GUARD, IPM_MODULE_NAME } from "./bootstrap-classes.js";
 import { classifyDeployedMarker, parseBootstrapMarker } from "./bootstrap-version.js";
+import type { AutoInstallSource } from "./auto-install.js";
+import type { IrisSideRefusal } from "./errors.js";
 
 /** The Atelier document that carries the version marker. */
 const SETUP_DOCUMENT = "ExecuteMCPv2.Setup.cls";
@@ -112,6 +114,17 @@ export interface BootstrapResult {
    * alone. Present only when `true`.
    */
   ipmOwned?: boolean;
+  /**
+   * The channel that turned the automatic install off for this profile (Story 45.2). Present only when it
+   * is off: bootstrap then sent reads only, on every branch.
+   */
+  autoInstallOff?: AutoInstallSource;
+  /**
+   * `true` when the install is off and the IRIS side is `missing`, `stale` or `unconfigured` (and not
+   * IPM-owned): the profile's client must refuse every request to the custom REST service
+   * ({@link buildIrisSideRefusal}). Present only when `true`.
+   */
+  customRestRefused?: true;
   /** Whether class deployment succeeded. */
   deployed: boolean;
   /** Whether class compilation succeeded. */
@@ -862,6 +875,112 @@ function describeMarker(marker: string): string {
   return JSON.stringify(marker.length > 80 ? `${marker.slice(0, 80)}...` : marker);
 }
 
+/** An older marker found while the automatic install is off: what the `unknown` warning adds to its wording (Story 45.2). */
+interface OlderWhileOff {
+  /** The marker on the instance. */
+  deployed: string;
+  /** The channel that turned the install off. */
+  source: AutoInstallSource;
+}
+
+/** How the channel that turned the automatic install off is named in a message. */
+function autoInstallLabel(source: AutoInstallSource): string {
+  if (source === "IRIS_GOVERNANCE_PRESET") return "IRIS_GOVERNANCE_PRESET=read-only";
+  if (source === "IRIS_PROFILES") return "autoInstall: false in IRIS_PROFILES";
+  return "IRIS_AUTO_INSTALL=false";
+}
+
+/** The way out of an install that one channel turned off, ending a sentence like "start one server against host:port ...". */
+function autoInstallWayOut(source: AutoInstallSource): string {
+  if (source === "IRIS_GOVERNANCE_PRESET") return "without the read-only preset";
+  if (source === "IRIS_PROFILES") return "with the profile's autoInstall removed or true";
+  return "with IRIS_AUTO_INSTALL unset or true";
+}
+
+/** The profile name a connection config carries (a profile has one; the startup config of `default` does not). */
+function profileNameOf(config: IrisConnectionConfig): string {
+  const name = (config as { name?: unknown }).name;
+  return typeof name === "string" && name !== "" ? name : "default";
+}
+
+/** What the probe found, for a profile that cannot use the custom REST service: the sentence part naming the problem. */
+function notInstalledFinding(
+  found: "missing" | "stale" | "unconfigured",
+  namespace: string,
+  deployed: string | undefined,
+): string {
+  if (found === "missing") return `the ExecuteMCPv2 classes are not installed in '${namespace}'`;
+  if (found === "stale") {
+    return (
+      `the ExecuteMCPv2 classes in '${namespace}' are from an older build (${deployed ?? "unknown marker"}; ` +
+      `this server needs ${BOOTSTRAP_VERSION})`
+    );
+  }
+  return (
+    `the ExecuteMCPv2 classes in '${namespace}' are current, but the /api/executemcp/v2 web application is not registered ` +
+    `(Do ##class(ExecuteMCPv2.Setup).Configure("${namespace}") as a user with %Admin_Manage also fixes this)`
+  );
+}
+
+/**
+ * The refusal a profile's client carries after a bootstrap that left the custom REST service unavailable (Story 45.2):
+ * the text and the `structuredContent` fields of `IRIS_SIDE_NOT_INSTALLED`. `result` is the bootstrap's result with
+ * `customRestRefused` set; its `probeStatus` (`missing`, `stale` or `unconfigured`) is the finding.
+ *
+ * Neither the text nor the fields carry a credential.
+ *
+ * @param config - The profile's connection config (host, port, namespace, name, `autoInstallSource`).
+ * @param result - The result of {@link bootstrap} for that profile.
+ */
+export function buildIrisSideRefusal(config: IrisConnectionConfig, result: BootstrapResult): IrisSideRefusal {
+  const found = result.probeStatus as "missing" | "stale" | "unconfigured";
+  const source = result.autoInstallOff ?? config.autoInstallSource ?? "IRIS_AUTO_INSTALL";
+  const profile = profileNameOf(config);
+  const namespace = config.namespace;
+  const deployed = found === "stale" ? result.deployedVersion : undefined;
+  const text =
+    `The ExecuteMCPv2 service on IRIS is not available to server profile "${profile}": ` +
+    `${notInstalledFinding(found, namespace, deployed)}. ` +
+    `The automatic install is off for this profile (${autoInstallLabel(source)}), so this server installs, upgrades and repairs ` +
+    "nothing on IRIS; tools that use only the Atelier API keep working. " +
+    `To use this tool, an operator installs or upgrades the IRIS side once: start one server against ${config.host}:${config.port} ` +
+    `${autoInstallWayOut(source)}, or run zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}" in '${namespace}' as a user with %Admin_Manage. ` +
+    "An instance that only read-only servers use needs this once after every release that changes the IRIS-side classes.";
+  return {
+    text,
+    fields: {
+      profile,
+      namespace,
+      found,
+      ...(deployed !== undefined ? { deployedVersion: deployed } : {}),
+      requiredVersion: BOOTSTRAP_VERSION,
+      autoInstallSource: source,
+    },
+  };
+}
+
+/** The one startup warning of a profile whose custom REST service is not available and whose install is off. */
+function warnCustomRestRefused(config: IrisConnectionConfig, result: BootstrapResult, source: AutoInstallSource): void {
+  const found = result.probeStatus as "missing" | "stale" | "unconfigured";
+  const deployed = found === "stale" ? result.deployedVersion : undefined;
+  logger.warn(
+    `Bootstrap: the automatic install is off for profile "${profileNameOf(config)}" (${autoInstallLabel(source)}): ` +
+      `${notInstalledFinding(found, config.namespace, deployed)}. ` +
+      "This server installs, upgrades and repairs nothing on IRIS, so its custom-REST tools refuse with IRIS_SIDE_NOT_INSTALLED " +
+      "for this profile; tools that use only the Atelier API keep working. " +
+      `To install or upgrade the IRIS side once, start one server against ${config.host}:${config.port} ${autoInstallWayOut(source)}, ` +
+      `or run zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}" in '${config.namespace}' as a user with %Admin_Manage.`,
+  );
+}
+
+/** The one startup line of a profile whose install is off and whose deployment is left as today (nothing to refuse). */
+function logAutoInstallOff(config: IrisConnectionConfig, source: AutoInstallSource, found: string): void {
+  logger.info(
+    `Bootstrap: the automatic install is off for profile "${profileNameOf(config)}" (${autoInstallLabel(source)}); ` +
+      `found ${found}, nothing to install.`,
+  );
+}
+
 /**
  * A deployment that bootstrap leaves alone: a newer or foreign marker, a marker
  * (or an ownership) that could not be read, or an IPM installation. For `ipm`,
@@ -871,7 +990,7 @@ function describeMarker(marker: string): string {
 type LeftAlone =
   | { kind: "newer"; deployed: string }
   | { kind: "foreign"; deployed: string }
-  | { kind: "unknown"; reason: string }
+  | { kind: "unknown"; reason: string; olderOff?: OlderWhileOff }
   | { kind: "ipm"; state: "stale" | "unconfigured" | "missing"; deployed: string | undefined };
 
 /**
@@ -925,6 +1044,16 @@ function warnDeploymentLeftAlone(
     finding =
       `the deployed marker ${describeMarker(found.deployed)} cannot be ordered against this server's ${BOOTSTRAP_VERSION}. ` +
       `Run one build per instance. ${deliberate}`;
+  } else if (found.olderOff !== undefined) {
+    // The automatic install is off and the marker read older; only the ownership read failed (Story 45.2). The classes stay
+    // in place and the tools go on, so the warning says what that means and how to bring them up to date.
+    finding =
+      `the ownership of the classes could not be read (${found.reason}), so nothing is changed. ` +
+      `The ExecuteMCPv2 classes in '${namespace}' are older than this server (the deployed marker is ${describeMarker(found.olderOff.deployed)}; ` +
+      `this server's is ${BOOTSTRAP_VERSION}) and may behave differently from what this server expects. ` +
+      `The automatic install is off for this profile (${autoInstallLabel(found.olderOff.source)}), so they are not upgraded. ` +
+      `To bring them up to date, start one server against ${config.host}:${config.port} ${autoInstallWayOut(found.olderOff.source)}, ` +
+      `or run zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}" in '${namespace}' as a user with %Admin_Manage.`;
   } else {
     finding =
       `the deployed marker could not be read (${found.reason}), so it cannot be ordered against this server's ${BOOTSTRAP_VERSION}. ` +
@@ -1002,6 +1131,7 @@ async function leftToIpm(
   deployed: string | undefined,
   beforeCompile: boolean,
   uploaded: boolean,
+  olderOff?: OlderWhileOff,
 ): Promise<boolean> {
   const ownership = await ipmOwnership(http, config, version);
   if (ownership.owner === "none") return false;
@@ -1014,7 +1144,12 @@ async function leftToIpm(
   result.probeStatus = "unknown";
   result.readFailure = ownership.reason;
   delete result.deployedVersion;
-  warnDeploymentLeftAlone({ kind: "unknown", reason: ownership.reason }, config, beforeCompile, uploaded);
+  warnDeploymentLeftAlone(
+    { kind: "unknown", reason: ownership.reason, ...(olderOff !== undefined ? { olderOff } : {}) },
+    config,
+    beforeCompile,
+    uploaded,
+  );
   return true;
 }
 
@@ -1061,6 +1196,12 @@ async function leftToIpm(
  *    uploaded: those stay (`deployed` true), and the compile and every later step
  *    are skipped.
  * 10. Return result with step-level tracking.
+ * 11. With the profile's automatic install off (`config.autoInstall === false`; Story 45.2) every branch
+ *    sends reads only. `current`, `newer`, `foreign`, `unknown` and an IPM installation behave as above
+ *    plus one `[INFO]` line. On `missing`, `stale` and `unconfigured` (after the ownership read of step 9) nothing
+ *    is uploaded, compiled or configured; the result carries `customRestRefused: true`, one `[WARN]` is logged,
+ *    and the caller arms the client's refusal ({@link buildIrisSideRefusal}). `autoInstallOff` names the
+ *    channel; both fields are absent with the install on.
  *
  * If the configure step fails (e.g. insufficient privileges), the result
  * includes manual instructions but does not throw. Because the probe checks
@@ -1095,16 +1236,24 @@ export async function bootstrap(
   result.probeStatus = probe.status;
   result.probeFound = probe.status !== "missing";
 
+  // The automatic install (Story 45.2): off means every branch below sends reads only. `autoInstall` is absent on a
+  // config that never went through the profile resolution, which counts as on (today's behavior).
+  const off: AutoInstallSource | undefined =
+    config.autoInstall === false ? (config.autoInstallSource ?? "IRIS_AUTO_INSTALL") : undefined;
+  if (off !== undefined) result.autoInstallOff = off;
+
   // A newer or foreign deployment is never replaced: change nothing, say why once.
   if (probe.status === "newer" || probe.status === "foreign") {
     result.deployedVersion = probe.deployedVersion;
     warnDeploymentLeftAlone({ kind: probe.status, deployed: probe.deployedVersion }, config, false, false);
+    if (off !== undefined) logAutoInstallOff(config, off, probe.status);
     return result;
   }
   // Nor is a deployment whose marker cannot be read: it may be newer.
   if (probe.status === "unknown") {
     result.readFailure = probe.reason;
     warnDeploymentLeftAlone({ kind: "unknown", reason: probe.reason }, config, false, false);
+    if (off !== undefined) logAutoInstallOff(config, off, probe.status);
     return result;
   }
   if (probe.status === "stale") {
@@ -1115,6 +1264,8 @@ export async function bootstrap(
   // prove neither that an earlier start's compile finished nor that every class compiled, so the same check that follows
   // a compile runs here too (two reads, no compile): a partial failure is reported again until it is fixed.
   if (probe.status === "current") {
+    // `current` already sends reads only, so the install being off changes nothing here but one line.
+    if (off !== undefined) logAutoInstallOff(config, off, probe.status);
     result.deployed = true;
     const names = [...BOOTSTRAP_CLASSES.keys()];
     let notCompiled: string[];
@@ -1143,6 +1294,21 @@ export async function bootstrap(
   // ownership that cannot be read is not a licence to write either.
   const probedMarker =
     probe.status === "stale" ? probe.deployedVersion : probe.status === "unconfigured" ? BOOTSTRAP_VERSION : undefined;
+
+  // Install off (Story 45.2): the ownership read runs where the write paths run it, and nothing is written whatever it
+  // finds. An IPM installation, or an ownership that cannot be read, is left as today (one warning, the tools go on).
+  // Otherwise the custom REST service is not available to this profile: the caller arms the client's refusal.
+  if (off !== undefined) {
+    const olderOff = probe.status === "stale" ? { deployed: probe.deployedVersion, source: off } : undefined;
+    if (await leftToIpm(http, config, version, result, probe.status, probedMarker, false, false, olderOff)) {
+      logAutoInstallOff(config, off, result.probeStatus);
+      return result;
+    }
+    result.customRestRefused = true;
+    warnCustomRestRefused(config, result, off);
+    return result;
+  }
+
   if (await leftToIpm(http, config, version, result, probe.status, probedMarker, false, false)) {
     return result;
   }

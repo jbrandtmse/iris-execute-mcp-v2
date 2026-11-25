@@ -226,6 +226,9 @@ describe("Story 19.0 — profile roster + password redaction (AC 19.0.2)", () =>
       // Story 39.2: a server with no data-policy configuration reports the safe default and where it came from.
       dataPolicy: "redact",
       dataPolicySource: "default",
+      // Story 45.2: a server with no automatic-install configuration reports it on, from the default.
+      autoInstall: true,
+      autoInstallSource: "default",
     });
   });
 

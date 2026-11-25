@@ -17,9 +17,18 @@ export {
   IrisConnectionError,
   IrisApiError,
   McpProtocolError,
+  IrisSideNotInstalledError,
 } from "./errors.js";
-export { IrisHttpClient } from "./http-client.js";
-export type { RequestOptions, AtelierEnvelope, HeadResponse } from "./http-client.js";
+export type { IrisSideRefusal } from "./errors.js";
+export { IrisHttpClient, recordSideRefusal } from "./http-client.js";
+export type { RequestOptions, AtelierEnvelope, HeadResponse, SideRefusalRecorder } from "./http-client.js";
+export {
+  AUTO_INSTALL_ENV_VAR,
+  parseOperatorAutoInstall,
+  resolveAutoInstall,
+  applyAutoInstall,
+} from "./auto-install.js";
+export type { AutoInstallSource, AutoInstallCarrier } from "./auto-install.js";
 export { logger, LogLevel, parseLogLevel } from "./logger.js";
 export type { Logger } from "./logger.js";
 export { checkHealth, ping } from "./health.js";
@@ -123,6 +132,7 @@ export {
   deployClasses,
   compileClasses,
   compileAndVerify,
+  buildIrisSideRefusal,
   verifyCompiled,
   verifyRoutinesCompiled,
   configureWebApp,

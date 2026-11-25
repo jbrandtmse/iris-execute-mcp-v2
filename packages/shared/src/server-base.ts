@@ -41,10 +41,13 @@ import type { ZodObject } from "zod";
 
 import type { IrisConnectionConfig } from "./config.js";
 import { loadConfig } from "./config.js";
-import { IrisHttpClient, bindSignal } from "./http-client.js";
+import { IrisHttpClient, bindSignal, recordSideRefusal } from "./http-client.js";
+import type { SideRefusalRecorder } from "./http-client.js";
+import { applyAutoInstall, parseOperatorAutoInstall } from "./auto-install.js";
 import { checkHealth } from "./health.js";
 import { negotiateVersion } from "./atelier.js";
-import { bootstrap } from "./bootstrap.js";
+import { bootstrap, buildIrisSideRefusal } from "./bootstrap.js";
+import type { BootstrapResult } from "./bootstrap.js";
 import { logger } from "./logger.js";
 import type { AuditConfig, AuditConfirmation, AuditEntryInput, AuditOutcome } from "./audit.js";
 import { AuditLogger, parseAuditConfig } from "./audit.js";
@@ -2021,13 +2024,42 @@ export class McpServerBase {
       this.governanceFileConfig,
     );
     // A call off the wire gets the request's abort signal on its HTTP clients and the confirmation helper.
-    const ctx =
+    const wireCtx =
       wireCall === undefined
         ? baseCtx
         : this.wireToolContext(baseCtx, tool, profile, parseResult.data, validatedArgs, wireCall);
+    // A profile whose IRIS side is not installed (automatic install off) refuses its custom-REST requests in its client
+    // (AD-1, Story 45.2). The recorder keeps the first such refusal of this call, refuses every later request of the call,
+    // and lets the framework answer with the refusal whatever the handler did with the error.
+    const sideRefusal: SideRefusalRecorder = {};
+    // One view per client for the whole call, so asking for the same profile twice returns the same object.
+    const recorded = new Map<IrisHttpClient, IrisHttpClient>();
+    const record = (client: IrisHttpClient): IrisHttpClient => {
+      let view = recorded.get(client);
+      if (view === undefined) {
+        view = recordSideRefusal(client, sideRefusal);
+        recorded.set(client, view);
+      }
+      return view;
+    };
+    const ctx: ToolContext = {
+      ...wireCtx,
+      http: record(wireCtx.http),
+      resolveProfileClient: async (profileName: string) => record(await wireCtx.resolveProfileClient(profileName)),
+    };
+    const refusedResult = (): CallToolResult | undefined =>
+      sideRefusal.refusal === undefined
+        ? undefined
+        : refusalResult(
+            REFUSAL_CODES.IRIS_SIDE_NOT_INSTALLED,
+            sideRefusal.refusal.refusalText,
+            sideRefusal.refusal.fields,
+          );
 
     try {
       const result: ToolResult = await tool.handler(validatedArgs, ctx);
+      const refused = refusedResult();
+      if (refused !== undefined) return refused;
       // The handler asked for a confirmation: answer with the question, not with a tool result.
       if (result === CONFIRMATION_PENDING && wireCall?.pending !== undefined) return wireCall.pending;
       const callResult: CallToolResult = {
@@ -2042,6 +2074,8 @@ export class McpServerBase {
       }
       return callResult;
     } catch (error: unknown) {
+      const refused = refusedResult();
+      if (refused !== undefined) return refused;
       const message =
         error instanceof Error ? error.message : String(error);
       // A call the client cancelled has not failed: its audit entry says it was cancelled, and nothing is logged.
@@ -2864,6 +2898,12 @@ export class McpServerBase {
     // `undefined` ⇒ the presetSeed layer is a pure pass-through (AC 24.1.1).
     this.preset = parseGovernancePreset();
 
+    // Resolve every profile's automatic install (Story 45.2; AD-9, AD-8, AD-14): the profile's IRIS_PROFILES entry, then
+    // IRIS_AUTO_INSTALL, then the read-only preset (which forces it off), then on. A malformed IRIS_AUTO_INSTALL, or an
+    // explicit "on" together with the read-only preset, fails fast here, before any request reaches IRIS. The registry holds
+    // the resolved value of every profile from here on; bootstrap reads it from the config it is given.
+    applyAutoInstall(this.profiles, parseOperatorAutoInstall(), this.preset);
+
     // Parse the audit-log configuration (Epic 29, spec `07-observability-
     // audit-log.md` §2), mirroring the governance parses immediately above.
     // Absent `IRIS_AUDIT_LOG` ⇒ `auditConfig` stays `undefined` ⇒
@@ -2978,11 +3018,26 @@ export class McpServerBase {
       // 4.5. Bootstrap custom REST service if needed (default profile).
       if (this.options.needsCustomRest) {
         try {
+          // The connection fields are `this.config`'s, as before; only the resolved automatic install is added
+          // (Story 45.2). The registry's `default` profile can differ from `this.config` when IRIS_PROFILES
+          // defines `default` (DW-767): that mismatch is observed, not changed here.
+          const defaultProfile = this.profiles.get(DEFAULT_PROFILE_NAME);
+          const bootstrapConfig: IrisConnectionConfig =
+            defaultProfile?.autoInstall === false
+              ? {
+                  ...this.config,
+                  autoInstall: false,
+                  ...(defaultProfile.autoInstallSource !== undefined
+                    ? { autoInstallSource: defaultProfile.autoInstallSource }
+                    : {}),
+                }
+              : this.config;
           const result = await bootstrap(
             defaultClient,
-            this.config,
+            bootstrapConfig,
             this.atelierVersion,
           );
+          this.armCustomRestRefusal(defaultClient, bootstrapConfig, DEFAULT_PROFILE_NAME, result);
           if (result.errors.length > 0) {
             logger.warn(
               `Bootstrap completed with errors: ${result.errors.join("; ")}`,
@@ -3239,6 +3294,7 @@ export class McpServerBase {
   ): Promise<void> {
     try {
       const result = await bootstrap(client, profile, atelierVersion);
+      this.armCustomRestRefusal(client, profile, profile.name, result);
       if (result.errors.length > 0) {
         logger.warn(
           `Bootstrap for profile "${profile.name}" completed with errors: ${result.errors.join("; ")}`,
@@ -3253,6 +3309,23 @@ export class McpServerBase {
         `Bootstrap failed for profile "${profile.name}": ${message}. Custom REST tools may not work against this profile.`,
       );
     }
+  }
+
+  /**
+   * Arm a profile's client with the `IRIS_SIDE_NOT_INSTALLED` refusal when its bootstrap left the custom REST service
+   * unavailable with the automatic install off (Story 45.2; AD-1, AD-14): from then on the client refuses every request to
+   * `/api/executemcp/` before any I/O. A bootstrap result without `customRestRefused` changes nothing.
+   *
+   * @param profileName - The profile name for the text (the startup config of `default` carries none).
+   */
+  private armCustomRestRefusal(
+    client: IrisHttpClient,
+    config: IrisConnectionConfig,
+    profileName: string,
+    result: BootstrapResult,
+  ): void {
+    if (result.customRestRefused !== true) return;
+    client.refuseCustomRest(buildIrisSideRefusal({ ...config, name: profileName } as IrisConnectionConfig, result));
   }
 
   // ── Accessors ──────────────────────────────────────────────────────

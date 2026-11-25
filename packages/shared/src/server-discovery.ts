@@ -43,6 +43,7 @@ import type {
   ParentKeys,
 } from "./governance.js";
 import { effectiveDataPolicy, type DataPolicy, type DataPolicySource } from "./data-policy.js";
+import type { AutoInstallSource } from "./auto-install.js";
 import { getEffectiveConfigSources, getEffectivePolicy } from "./governance.js";
 import type { IrisProfile, ProfileRegistry, ProfileSource } from "./profiles.js";
 import { DEFAULT_PROFILE_NAME, resolveProfile } from "./profiles.js";
@@ -124,6 +125,16 @@ export interface ProfileRosterEntry {
    * `IRIS_GOVERNANCE_FILE:profiles`, `IRIS_GOVERNANCE_FILE:global` or `default`.
    */
   dataPolicySource: DataPolicySource;
+  /**
+   * Whether the profile installs, upgrades and repairs the IRIS side on connect (Story 45.2). `false`
+   * means bootstrap only reads and the custom-REST tools refuse while the IRIS side is not installed.
+   */
+  autoInstall: boolean;
+  /**
+   * The channel that supplied {@link autoInstall}: `IRIS_PROFILES`, `IRIS_AUTO_INSTALL`,
+   * `IRIS_GOVERNANCE_PRESET` or `default`.
+   */
+  autoInstallSource: AutoInstallSource;
 }
 
 /**
@@ -215,6 +226,8 @@ export function buildRosterEntry(profile: IrisProfile): ProfileRosterEntry {
     ...(profile.sourceFile !== undefined ? { sourceFile: profile.sourceFile } : {}),
     dataPolicy: effectiveDataPolicy(profile),
     dataPolicySource: profile.dataPolicySource ?? "default",
+    autoInstall: profile.autoInstall ?? true,
+    autoInstallSource: profile.autoInstallSource ?? "default",
   };
 }
 

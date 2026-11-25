@@ -2,14 +2,29 @@
 title: 'Story 45.2: Auto-Install Setting, Off Under Read-Only'
 type: 'feature'
 created: '2026-11-25'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'fd7a20cb44fd83fbe84ed76266e0a0d19ae0eb33'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-45-context.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      The sibling docs do not name IRIS_AUTO_INSTALL, the per-profile autoInstall or IRIS_SIDE_NOT_INSTALLED.
+    evidence: |-
+      Blind Hunter: tool_support.md, docs/client-config/{claude-code,claude-desktop,cursor}.md, the launcher README's left-alone variable list and packages/shared/README.md (refusal-code table and the new exports recordSideRefusal, IrisSideNotInstalledError, applyAutoInstall) carry IRIS_DATA_POLICY-style entries but not the new setting. The spec scoped this story's docs to README.md and CHANGELOG.md (Rule #43: the closing rollup enriches).
+    location: >-
+      tool_support.md; docs/client-config/*.md; extensions/iris-mcp-launcher/README.md; packages/shared/README.md
+    severity: low
+  - summary: >-
+      deriveAuditOutcome records the IRIS_SIDE_NOT_INSTALLED refusal as `error`, not `denied`.
+    evidence: |-
+      Edge Case Hunter: server-base.ts deriveAuditOutcome maps GOVERNANCE_DISABLED, CONFIRMATION_DECLINED and CONFIRMATION_SCOPE_CHANGED to `denied` and every other isError result to `error`, so the new refusal is audited as `error`. Whether it should read `denied` is an audit-log decision the spec does not make (and a refusal after earlier Atelier writes is not "nothing changed"); the lead decides.
+    location: >-
+      packages/shared/src/server-base.ts deriveAuditOutcome
+    severity: medium
 ---
 
 <intent-contract>
@@ -117,7 +132,38 @@ deferred: []
 
 - 2026-11-25 (lead, spec gate, decision #158): amendments 1-3 applied to `epics.md` (AC 45.2.1 discovery fields under the wire golden, AC 45.2.2 "never reaches older classes" made precise, AC 45.2.4 both start paths), each tagged. Amendment 4 is a line reference only; no `epics.md` text change. Decisions (a)-(d) accepted as written; (b) because the spine's AD-14 "when" rule binds `unknown` to today's behavior, and the residual equals the owner-accepted IPM-owned stale case (C-4). The observed startup-config/registry mismatch is ledger DW-767 (burndown).
 
+- 2026-11-25 (lead, Planner ruling on decision #158): binding additions, everything else stands. (1) Two real-start-path pins for the gateway refusal: the fake records zero `/api/executemcp/` requests for the refused call, and an Atelier-only tool still works on the refused profile. (2) CHANGELOG Behavior-changes gets a separate bullet under `S-45.2-read-only-no-install`: `iris_execute_tests` and `iris_test_coverage` now refuse on a profile whose IRIS side is not installed while the install is off (today a 404 on their guard read lets them run unguarded). (3) `unknown` stays as today (no write, one warning, tools go on) with: (a) when the marker reads older, including only the ownership/InstallGuard read failing with a non-404, the one warning says plainly the IRIS-side classes are older than this server and may behave differently, and gives the refusal's way out (one start with the automatic install on, or `zpm "install iris-execute-mcp-v2 <semver>"`); (b) the README residuals text lists this case next to the IPM-owned stale case (C-4); (c) a test pins `unknown` + install off (no write, exactly one warning, a custom-REST call runs unrefused) with a proven-red mutation (make `unknown` refuse, or drop the warning).
+
 ## Review Triage Log
+
+### 2026-11-25 — Review pass
+- verdicts: 24 findings from the three finding layers — high 0, medium 8, low 16, false 0, maybe-false 0; plus 6 descriptive intent-alignment observations (no verdict, one row)
+- findings:
+  - `[medium]` `patch` Blind: `iris_execute_tests`/`iris_test_coverage` refusal claimed but no test drives the real tools — real (orchestration test uses `iris_global_get` only); patched: extra calls for both real tools on the refused legs.
+  - `[low]` `reject` Blind: way-out hints name only the winning channel (`IRIS_AUTO_INSTALL`/profile) though the read-only preset can sit underneath — wording is fixed by the spec's C-2 and the niche combination fails clearly at startup if the operator sets `true`; fix would add preset state to three messages.
+  - `[medium]` `patch` Blind: nothing says a restart is needed after the IRIS side is installed (refusal armed once at connect) — real; README (and CHANGELOG clause) now say so; refusal and warning texts are spec-fixed.
+  - `[low]` `patch` Blind: whole-call refusal can contradict "Nothing was changed" in the README row when an earlier request of a multi-profile or mixed tool already wrote — real wording inaccuracy; README row rescoped.
+  - `[medium]` `patch` Blind: `iris_sql_query` is custom REST and refused on a not-installed profile, but the README read-only paragraph presents it as always usable — real; one sentence added.
+  - `[low]` `defer` Blind: sibling docs (`tool_support.md`, client-config pages, launcher README, `packages/shared/README.md` refusal-code table and new exports) do not name `IRIS_AUTO_INSTALL`/`IRIS_SIDE_NOT_INSTALLED` — spec scoped docs to README + CHANGELOG (#43: the closing rollup enriches); recorded in `deferred`.
+  - `[low]` `reject` Blind: profile name reaches the refusal through an unchecked cast (`{...config, name} as IrisConnectionConfig`) — works, and the fields test pins `profile`; no reachable defect.
+  - `[low]` `reject` Blind: `recordSideRefusal` guards an allowlist of five method names — the same shape as the `bindSignal` precedent; `IrisHttpClient` has no other request method and a new one would meet the prefix gate in `request`.
+  - `[low]` `reject` Blind: changeset is `patch` for every package — the spec fixes `patch` ("the Planner raises to minor").
+  - `[low]` `reject` Edge: `missing`/`unconfigured` plus a failed ownership read ends as `unknown` and arms no refusal — `unknown` stays as today (decision #158 (b), Planner ruling 3); nothing is written.
+  - `[low]` `reject` Edge: IPM-owned `missing`/`unconfigured` side is not refused — the matrix row says IPM-owned behaves as today (C-4).
+  - `[low]` `reject` Edge: `current` with an uncompiled class while off is not refused — the matrix says `current` behaves as today (Story 44.4 report unchanged).
+  - `[low]` `reject` Edge: gate misses dot-segments, percent-encoding or `/api/executemcp` without a slash — every caller passes a `/api/executemcp/v2...` literal (Rule #56 enumeration), so no real input reaches it (Rule #54).
+  - `[low]` `reject` Edge: a refusal after earlier writes in the call is reported as a pure refusal — same root as the README "Nothing was changed" row, handled there.
+  - `[medium]` `defer` Edge: `deriveAuditOutcome` records `IRIS_SIDE_NOT_INSTALLED` as `error`, not `denied` — real but it changes an audit-log outcome the spec does not name and the existing precedent is a decision for the lead; recorded in `deferred`.
+  - `[low]` `reject` Edge: `record()` map is keyed by the wire view so "asking for the same profile twice returns the same object" is not true on the wire path — pre-existing `bindSignal` behavior (a fresh view per call); nothing in this diff compares identity there.
+  - `[medium]` `patch` Edge: the refusal is armed once and never cleared until restart — same root as the restart note above.
+  - `[low]` `reject` Edge (claim): wrapping `ctx.http` in a Proxy on every call changes identity with the install on — the full suites and the byte-identity pins are green and `instanceof`/methods are preserved.
+  - `[low]` `reject` Edge (claim): startup passes `this.config` plus the setting — DW-767, observed and already ledgered.
+  - `[medium]` `patch` Verification-gap: real `iris_execute_tests`/`iris_test_coverage` never driven against a refused profile — same root as the first row.
+  - `[medium]` `patch` Verification-gap: `resolve-profile-client.test.ts` now compares the server cache with itself — replaced with a real relation to the cached client.
+  - `[medium]` `patch` Verification-gap: no `mutation:` line for the conflict/malformed throws, roster fields, lazy-path arming, the later-request guard, the `resolveProfileClient` wrapping, the `olderOff` wording and the password pins — each mutation run and recorded.
+  - `[low]` `patch` Verification-gap: a unit test builds an `unknown` result the real bootstrap cannot return — uses the real shape.
+  - `[low]` `reject` Verification-gap: the `ExtraCall` cast reads `structuredContent` unchecked — a missing shape fails the test, so it cannot pass wrongly.
+  - Intent-alignment (descriptive, no verdict; none routed): (1) the gateway holds the mechanism and bootstrap/framework arm it, by the spec's design (setter on `IrisHttpClient`); (2) the per-call recorder is a second layer in `http-client.ts`, by design; (3) DW-767 mismatch of startup config and registry `default`, ledgered; (4) `unknown` after a failed ownership read on a stale side is not refused, per ruling 3; (5) the tests run against a stateful fake plus the recorded throwaway proof, not a live IRIS in the default suite, per the spec; (6) `iris_execute_tests`/`iris_test_coverage` refusal is decision (a), now pinned.
 
 ## Design Notes
 
@@ -163,7 +209,57 @@ Shared surfaces: `REFUSAL_CODES` (catalog test, README refusal table), the disco
 - AC 45.2.5: make `BootstrapResult` carry `autoInstallOff` when on -> the ON-vs-unset byte-identity test red; resolve unset as off -> the 42.2 orchestration upgrade legs red.
 - AC 45.2.1: let a profile inherit `autoInstall` from the `default` entry -> the non-inheritance test red.
 
+### Recorded results (implementation, 2026-11-25)
+
+**Automated.** `pnpm turbo run build --force` ok; `pnpm type-check` and `pnpm lint` ok; `@iris-mcp/shared` 95 files / 2809 tests green; `dev` 1576, `admin` 518, `interop` 754, `ops` 350, `data` 231 green (closed-port env); the FULL `@iris-mcp/all` suite 243 of 244 files green on the final tree, the one failure (`qa-42-9-doc-claims`, two new README lines naming `zpm "install ..."` without the 1.1.0 qualifier) fixed in the README and re-run green together with every `doc-claims`/`changelog`/`readme` file (43 files, 796 tests). `gen:ipm:check`, `gen:governance-baseline:check`, `gen:tools-list-snapshot:check` OK; `pnpm run gen:bootstrap` "not rewritten", `BOOTSTRAP_VERSION` stays `1.2.0+8.5cedcac20ae9`. New tests: `auto-install.test.ts` (24), `bootstrap-auto-install.test.ts` (47), `http-client-side-refusal.test.ts` (14), `server-base-auto-install.test.ts` (23), `story-45-2-auto-install-orchestration.test.ts` (22). The 42.2 hermetic orchestration test (38) and the wire/handler goldens pass with their frozen fixtures unchanged apart from the 10 new ledger entries (`45.2/discovery-roster/<server>`, `45.2/discovery-text/<server>`, registered in `story-43-4-sanctioned-golden-changes.test.ts`).
+
+**Live proof (throwaway, unseeded, `intersystems/irishealth-community:2026.2@sha256:462de1fb...af0a`, `HSCUSTOM`, port 52792; the shared instance was never touched).** Scratch script run through `throwaway-iris.mjs exec`; oracles are the five Design-Notes queries over Atelier `action/query` as `_SYSTEM`.
+- Snapshot before: `classes: 0`, `webApp: []`, `allNamespacePresent: false`, `mapping: []`, `unitTestRoot: []`.
+- Built `iris-dev-mcp` with `IRIS_GOVERNANCE_PRESET=read-only` over a real MCP stdio session: `iris_global_get` -> `isError`, `code: "IRIS_SIDE_NOT_INSTALLED"` (text: `The ExecuteMCPv2 service on IRIS is not available to server profile "default": the ExecuteMCPv2 classes are not installed in 'HSCUSTOM'. The automatic install is off ...`); `iris_server_info` -> success; one `[WARN] Bootstrap: the automatic install is off for profile "default" (IRIS_GOVERNANCE_PRESET=read-only): ...`.
+- Snapshot after the read-only run: identical to the first (`snapshotsEqual: true`).
+- The same build started once without the preset: `Bootstrap: REST service not found, running full install`, `deployed 35 classes`, compiled, web application configured, mapped, `^UnitTestRoot ensured in 'HSCUSTOM' (value: /usr/irissys/mgr/)`; snapshot after: `classes: 35`, `webApp: [{Name: "/api/executemcp/v2"}]`, `allNamespacePresent: true`, `mapping: [{Namespace: "%ALL", Name: "ExecuteMCPv2"}]`, `unitTestRoot: [{Name: "^UnitTestRoot", Value: "/usr/irissys/mgr/"}]`. No warning.
+- A second fresh unseeded container (new state file, same port): `story-42-2-bootstrap-guard-live-gate.test.ts` 13 of 13 green (ON legs unchanged on a real instance). Both containers removed with `down`; `docker ps -a --filter label=iris-mcp.owner=throwaway` empty afterwards.
+
+**Mutations (each applied, run, observed red, reverted byte-identical with `cmp` against a copy taken before; the shared dist rebuilt after each change).**
+- `mutation: remove the read-only branch of resolveAutoInstall -> red`: unit `resolveAutoInstall ... the read-only preset forces it off` and `applyAutoInstall ... the read-only preset turns every profile off` (2 failed); orchestration 7 failed, among them every `preset via startup|other, missing|stale` leg (the server sent 39 and 37 writes, `expected [ ...(39) ] to deeply equal []`).
+- `mutation: remove the prefix gate in IrisHttpClient (assertCustomRestAllowed body emptied) -> red`: `http-client-side-refusal` + `server-base-auto-install` 15 failed; orchestration 14 failed (`the refused call sent nothing to /api/executemcp/: expected [ Array(1) ] to deeply equal []`, no refusal code).
+- `mutation: drop the framework's refusal substitution (refusedResult always undefined) -> red`: `server-base-auto-install` 6 failed (the swallowed-error test, the mixed-tool test, the throw-after-refusal test, both per-profile tests and the base refusal test); orchestration 14 failed.
+- `mutation: BootstrapResult carries autoInstallOff when the install is on -> red`: `bootstrap-auto-install` `ON equals unset, byte for byte, on every branch` red on all 7 branches (`strictly equal ... (9)` vs `(8)` members).
+- `mutation: resolve an unset autoInstall as off (config.autoInstall !== true) -> red`: ON-versus-unset unit rows 8 failed, and `story-42-2-bootstrap-guard-orchestration.test.ts` 10 failed (older-sequence, legacy-bare-hash, current-after-upgrade, the race rows, the unknown rows that expect an install).
+- `mutation: a profile inherits the default entry's own autoInstall -> red`: `auto-install.test.ts` `never inherits the default entry's value: default off (IRIS_PROFILES), p2 on (default)` (1 failed).
+- Planner ruling (decision #158), `unknown` + install off: `mutation: make unknown refuse (customRestRefused = true on the unknown branch) -> red`: `bootstrap-auto-install` 3 failed (`unknown: as today, plus one INFO line, and no refusal` x3 channels) and the orchestration `unknown ... a custom-REST call is NOT refused` (`the custom-REST call ran: it reached the instance: expected 0 to be greater than 0`). `mutation: drop the unknown warning (warnDeploymentLeftAlone removed on that branch) -> red`: `bootstrap-auto-install` 3 failed and the orchestration unknown test (`exactly one warning: expected [] to have a length of 1 but got +0`).
+
+**Review round 1 (lead), additions.** The orchestration test now also drives the real `iris_execute_tests` (level `class`, so it reaches the guard read; a package target stops earlier at package discovery) and `iris_test_coverage` on every `missing` and `stale` leg (all three channels, startup and lazy `other`), with `IRIS_GOVERNANCE={"global":{"iris_execute_tests":true,"iris_test_coverage":true}}` (both are default-disabled writes; the explicit `true` enables them, over the read-only preset too). Each returns the same `IRIS_SIDE_NOT_INSTALLED` structuredContent as `iris_global_get`, with zero `/api/executemcp/` requests and zero `/work` or `Setup_EnsureUnitTestRoot` requests. `test-production-guard.test.ts` gains two tests (`readProductionGuard` rethrows the refusal; `iris_execute_tests` rejects at the guard read with no later call). `resolve-profile-client.test.ts` now relates the view to the server's cached client with a marker set on the cached client. `server-base-auto-install.test.ts` uses the real `unknown` result shape (`deployed: false`, `readFailure` set). Only `vitest run <file>` was used; shared `src` mutations were run through the shared unit tests, which import `src`.
+- `mutation: readProductionGuard swallows the refusal (returns undefined for IrisSideNotInstalledError) -> red`: `test-production-guard.test.ts` 2 failed (`promise resolved "undefined" instead of rejecting`; the handler resolved instead of rejecting). Note: the orchestration legs stay green under this mutation by design, because the per-call recorder still refuses every later request and the framework still answers with the refusal; the dist-level orchestration run could not be re-mutated without a rebuild, so this guard-level unit test is what pins it.
+- `mutation: IRIS_AUTO_INSTALL=true + read-only no longer throws -> red`: `auto-install.test.ts` 1 + `server-base-auto-install.test.ts` 1 failed. `mutation: profile autoInstall:true + read-only no longer throws -> red`: 3 failed (2 unit, 1 startup row). `mutation: malformed IRIS_AUTO_INSTALL no longer throws -> red`: 2 failed.
+- `mutation: buildRosterEntry drops autoInstall/autoInstallSource -> red`: `server-discovery.test.ts` (roster allow-list) + `server-base-auto-install.test.ts` discovery row, 2 failed.
+- `mutation: attemptProfileBootstrap does not arm the client (lazy path only) -> red`: `server-base-auto-install.test.ts` 2 failed (the lazy `p2` leg and the per-profile leg). Run at unit level, not in the orchestration, because the built dist cannot be rebuilt in this round.
+- `mutation: recordSideRefusal no longer throws the recorded refusal on later requests -> red`: `http-client-side-refusal.test.ts` 1 + `server-base-auto-install.test.ts` mixed-tool test 1 failed.
+- `mutation: handleToolCall does not wrap resolveProfileClient results in record(...) -> red`: `server-base-auto-install.test.ts` per-profile leg 1 failed, plus `resolve-profile-client.test.ts` identity row 1 failed.
+- `mutation: the olderOff wording branch of warnDeploymentLeftAlone disabled -> red` and `mutation: leftToIpm no longer passes olderOff through -> red`: `bootstrap-auto-install.test.ts` 1 failed each (`a stale deployment whose ownership cannot be read ... says the classes are older`).
+- `mutation: config.password added to the refusal text -> red`: `bootstrap-auto-install.test.ts` 4 failed (the three `the password never reaches ...` rows and the exact-text row) and `server-base-auto-install.test.ts` 1 failed.
+- `mutation: ctx.resolveProfileClient builds its own IrisHttpClient -> red`: `resolve-profile-client.test.ts` 2 failed.
+- Every mutation was reverted with `cp` from a copy taken before and checked with `cmp` (identical); `git status` shows no change to those source files beyond the story's own.
+
 ## Auto Run Result
 
-Status: ready-for-dev
-Blocking condition: none (halted after planning, as directed)
+Status: done
+Blocking condition: none
+
+**Summary.** The automatic install is now a per-profile setting (`IRIS_AUTO_INSTALL`, per-profile `autoInstall`, read-only preset forces off, explicit "on" with the preset fails startup). With it off, bootstrap sends reads only on every branch; on a `missing`, `stale` or `unconfigured` side the profile's `IrisHttpClient` refuses every `/api/executemcp/` request before any I/O and the framework answers with `IRIS_SIDE_NOT_INSTALLED`, even when a handler swallowed the error. `iris_server_profiles` rows gain `autoInstall` and `autoInstallSource`. No `.cls` changed (`BOOTSTRAP_VERSION` stays `1.2.0+8.5cedcac20ae9`). Planner ruling on decision #158 folded in: gateway pins through the real start path, the CHANGELOG bullet for `iris_execute_tests`/`iris_test_coverage`, and `unknown` kept as today with the older-marker warning wording, README residual and a pinned, mutation-verified test.
+
+**Files changed.**
+- `packages/shared/src/auto-install.ts` (new) -- resolution, parse and conflict errors.
+- `packages/shared/src/{config,profiles,errors,refusals,http-client,bootstrap,server-base,server-discovery,index}.ts` -- field, error class, refusal code, prefix gate and per-call recorder, off path and refusal builder, arming on both bootstrap paths, roster fields.
+- `packages/shared/src/__tests__/{auto-install,bootstrap-auto-install,http-client-side-refusal,server-base-auto-install}.test.ts` (new) and updates to `env-harness`, `refusals`, `resolve-profile-client`, `server-discovery`, `startup-env`.
+- `packages/iris-dev-mcp/src/__tests__/test-production-guard.test.ts` -- pins the guard read rethrowing the refusal.
+- `packages/iris-mcp-all/src/__tests__/story-45-2-auto-install-orchestration.test.ts` (new), `bootstrap-guard-legs.ts` (`runServerCalls`), `story-43-4-sanctioned-golden-changes.test.ts`, `fixtures/sdk-golden-sanctioned-changes.json` (10 entries under `S-45.2-read-only-no-install`).
+- `README.md`, `CHANGELOG.md`, `.changeset/story-45-2-auto-install-setting-off-under-read-only.md`.
+
+**Review.** 24 findings from three layers plus 6 descriptive intent observations (rows in `## Review Triage Log`): patches applied 7 (5 medium, 2 low: real-tool orchestration legs, resolve-profile-client self-comparison, impossible `unknown` fixture, missing mutation records, README refusal-row scope, README `iris_sql_query` caveat, README/CHANGELOG restart note); deferred 2 (sibling docs, low; audit outcome `error` vs `denied`, medium); rejected 15 with reasons in the log.
+
+**Follow-up review recommended: true.** Five medium findings were patched. The risk to check: the patch round ran source mutations in the working tree and restored them byte-identical (`cmp`), and added real-tool orchestration legs that enable the two default-disabled tools through `IRIS_GOVERNANCE`; the final full runs below are green, but the patched legs and the new guard unit test were reviewed only by the lead's triage, not by a second layer pass.
+
+**Verification performed.** `pnpm build`, `pnpm lint`, `pnpm type-check` ok; `pnpm check:live-guards` (75 armed files, 0 findings), `gen:governance-baseline:check`, `gen:ipm:check`, `gen:tools-list-snapshot:check` (115 entries), `node scripts/check-epics-sync.mjs` ok; `gen:bootstrap` unchanged (35 classes). Closed-port env, after the review patches: `@iris-mcp/shared` 95 files / 2809 tests, `@iris-mcp/dev` 84 files / 1578 passed (344 skipped), full `@iris-mcp/all` 244 files / 6522 passed (737 skipped, live-only), all green. Live throwaway proof, mutation records and the 42.2 live gate (13 of 13) are under `## Verification` above; both throwaways removed, label filter empty.
+
+**Residual risks.** DW-767 (startup bootstrap uses `this.config` while an `IRIS_PROFILES` `default` entry can differ) is unchanged and ledgered. `unknown` with install off keeps serving older classes with one warning, and an IPM-owned stale side likewise (C-4). The refusal is decided at connect and cleared only by a restart (documented). The implementation round used `perl -pi` and one node script for the ledger (Rule #55 deviation, each verified by tests and `git diff --stat`).
