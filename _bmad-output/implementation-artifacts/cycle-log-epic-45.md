@@ -41,3 +41,5 @@
 2026-11-25T21:21:50Z	Story 45.2	smoke_complete	lead=throwaway(unseeded,52792) built_dev_server_stdio result=25/25 phases=read-only_missing(startup+lazy_p2_refused,atelier_ok,no_write),conflict_fails_startup(no_write),IRIS_AUTO_INSTALL=false(refused,source),normal_installs(35cls,webapp,%ALL,mapping,UnitTestRoot),read-only_current_runs,C-2_stale_refused(found=stale,no_write),one_start_upgrades teardown=clean oracle_fixes=2(Config.Namespaces_distinct,session_reauth_warn_excluded)
 2026-11-25T21:21:50Z	Story 45.2	fresh_check	files=shared8+dev1+all3 in_order=pass shuffle_seed7=pass tests=271 full_all=245f/6545p/737s live-guards=75/0 head=fa4afed5
 2026-11-25T21:21:50Z	Story 45.2	story_cycle	commits=48ad0819(build),d4dc0097(qa),fa4afed5(cr) review=CLEAN smoke=25/25 ledger=DW-768(45-5),DW-769(by-design),DW-770(burndown,#161) decisions=159,160,161
+2026-11-25T21:22:31Z	Story 45.2	committed	sha=ec6ab9ba ci=pending run=45703667020
+2026-11-25T21:22:31Z	Story 45.3	stage_spawned	stage=plan spawn_at=2026-11-25T21:22:31Z model=claude-opus-5-5 agent_name=45-3-careful-uninstall-plan-1 cycle_iteration=1 ledger_inbox=none prev_ci=pending(45703667020)
