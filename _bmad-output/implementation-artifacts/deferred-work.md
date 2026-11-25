@@ -4334,3 +4334,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-45-2-auto-install-setting-off-under-read-only.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: Unverified (maybe-false): Story 45.2 plan read server-base.ts start() passing this.config to bootstrap while the default ToolContext client is built from the registry profile; not reproduced
 - 2026-11-25T17:32:19Z status=routed owner=burndown by=harvest note=observed at the 45.2 plan, out of scope (AD-15 unused-feature pin); probe whether an IRIS_PROFILES default entry with a different host makes startup bootstrap one instance and tools call another
+- 2026-11-25T17:57:23Z status=routed owner=burndown by=lead note=Planner 2026-11-25: probe first (Rule #16): an IRIS_PROFILES default entry pointing at a second throwaway different from IRIS_*; observe which instance startup bootstrap installs to and which the default tools call
+
+### DW-768: Sibling docs do not name IRIS_AUTO_INSTALL, per-profile autoInstall or IRIS_SIDE_NOT_INSTALLED
+- source: spec-45-2-auto-install-setting-off-under-read-only.md | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: Blind Hunter at the 45.2 build review: tool_support.md, docs/client-config/{claude-code,claude-desktop,cursor}.md, extensions/iris-mcp-launcher/README.md (left-alone variable list) and packages/shared/README.md (refusal-code table; exports recordSideRefusal, IrisSideNotInstalledError, applyAutoInstall) lack the new setting; the story scoped docs to README.md and CHANGELOG.md
+- 2026-11-25T19:43:26Z status=routed owner=45-5-what-the-safety-settings-protect by=harvest note=Rule #43: the closing docs rollup (45.5) enriches; 45.5 already points at the automatic-install setting
+
+### DW-769: deriveAuditOutcome records IRIS_SIDE_NOT_INSTALLED as error, not denied
+- source: spec-45-2-auto-install-setting-off-under-read-only.md | severity: med | fix-risk: low | footprint: in-footprint
+- evidence: Edge Case Hunter at the 45.2 build review: server-base.ts deriveAuditOutcome maps GOVERNANCE_DISABLED, CONFIRMATION_DECLINED, CONFIRMATION_SCOPE_CHANGED to denied, every other isError to error
+- 2026-11-25T19:43:33Z status=by-design owner=45-2-auto-install-setting-off-under-read-only by=harvest note=Lead decision: keep error. AD-19 denied means governance or a person refused before anything changed and carries denyReason/presetApplied; this refusal is a target-side capability gap raised at the gateway, possibly after a handler's earlier Atelier calls, and error keeps the refusal text in the entry's error field, which denied would drop. New refusal, so no back-compat change either way
