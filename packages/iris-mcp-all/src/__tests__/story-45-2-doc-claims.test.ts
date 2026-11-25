@@ -73,7 +73,7 @@ describe("Story 45.2: the README variable table row for IRIS_AUTO_INSTALL", () =
       "`true` or `false` (case-insensitive; empty is unset)",
       "Default **on**; **`IRIS_GOVERNANCE_PRESET=read-only` forces it off**",
       "`false` turns it off for any other setup",
-      "refused with `IRIS_SIDE_NOT_INSTALLED`, and Atelier-only tools keep working",
+      "whose IRIS side is missing or older are refused with `IRIS_SIDE_NOT_INSTALLED`, an `unconfigured` reading only warns (a call refuses only if the web application then answers 404), and Atelier-only tools keep working",
       "`\"autoInstall\": true` or `false` in `IRIS_PROFILES`, which wins over this variable and is never inherited from the `default` entry",
       "Server Manager profiles take this variable",
       "together with the read-only preset fails startup naming both settings",
@@ -147,9 +147,19 @@ describe("Story 45.2: the README refusal table row and the real refusal", () => 
     expect(refusal.text).toContain('zpm "install iris-execute-mcp-v2 ');
     expect(row).toContain("start one server against that instance with the automatic install on");
     expect(row).toContain('run `zpm "install iris-execute-mcp-v2 <version>"`');
-    const unconfigured = shared.buildIrisSideRefusal(config, { ...base, probeStatus: "unconfigured", autoInstallOff: "IRIS_AUTO_INSTALL", customRestRefused: true });
+    const unconfigured = shared.buildIrisSideRefusal(config, { ...base, probeStatus: "unconfigured", autoInstallOff: "IRIS_AUTO_INSTALL", webAppUnconfirmed: true });
     expect(unconfigured.text).toContain('Do ##class(ExecuteMCPv2.Setup).Configure("APP")');
+    expect(unconfigured.fields).toMatchObject({ found: "unconfigured" });
     expect(row).toContain('`Do ##class(ExecuteMCPv2.Setup).Configure("<namespace>")` also fixes it');
+  });
+
+  // DW-772: the row says what the real code does: missing and stale refuse up front, unconfigured only on the 404 of an absent web application.
+  it("says missing and stale refuse before any request, and unconfigured only on the HTTP 404 of an absent web application", () => {
+    const text = squash(row);
+    expect(text).toContain("is missing or older than this server, and the profile's automatic install is off");
+    expect(text).not.toContain("older than this server or unconfigured");
+    expect(text).toContain("the probe read `unconfigured` (the web application could not be confirmed) and the request was answered with the HTTP 404 of an absent web application (`found: \"unconfigured\"`)");
+    expect(text).toContain("For `missing` and `stale` no request reached the custom REST service for this call; for `unconfigured` one request was sent and answered 404.");
   });
 });
 
@@ -210,6 +220,11 @@ describe("Story 45.2: the README read-only section, the Quick Start line and the
       // Every release restamps the marker's semver (gen-bootstrap.mjs at the version step), so every upgrade reads as stale.
       "After every upgrade of the servers (each release stamps its version into the IRIS-side classes",
       "an `unknown` IRIS side whose marker reads older",
+      // DW-772 (decision #165): the unconfigured reading warns, it does not refuse, and the residual is stated plainly.
+      "Where the IRIS side is `missing` or `stale` (older than this server), the server's custom-REST tools of that profile are refused",
+      "With the install off, an `unconfigured` reading (the classes are current, but the `/api/executemcp/v2` web application could not be confirmed) only warns once at startup and the tools go on",
+      "a call refuses with `IRIS_SIDE_NOT_INSTALLED` (`found: \"unconfigured\"`) only if the web application then answers the HTTP 404 of an absent application",
+      "with the install off, an `unconfigured` reading only warns, because an account that cannot read `%SYS` cannot tell \"not registered\" apart; a truly missing web application answers 404, the call refuses with `IRIS_SIDE_NOT_INSTALLED`, and nothing runs",
       "`iris_execute_tests` and `iris_test_coverage` refuse on a profile whose IRIS side is not installed while the install is off",
     ]) {
       expect(section, needle).toContain(needle);
@@ -257,6 +272,10 @@ describe("Story 45.2: the CHANGELOG entry", () => {
       "After every upgrade of the servers (each release stamps its version into the IRIS-side classes",
       "Upgrading is a deliberate admin step.",
       "An `unknown` IRIS side is not refused.",
+      "With the install off and the IRIS side `missing` or `stale` (older than this server), every call that reaches the `/api/executemcp/` service of that profile is refused before a request is sent",
+      "An `unconfigured` reading (the classes are current, the web application could not be confirmed) only logs one `[WARN]` and the tools go on",
+      "An `unconfigured` reading only warns (DW-772).",
+      "only if the web application then answers the HTTP 404 of an absent application, and a 404 from an installed web application (an unknown route) is never mapped",
       "`iris_execute_tests` and `iris_test_coverage` refuse on such a profile",
       "the startup requests and the bootstrap result are byte-identical",
       "No class changed; `BOOTSTRAP_VERSION` is unchanged.",
@@ -284,6 +303,8 @@ describe("Story 45.2: the changeset", () => {
       "GitHub issue #1 point 3",
       "`IRIS_AUTO_INSTALL`",
       "`IRIS_SIDE_NOT_INSTALLED`",
+      "On a `missing` or `stale` IRIS side, a call that would reach the `/api/executemcp/` custom REST service of that profile is refused before any request is sent",
+      "An `unconfigured` reading only logs one `[WARN]` and the tools go on",
       "Upgrading is a deliberate admin step.",
       "after every upgrade of the servers (each release stamps its version into the IRIS-side classes",
       "No `.cls` changed, so `BOOTSTRAP_VERSION` is unchanged.",

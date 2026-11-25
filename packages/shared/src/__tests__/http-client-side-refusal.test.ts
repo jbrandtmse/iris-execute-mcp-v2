@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { IrisHttpClient, recordSideRefusal } from "../http-client.js";
 import type { SideRefusalRecorder } from "../http-client.js";
-import { IrisSideNotInstalledError } from "../errors.js";
+import { IrisApiError, IrisSideNotInstalledError } from "../errors.js";
 import type { IrisSideRefusal } from "../errors.js";
 import type { IrisConnectionConfig } from "../config.js";
 
@@ -101,6 +101,71 @@ describe("IrisHttpClient.refuseCustomRest", () => {
     client.refuseCustomRest(REFUSAL);
     await client.post("/api/atelier/v8/USER/action/query", { query: "SELECT 1" });
     expect(fetchMock.mock.calls.map((c: unknown[]) => (c[1] as { method: string }).method)).toEqual(["HEAD", "POST"]);
+  });
+});
+
+// The two 404 shapes below are captured from a throwaway IRIS for Health 2026.2 (DW-772, Rules #36/#54), `curl` as _SYSTEM:
+// - the web application /api/executemcp/v2 DELETED: the Web Gateway's HTML page (this body, verbatim, for any path under it);
+// - the web application present, an unknown route: HTTP 404 whose body is the Atelier JSON envelope (Content-Type says text/html).
+const GATEWAY_404_BODY =
+  "<HTML><HEAD>\n<TITLE>Not Found</TITLE>\n</HEAD><BODY>\n<H1>Not Found</H1>\n" +
+  "The requested URL /api/executemcp/v2/config/namespace was not found on this server.\n</BODY></HTML>\n";
+const DISPATCH_404_BODY = '{"status":{"errors":[],"summary":""},"console":[],"result":{}}';
+const html404 = (): Response => new Response(GATEWAY_404_BODY, { status: 404, headers: { "Content-Type": "text/html; charset=UTF-8" } });
+const dispatch404 = (): Response => new Response(DISPATCH_404_BODY, { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
+const ABSENT: IrisSideRefusal = { text: "web app absent", fields: { profile: "default", found: "unconfigured" } };
+
+describe("IrisHttpClient.refuseCustomRestWhenAbsent (DW-772)", () => {
+  it("sends the request, and an absent web application's HTML 404 throws the refusal with found=unconfigured", async () => {
+    const client = new IrisHttpClient(CONFIG);
+    client.refuseCustomRestWhenAbsent(ABSENT);
+    fetchMock.mockResolvedValueOnce(html404());
+    const error = await client.get("/api/executemcp/v2/config/namespace").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(IrisSideNotInstalledError);
+    expect((error as IrisSideNotInstalledError).fields).toEqual({ profile: "default", found: "unconfigured" });
+    expect(fetchMock, "the request WAS sent").toHaveBeenCalledTimes(1);
+  });
+
+  it("a dispatch 404 (the web application is installed, the route is unknown) is NOT mapped: it stays an IrisApiError", async () => {
+    const client = new IrisHttpClient(CONFIG);
+    client.refuseCustomRestWhenAbsent(ABSENT);
+    fetchMock.mockResolvedValueOnce(dispatch404());
+    const error = await client.get("/api/executemcp/v2/no/such/route").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(IrisApiError);
+    expect((error as IrisApiError).statusCode).toBe(404);
+  });
+
+  it("a request that succeeds is untouched, and the armed client sends every request (no up-front refusal)", async () => {
+    const client = new IrisHttpClient(CONFIG);
+    client.refuseCustomRestWhenAbsent(ABSENT);
+    await expect(client.get("/api/executemcp/v2/health")).resolves.toMatchObject({ result: {} });
+    await expect(client.post("/api/executemcp/v2/global", {})).resolves.toMatchObject({ result: {} });
+  });
+
+  it("only the 404 of the custom REST prefix maps: an HTML 404 on Atelier, an HTML 500 on the prefix, and an unarmed client do not", async () => {
+    const armed = new IrisHttpClient(CONFIG);
+    armed.refuseCustomRestWhenAbsent(ABSENT);
+    fetchMock.mockResolvedValueOnce(html404());
+    await expect(armed.get("/api/atelier/v8/USER/doc/X.cls")).rejects.toBeInstanceOf(IrisApiError);
+    fetchMock.mockResolvedValueOnce(new Response("<HTML>boom</HTML>", { status: 500 }));
+    await expect(armed.get("/api/executemcp/v2/x")).rejects.toBeInstanceOf(IrisApiError);
+
+    const unarmed = new IrisHttpClient(CONFIG);
+    fetchMock.mockResolvedValueOnce(html404());
+    await expect(unarmed.get("/api/executemcp/v2/x")).rejects.toBeInstanceOf(IrisApiError);
+  });
+
+  it("the per-call recorder keeps it and refuses every later request of the call", async () => {
+    const client = new IrisHttpClient(CONFIG);
+    client.refuseCustomRestWhenAbsent(ABSENT);
+    const recorder: SideRefusalRecorder = {};
+    const view = recordSideRefusal(client, recorder);
+    fetchMock.mockResolvedValueOnce(html404());
+    await expect(view.get("/api/executemcp/v2/x")).rejects.toBeInstanceOf(IrisSideNotInstalledError);
+    expect(recorder.refusal?.fields).toEqual({ profile: "default", found: "unconfigured" });
+    fetchMock.mockClear();
+    await expect(view.get("/api/atelier/v8/USER/doc/X.cls")).rejects.toBe(recorder.refusal);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

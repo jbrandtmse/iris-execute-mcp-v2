@@ -15,7 +15,8 @@
  * It never redeploys an IPM installation either: when the IPM-only
  * `ExecuteMCPv2.InstallGuard` class is present, IPM owns the classes, and a
  * deployment that would write (`stale`, `unconfigured`, `missing`) writes nothing
- * and logs one warning naming the `zpm` command.
+ * and logs one warning naming the `zpm` command. With the automatic install off, nothing is written on any
+ * branch either (Story 45.2).
  */
 
 import { IrisHttpClient, type AtelierEnvelope } from "./http-client.js";
@@ -120,11 +121,19 @@ export interface BootstrapResult {
    */
   autoInstallOff?: AutoInstallSource;
   /**
-   * `true` when the install is off and the IRIS side is `missing`, `stale` or `unconfigured` (and not
-   * IPM-owned): the profile's client must refuse every request to the custom REST service
-   * ({@link buildIrisSideRefusal}). Present only when `true`.
+   * `true` when the install is off and the IRIS side is `missing` or `stale` (and not IPM-owned): the profile's
+   * client must refuse every request to the custom REST service ({@link buildIrisSideRefusal}). Present only when
+   * `true`.
    */
   customRestRefused?: true;
+  /**
+   * `true` when the install is off and the probe read `unconfigured` (and the classes are not IPM-owned): the
+   * classes are current but this server could not confirm the web application, and an account that cannot read
+   * `%SYS` reads the same. The tools go on; the client refuses a call only when the web application then answers
+   * the HTML 404 of an absent application ({@link IrisHttpClient.refuseCustomRestWhenAbsent}). Present only when
+   * `true`.
+   */
+  webAppUnconfirmed?: true;
   /** Whether class deployment succeeded. */
   deployed: boolean;
   /** Whether class compilation succeeded. */
@@ -925,7 +934,8 @@ function notInstalledFinding(
 /**
  * The refusal a profile's client carries after a bootstrap that left the custom REST service unavailable (Story 45.2):
  * the text and the `structuredContent` fields of `IRIS_SIDE_NOT_INSTALLED`. `result` is the bootstrap's result with
- * `customRestRefused` set; its `probeStatus` (`missing`, `stale` or `unconfigured`) is the finding.
+ * `customRestRefused` set (`missing` or `stale`: refused up front) or `webAppUnconfirmed` set (`unconfigured`: the
+ * refusal is raised only when the web application answers 404); its `probeStatus` is the finding.
  *
  * Neither the text nor the fields carry a credential.
  *
@@ -945,7 +955,9 @@ export function buildIrisSideRefusal(config: IrisConnectionConfig, result: Boots
     "nothing on IRIS; tools that use only the Atelier API keep working. " +
     `To use this tool, an operator installs or upgrades the IRIS side once: start one server against ${config.host}:${config.port} ` +
     `${autoInstallWayOut(source)}, or run zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}" in '${namespace}' as a user with %Admin_Manage. ` +
-    "Then restart this server: the refusal is decided when the profile connects. " +
+    (found === "unconfigured"
+      ? "No restart is needed: this server checks the web application again on every call. "
+      : "Then restart this server: the refusal is decided when the profile connects. ") +
     "After every upgrade of the servers (each release stamps its version into the IRIS-side classes), an instance that only " +
     "read-only servers, or servers with the automatic install off, connect to needs this once: upgrading the IRIS side is a " +
     "deliberate admin step.";
@@ -964,7 +976,7 @@ export function buildIrisSideRefusal(config: IrisConnectionConfig, result: Boots
 
 /** The one startup warning of a profile whose custom REST service is not available and whose install is off. */
 function warnCustomRestRefused(config: IrisConnectionConfig, result: BootstrapResult, source: AutoInstallSource): void {
-  const found = result.probeStatus as "missing" | "stale" | "unconfigured";
+  const found = result.probeStatus as "missing" | "stale";
   const deployed = found === "stale" ? result.deployedVersion : undefined;
   logger.warn(
     `Bootstrap: the automatic install is off for profile "${profileNameOf(config)}" (${autoInstallLabel(source)}): ` +
@@ -974,6 +986,23 @@ function warnCustomRestRefused(config: IrisConnectionConfig, result: BootstrapRe
       `To install or upgrade the IRIS side once, start one server against ${config.host}:${config.port} ${autoInstallWayOut(source)}, ` +
       `or run zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}" in '${config.namespace}' as a user with %Admin_Manage, ` +
       "then restart this server.",
+  );
+}
+
+/**
+ * The one startup warning of a profile whose install is off and whose probe read `unconfigured` (DW-772): the classes
+ * are current, but the web application could not be confirmed, which an account that cannot read `%SYS` also reads.
+ * The tools go on; nothing was changed. No credential is named.
+ */
+function warnWebAppUnconfirmed(config: IrisConnectionConfig, source: AutoInstallSource): void {
+  const namespace = config.namespace;
+  logger.warn(
+    `Bootstrap: the ExecuteMCPv2 classes in '${namespace}' on ${config.host}:${config.port} are current, but this server ` +
+      `could not confirm that the /api/executemcp/v2 web application is registered (profile "${profileNameOf(config)}"). ` +
+      "The account may not be able to read %SYS, or the web application is not registered. " +
+      `The automatic install is off for this profile (${autoInstallLabel(source)}), so nothing was changed and the custom-REST tools go on. ` +
+      `If they answer 404, an operator runs Do ##class(ExecuteMCPv2.Setup).Configure("${namespace}") as a user with %Admin_Manage, ` +
+      `or starts one server against ${config.host}:${config.port} ${autoInstallWayOut(source)}.`,
   );
 }
 
@@ -1202,10 +1231,13 @@ async function leftToIpm(
  * 10. Return result with step-level tracking.
  * 11. With the profile's automatic install off (`config.autoInstall === false`; Story 45.2) every branch
  *    sends reads only. `current`, `newer`, `foreign`, `unknown` and an IPM installation behave as above
- *    plus one `[INFO]` line. On `missing`, `stale` and `unconfigured` (after the ownership read of step 9) nothing
+ *    plus one `[INFO]` line. On `missing` and `stale` (after the ownership read of step 9) nothing
  *    is uploaded, compiled or configured; the result carries `customRestRefused: true`, one `[WARN]` is logged,
- *    and the caller arms the client's refusal ({@link buildIrisSideRefusal}). `autoInstallOff` names the
- *    channel; both fields are absent with the install on.
+ *    and the caller arms the client's refusal ({@link buildIrisSideRefusal}). On `unconfigured` (same ownership
+ *    read) nothing is written either, but the tools go on (DW-772: a least-privilege account cannot read `%SYS`, so the
+ *    reading cannot tell "not registered" apart): the result carries `webAppUnconfirmed: true`, one `[WARN]` is
+ *    logged, and the caller arms a refusal that the client raises only on the HTML 404 of an absent web application.
+ *    `autoInstallOff` names the channel; all three fields are absent with the install on.
  *
  * If the configure step fails (e.g. insufficient privileges), the result
  * includes manual instructions but does not throw. Because the probe checks
@@ -1306,6 +1338,14 @@ export async function bootstrap(
     const olderOff = probe.status === "stale" ? { deployed: probe.deployedVersion, source: off } : undefined;
     if (await leftToIpm(http, config, version, result, probe.status, probedMarker, false, false, olderOff)) {
       logAutoInstallOff(config, off, result.probeStatus);
+      return result;
+    }
+    // An `unconfigured` reading cannot tell "not registered" from "this account cannot read %SYS" (DW-772): the marker
+    // matched, so no older class can run, and the tools go on. A call refuses only if the web application then answers
+    // the 404 of an absent application (the client's `refuseCustomRestWhenAbsent`).
+    if (probe.status === "unconfigured") {
+      result.webAppUnconfirmed = true;
+      warnWebAppUnconfirmed(config, off);
       return result;
     }
     result.customRestRefused = true;

@@ -23,15 +23,37 @@ import { auditLines } from "./test-helpers.js";
  * The result the real bootstrap returns for a refused profile (Rule #54): only with the install off, and naming the channel the
  * resolution handed it in `config.autoInstallSource`.
  */
-const refusedFor = (probeStatus: "missing" | "stale" | "unconfigured", config: IrisConnectionConfig): BootstrapResult => {
+const refusedFor = (probeStatus: "missing" | "stale", config: IrisConnectionConfig): BootstrapResult => {
   if (config.autoInstall !== false || config.autoInstallSource === undefined) {
     throw new Error("the real bootstrap refuses only a profile whose install the resolution turned off");
   }
   return refusedShape(probeStatus, config.autoInstallSource);
 };
 
+/**
+ * What the real bootstrap returns for an install-off profile whose probe read `unconfigured` (DW-772): the tools go on
+ * (no `customRestRefused`), and the framework arms the refusal for an absent web application only.
+ */
+const unconfirmedFor = (config: IrisConnectionConfig): BootstrapResult => {
+  if (config.autoInstall !== false || config.autoInstallSource === undefined) {
+    throw new Error("the real bootstrap marks the web application unconfirmed only with the install off");
+  }
+  return {
+    probeFound: true,
+    probeStatus: "unconfigured",
+    autoInstallOff: config.autoInstallSource,
+    webAppUnconfirmed: true,
+    deployed: false,
+    compiled: false,
+    configured: false,
+    mapped: false,
+    unitTestRootEnsured: false,
+    errors: [],
+  };
+};
+
 const refusedShape = (
-  probeStatus: "missing" | "stale" | "unconfigured",
+  probeStatus: "missing" | "stale",
   source: NonNullable<BootstrapResult["autoInstallOff"]>,
 ): BootstrapResult => ({
   probeFound: probeStatus !== "missing",
@@ -352,15 +374,105 @@ describe("a refused profile (the install is off and the IRIS side is not install
 
   it("a lazy profile (not default) is armed through the same path: server selects p2", async () => {
     process.env.IRIS_PROFILES = JSON.stringify({ p2: { host: "p2.example.com", autoInstall: false } });
-    answer = (config) => (config.name === "p2" ? refusedFor("unconfigured", config) : currentResult);
+    answer = (config) => (config.name === "p2" ? refusedFor("stale", config) : currentResult);
     stageStartup(env.fetchMock);
     const server = new McpServerBase(opts([tool("iris_custom", async (_a, ctx) => text(JSON.stringify(await ctx.http.get("/api/executemcp/v2/x"))))]));
     await server.start("stdio");
     env.fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
     env.fetchMock.mockResolvedValueOnce(versionResponse());
     const result = await callTool(server, "iris_custom", { server: "p2" });
-    expect(result.structuredContent).toMatchObject({ code: "IRIS_SIDE_NOT_INSTALLED", profile: "p2", found: "unconfigured" });
+    expect(result.structuredContent).toMatchObject({ code: "IRIS_SIDE_NOT_INSTALLED", profile: "p2", found: "stale" });
     expect(configArg(1)).toMatchObject({ autoInstall: false, autoInstallSource: "IRIS_PROFILES" });
+  });
+});
+
+describe("an install-off profile whose web application could not be confirmed (DW-772: a least-privilege account reads unconfigured)", () => {
+  // The two 404 shapes are captured from a throwaway IRIS for Health 2026.2 (see http-client-side-refusal.test.ts).
+  const GATEWAY_404 = "<HTML><HEAD>\n<TITLE>Not Found</TITLE>\n</HEAD><BODY>\n<H1>Not Found</H1>\nThe requested URL was not found on this server.\n</BODY></HTML>\n";
+  const DISPATCH_404 = '{"status":{"errors":[],"summary":""},"console":[],"result":{}}';
+
+  /** Startup with the read-only preset; `customRest` answers every custom-REST request. */
+  async function started(customRest: () => Response, extra: ToolDefinition[]) {
+    process.env.IRIS_GOVERNANCE_PRESET = "read-only";
+    answer = (config) => unconfirmedFor(config);
+    stageStartup(env.fetchMock);
+    const server = new McpServerBase(opts(extra));
+    await server.start("stdio");
+    env.fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+      if (String(url).includes("/api/executemcp/")) return customRest();
+      if (init.method === "HEAD") return new Response(null, { status: 200 });
+      return okResponse();
+    });
+    return server;
+  }
+
+  const custom = tool("iris_custom", async (_a, ctx) => text(JSON.stringify(await ctx.http.get("/api/executemcp/v2/config/namespace"))));
+
+  it("the profile's custom-REST tool RUNS under the read-only preset: the request is sent and its answer returned", async () => {
+    const server = await started(okResponse, [custom]);
+    const before = env.fetchMock.mock.calls.length;
+    const result = await callTool(server, "iris_custom");
+    expect(result.isError).toBeFalsy();
+    expect(paths(env.fetchMock, before).some((p) => p.includes("/api/executemcp/v2/config/namespace"))).toBe(true);
+  });
+
+  it("the web application's HTML 404 (really absent) answers IRIS_SIDE_NOT_INSTALLED with found=unconfigured", async () => {
+    const server = await started(() => new Response(GATEWAY_404, { status: 404 }), [custom]);
+    const result = await callTool(server, "iris_custom");
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      code: "IRIS_SIDE_NOT_INSTALLED",
+      profile: "default",
+      found: "unconfigured",
+      autoInstallSource: "IRIS_GOVERNANCE_PRESET",
+    });
+    expect(result.content[0].text).toContain('Do ##class(ExecuteMCPv2.Setup).Configure("DEFAULTNS")');
+    expect(result.content[0].text).toContain("without the read-only preset");
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it("a dispatch 404 (the web application is installed, the route unknown) is NOT mapped: the handler's own error stands", async () => {
+    const server = await started(() => new Response(DISPATCH_404, { status: 404 }), [
+      tool("iris_custom", async (_a, ctx) => {
+        try {
+          await ctx.http.get("/api/executemcp/v2/no/such/route");
+        } catch (error: unknown) {
+          return text(`handler saw: ${(error as Error).name}`);
+        }
+        return text("no error");
+      }),
+    ]);
+    const result = await callTool(server, "iris_custom");
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toBe("handler saw: IrisApiError");
+  });
+
+  it("an Atelier-only tool works as today", async () => {
+    const server = await started(() => new Response(GATEWAY_404, { status: 404 }), [
+      tool("iris_atelier", async (_a, ctx) => {
+        await ctx.http.get("/api/atelier/v8/DEFAULTNS/doc/X.cls");
+        return text("atelier ok");
+      }),
+    ]);
+    const result = await callTool(server, "iris_atelier");
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toBe("atelier ok");
+  });
+
+  it("a lazy profile (not default) is armed through the same path", async () => {
+    process.env.IRIS_PROFILES = JSON.stringify({ p2: { host: "p2.example.com", autoInstall: false } });
+    answer = (config) => (config.name === "p2" ? unconfirmedFor(config) : currentResult);
+    stageStartup(env.fetchMock);
+    const server = new McpServerBase(opts([custom]));
+    await server.start("stdio");
+    env.fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+      if (String(url).includes("/api/executemcp/")) return new Response(GATEWAY_404, { status: 404 });
+      if (init.method === "HEAD") return new Response(null, { status: 200 });
+      if (String(url).endsWith("/api/atelier/")) return versionResponse();
+      return okResponse();
+    });
+    const result = await callTool(server, "iris_custom", { server: "p2" });
+    expect(result.structuredContent).toMatchObject({ code: "IRIS_SIDE_NOT_INSTALLED", profile: "p2", found: "unconfigured" });
   });
 });
 

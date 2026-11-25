@@ -4,7 +4,8 @@
  * Every branch of the probe, with the install ON (unset) and OFF from each of the three channels (the
  * variable, the read-only preset, the profile's own field), over a small stateful fake of the Atelier
  * routes the bootstrap uses. OFF sends reads only (the recorded request list is exact), logs what the spec
- * fixes, and leaves the custom REST service refused only on `missing`, `stale` and `unconfigured`.
+ * fixes, and leaves the custom REST service refused only on `missing` and `stale`. On `unconfigured` it warns once
+ * and lets the tools go on (DW-772, decision #165): an account that cannot read `%SYS` reads `unconfigured` too.
  * ON-versus-unset is pinned byte for byte per branch (Rule #19).
  */
 
@@ -39,6 +40,8 @@ interface InstanceState {
   configured: boolean;
   /** `ExecuteMCPv2.InstallGuard`: `found` (IPM), `absent` (404) or `fails` (HTTP 500). */
   guard: "found" | "absent" | "fails";
+  /** What the `Configured` column carries, when it is not the 1/0 of a privileged account (the live least-privilege shape: `false`). */
+  configuredValue?: unknown;
 }
 
 /** The five states of the spec's branch table. */
@@ -92,7 +95,9 @@ function installFake(state: InstanceState): ReturnType<typeof vi.fn> {
       if (query.includes("Setup_GetBootstrapVersion")) {
         return live.marker === undefined ? status(400) : envelope({ content: [{ Version: live.marker }] });
       }
-      if (query.includes("Setup_IsConfigured")) return envelope({ content: [{ Configured: live.configured ? 1 : 0 }] });
+      if (query.includes("Setup_IsConfigured")) {
+        return envelope({ content: [{ Configured: "configuredValue" in live ? live.configuredValue : live.configured ? 1 : 0 }] });
+      }
       if (query.includes("%Dictionary.ClassDefinition")) {
         return envelope({ content: names.map((name) => ({ ID: name.slice(0, -4), Compiled: 1, CompileError: 0 })) });
       }
@@ -210,7 +215,40 @@ const OFF_REQUESTS: Record<Branch, string[]> = {
 describe.each(SOURCES)("the install off from $source", ({ source, label: sourceLabel, wayOut }) => {
   const off = (): IrisConnectionConfig => configFor(source);
 
-  it.each(["missing", "stale", "unconfigured"] as const)(
+  it("unconfigured: sends reads only, refuses nothing, logs exactly one warning (DW-772)", async () => {
+    const { result, fetchMock } = await run(BRANCHES.unconfigured, off());
+
+    expect(requests(fetchMock)).toEqual(OFF_REQUESTS.unconfigured);
+    expect(writes(fetchMock)).toEqual([]);
+    expect(result).toStrictEqual({
+      probeFound: true,
+      probeStatus: "unconfigured",
+      autoInstallOff: source,
+      webAppUnconfirmed: true,
+      deployed: false,
+      compiled: false,
+      configured: false,
+      mapped: false,
+      unitTestRootEnsured: false,
+      errors: [],
+    });
+    expect(result, "the tools go on: no up-front refusal").not.toHaveProperty("customRestRefused");
+
+    const warnings = lines("[WARN]");
+    expect(warnings, "exactly one warning").toHaveLength(1);
+    expect(warnings[0]).toBe(
+      "[WARN] Bootstrap: the ExecuteMCPv2 classes in 'USER' on localhost:52773 are current, but this server could not confirm that " +
+        'the /api/executemcp/v2 web application is registered (profile "default"). ' +
+        "The account may not be able to read %SYS, or the web application is not registered. " +
+        `The automatic install is off for this profile (${sourceLabel}), so nothing was changed and the custom-REST tools go on. ` +
+        'If they answer 404, an operator runs Do ##class(ExecuteMCPv2.Setup).Configure("USER") as a user with %Admin_Manage, ' +
+        `or starts one server against localhost:52773 ${wayOut}.`,
+    );
+    expect(warnings[0], "no refusal wording").not.toContain("IRIS_SIDE_NOT_INSTALLED");
+    expect(lines("[INFO] Bootstrap: the automatic install is off"), "the INFO line is for the other branches").toEqual([]);
+  });
+
+  it.each(["missing", "stale"] as const)(
     "%s: sends reads only, arms the refusal, logs one warning, reports the channel",
     async (branch) => {
       const { result, fetchMock } = await run(BRANCHES[branch], off());
@@ -278,6 +316,7 @@ describe.each(SOURCES)("the install off from $source", ({ source, label: sourceL
       expect(writes(fetchMock)).toEqual([]);
       expect(result.ipmOwned).toBe(true);
       expect(result).not.toHaveProperty("customRestRefused");
+      expect(result).not.toHaveProperty("webAppUnconfirmed");
       expect(result.autoInstallOff).toBe(source);
       const warnings = lines("[WARN]");
       expect(warnings).toHaveLength(1);
@@ -294,7 +333,7 @@ describe.each(SOURCES)("the install off from $source", ({ source, label: sourceL
       const { result } = await run(BRANCHES[branch], config);
       const everything = JSON.stringify([vi.mocked(console.error).mock.calls, result]);
       expect(everything, branch).not.toContain(PASSWORD);
-      if (result.customRestRefused === true) {
+      if (result.customRestRefused === true || result.webAppUnconfirmed === true) {
         const refusal = buildIrisSideRefusal(config, result);
         expect(JSON.stringify(refusal), branch).not.toContain(PASSWORD);
       }
@@ -319,6 +358,7 @@ describe("the install on is today's behavior: ON equals unset, byte for byte, on
     expect(onLog).not.toContain("IRIS_SIDE_NOT_INSTALLED");
     expect(on.result).not.toHaveProperty("autoInstallOff");
     expect(on.result).not.toHaveProperty("customRestRefused");
+    expect(on.result).not.toHaveProperty("webAppUnconfirmed");
   });
 
   it("a profile with the field absent installs: missing writes classes (the unset run is the oracle)", async () => {
@@ -373,13 +413,44 @@ describe("a stale deployment whose ownership cannot be read, with the install of
   });
 });
 
+describe("a least-privilege account, install off (DW-772)", () => {
+  // Oracle: a throwaway IRIS for Health 2026.2, an account with %Development:U and %DB_USER:RW and no %All, the web
+  // application present. Atelier `action/query` answered HTTP 200 and `SELECT ExecuteMCPv2.Setup_IsConfigured()`
+  // returned the JSON boolean `false` (Setup.IsConfigured hits <PROTECT> in %SYS and catches it).
+  const leastPrivilege = { ...BRANCHES.unconfigured, configuredValue: false } satisfies InstanceState;
+
+  it.each(SOURCES)("reads unconfigured and goes on: one warning, nothing written, no refusal ($source)", async ({ source }) => {
+    const { result, fetchMock } = await run(leastPrivilege, configFor(source));
+    expect(result.probeStatus).toBe("unconfigured");
+    expect(result.webAppUnconfirmed).toBe(true);
+    expect(result).not.toHaveProperty("customRestRefused");
+    expect(writes(fetchMock)).toEqual([]);
+    expect(lines("[WARN]")).toHaveLength(1);
+  });
+
+  it("the profile's custom-REST call runs: the refusal is armed for an absent web application only", async () => {
+    const config = configFor("IRIS_GOVERNANCE_PRESET", "ro");
+    const fetchMock = installFake(leastPrivilege);
+    const http = new IrisHttpClient(config);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const result = await bootstrap(http, config, 7);
+    http.refuseCustomRestWhenAbsent(buildIrisSideRefusal(config, result));
+
+    fetchMock.mockClear();
+    fetchMock.mockImplementation(async () => envelope({ ok: true }));
+    await expect(http.get("/api/executemcp/v2/config/namespace")).resolves.toMatchObject({ result: { ok: true } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    http.destroy();
+  });
+});
+
 describe("buildIrisSideRefusal", () => {
   const refused = (probeStatus: "missing" | "stale" | "unconfigured", source: AutoInstallSource): BootstrapResult => ({
     probeFound: probeStatus !== "missing",
     probeStatus,
     ...(probeStatus === "stale" ? { deployedVersion: OLD_MARKER } : {}),
     autoInstallOff: source,
-    customRestRefused: true,
+    ...(probeStatus === "unconfigured" ? { webAppUnconfirmed: true as const } : { customRestRefused: true as const }),
     deployed: false,
     compiled: false,
     configured: false,
@@ -430,5 +501,8 @@ describe("buildIrisSideRefusal", () => {
     expect(fields).toMatchObject({ found: "unconfigured", autoInstallSource: "IRIS_PROFILES", profile: "p2" });
     expect(text).toContain('Do ##class(ExecuteMCPv2.Setup).Configure("USER") as a user with %Admin_Manage also fixes this');
     expect(text).toContain("with the profile's autoInstall removed or true");
+    // The refusal is raised per call, from an absent web application's 404, so no restart is asked for (Rule #54).
+    expect(text).toContain("No restart is needed: this server checks the web application again on every call.");
+    expect(text).not.toContain("Then restart this server");
   });
 });

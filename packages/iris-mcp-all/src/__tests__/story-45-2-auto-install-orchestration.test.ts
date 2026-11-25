@@ -8,7 +8,10 @@
  *   the server sends no write (PUT, DELETE, compile, `Setup_Configure`, `Setup_ConfigureMapping`,
  *   `Setup_EnsureUnitTestRoot`) and no request to `/api/executemcp/` at all, `iris_global_get` answers
  *   `IRIS_SIDE_NOT_INSTALLED` with the fields of the spec, `iris_server_info` (Atelier only) works, and exactly one `[WARN]` is logged;
- * - `unconfigured` is refused the same way; `current` is not refused (the custom REST call reaches the instance); and an
+ * - `unconfigured` (DW-772, decision #165) is NOT refused up front: one `[WARN]`, no write, the tool runs and its request is sent, and
+ *   only the Web Gateway's HTML 404 of an absent web application answers `IRIS_SIDE_NOT_INSTALLED` (`found: "unconfigured"`), while a
+ *   least-privilege account (`IsConfigured` answers `{Configured: false}`, the web application exists) just works;
+ *   `current` is not refused (the custom REST call reaches the instance); and an
  *   `unknown` side (the version read fails over an existing `Setup` class) is not refused either: no write, one warning, the
  *   custom REST call runs (Planner ruling on decision #158);
  * - the setting is per profile: the `default` profile off beside a `p2` that installs;
@@ -266,22 +269,61 @@ describe("Story 45.2: the install off, on a missing and on a stale IRIS side", (
 describe("Story 45.2: the other branches with the install off", () => {
   const preset = CHANNELS[0] as (typeof CHANNELS)[number];
 
-  it("unconfigured: refused (found: unconfigured), nothing written, the Configure one-liner in the text", async () => {
-    const fake = await startFake();
-    await seedInstance(targetOf(fake), embedded, { marker: embedded.marker, perturb: false });
-    fake.state.configured = false;
-    fake.state.mapped = false;
+  // DW-772 (decision #165): an `unconfigured` reading with the install off warns once and lets the tools go on; a call refuses
+  // only when the web application then answers the Web Gateway's HTML 404 of an absent application.
+  for (const channel of CHANNELS) {
+    for (const via of ["startup", "other"] as const) {
+      it(
+        `${channel.channel} via ${via}, unconfigured and the web application REALLY absent: the tool runs, its request is sent, the HTML 404 answers IRIS_SIDE_NOT_INSTALLED (found: unconfigured), nothing written, one warning`,
+        async () => {
+          const fake = await startFake();
+          await seedInstance(targetOf(fake), embedded, { marker: embedded.marker, perturb: false });
+          fake.state.configured = false;
+          fake.state.mapped = false;
+          fake.webAppAbsent = true;
 
-    const { run, window } = await runOff(fake, "startup", preset);
+          const { run, window } = await runOff(fake, via, channel);
 
-    expect(writesIn(window)).toEqual([]);
-    expect(customRestIn(window)).toEqual([]);
-    expect(fake.state.configured).toBe(false);
-    expect(run.results[0]?.structuredContent).toMatchObject({ code: "IRIS_SIDE_NOT_INSTALLED", found: "unconfigured" });
-    expect(run.results[0]?.content?.[0]?.text).toContain(`Do ##class(ExecuteMCPv2.Setup).Configure("${NAMESPACE}") as a user with %Admin_Manage also fixes this`);
-    expect(warnLines(run.stderr)).toHaveLength(1);
-    assertNoPassword(run);
-  }, TEST_TIMEOUT_MS);
+          expect(writesIn(window)).toEqual([]);
+          expect(fake.state.configured).toBe(false);
+          expect(customRestIn(window).length, "the request was SENT: no up-front refusal").toBeGreaterThan(0);
+          expect(run.results[0]?.structuredContent).toMatchObject({ code: "IRIS_SIDE_NOT_INSTALLED", found: "unconfigured" });
+          expect(run.results[0]?.content?.[0]?.text).toContain(`Do ##class(ExecuteMCPv2.Setup).Configure("${NAMESPACE}") as a user with %Admin_Manage also fixes this`);
+          expect(run.results[1]?.isError, "iris_server_info (Atelier only) works").toBeFalsy();
+          const warnings = warnLines(run.stderr);
+          expect(warnings, "exactly one warning").toHaveLength(1);
+          expect(warnings[0]).toContain("could not confirm that the /api/executemcp/v2 web application is registered");
+          expect(warnings[0]).toContain(`Do ##class(ExecuteMCPv2.Setup).Configure("${NAMESPACE}") as a user with %Admin_Manage`);
+          assertNoPassword(run);
+        },
+        TEST_TIMEOUT_MS,
+      );
+
+      it(
+        `${channel.channel} via ${via}, a least-privilege account (IsConfigured answers {Configured:false}, the web application exists): the custom-REST tool runs, one warning, nothing written`,
+        async () => {
+          const fake = await startFake();
+          await seedInstance(targetOf(fake), embedded, { marker: embedded.marker, perturb: false });
+          fake.isConfiguredReadsFalse = true;
+
+          const { run, window } = await runOff(fake, via, channel);
+
+          expect(writesIn(window)).toEqual([]);
+          expect(customRestIn(window).length, "the custom-REST call went out").toBeGreaterThan(0);
+          // The fake's installed web application answers an unknown route with the JSON envelope: the tool's own 404, not a refusal.
+          expect(run.results[0]?.structuredContent?.["code"]).not.toBe("IRIS_SIDE_NOT_INSTALLED");
+          expect(run.results[1]?.isError, "iris_server_info works").toBeFalsy();
+          const warnings = warnLines(run.stderr);
+          expect(warnings, "exactly one warning").toHaveLength(1);
+          expect(warnings[0]).toContain("could not confirm that the /api/executemcp/v2 web application is registered");
+          expect(warnings[0]).toContain("The account may not be able to read %SYS, or the web application is not registered.");
+          expect(run.stderr).not.toContain("IRIS_SIDE_NOT_INSTALLED");
+          assertNoPassword(run);
+        },
+        TEST_TIMEOUT_MS,
+      );
+    }
+  }
 
   it("current: not refused (the custom REST call reaches the instance), the compile check still runs, one INFO line, no warning", async () => {
     const fake = await startFake();

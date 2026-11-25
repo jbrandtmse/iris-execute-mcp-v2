@@ -63,6 +63,11 @@ export class IrisHttpClient {
    * request to the custom REST service is refused before any I/O.
    */
   private sideRefusal: IrisSideRefusal | undefined;
+  /**
+   * Set when this profile's bootstrap could not confirm the web application and its install is off (DW-772): a
+   * request to the custom REST service is sent, and only the answer of an ABSENT web application raises this refusal.
+   */
+  private absentRefusal: IrisSideRefusal | undefined;
 
   constructor(config: IrisConnectionConfig, defaultTimeout = 60_000) {
     this.config = config;
@@ -90,6 +95,17 @@ export class IrisHttpClient {
    */
   refuseCustomRest(refusal: IrisSideRefusal): void {
     this.sideRefusal = refusal;
+  }
+
+  /**
+   * Arm the refusal for an absent web application (DW-772): requests to `/api/executemcp/` are sent as usual, and a
+   * 404 whose body is not JSON (the answer of the Web Gateway when no web application serves the path; probed on
+   * IRIS 2026.2) throws an {@link IrisSideNotInstalledError} carrying `refusal`. The 404 of an installed web
+   * application (an unknown route) carries the JSON envelope and stays an {@link IrisApiError}. Checked on every
+   * request, so a web application registered later needs no restart.
+   */
+  refuseCustomRestWhenAbsent(refusal: IrisSideRefusal): void {
+    this.absentRefusal = refusal;
   }
 
   /** Throws the armed refusal when `path` belongs to the custom REST service. */
@@ -395,6 +411,13 @@ export class IrisHttpClient {
       envelope = JSON.parse(rawText) as AtelierEnvelope<T>;
     } catch {
       // IRIS may return non-JSON responses (e.g., HTML error pages)
+      if (
+        response.status === 404 &&
+        this.absentRefusal !== undefined &&
+        path.toLowerCase().startsWith(CUSTOM_REST_PREFIX)
+      ) {
+        throw new IrisSideNotInstalledError(this.absentRefusal);
+      }
       if (!response.ok) {
         throw new IrisApiError(
           response.status,

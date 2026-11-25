@@ -150,6 +150,18 @@ export interface StatefulFakeAtelier {
    * cannot be read).
    */
   failGuardRead: boolean;
+  /**
+   * Set to `true` to model a least-privilege account (DW-772): `Setup_IsConfigured()` answers HTTP 200 with the row
+   * `{Configured: false}` (the JSON boolean the live probe returned: `IsConfigured` hits `<PROTECT>` in `%SYS` and returns
+   * 0) whatever `state.configured` says. The web application itself is untouched.
+   */
+  isConfiguredReadsFalse: boolean;
+  /**
+   * Set to `true` to model a web application that is NOT registered: every request under `/api/executemcp/` answers the Web
+   * Gateway's HTML 404 page, byte for byte as captured on IRIS for Health 2026.2 with `/api/executemcp/v2` deleted (an
+   * installed web application answers an unknown route with the JSON envelope instead, which is what the fake does when this is off).
+   */
+  webAppAbsent: boolean;
   close: () => Promise<void>;
 }
 
@@ -252,6 +264,8 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
   let compileFailure: StatefulFakeAtelier["compileFailure"];
   let failCompileCheck: StatefulFakeAtelier["failCompileCheck"];
   let failGuardRead = false;
+  let isConfiguredReadsFalse = false;
+  let webAppAbsent = false;
   let versionQueries = 0;
   const visibleClasses = new Set(options.visibleClasses ?? []);
 
@@ -314,7 +328,7 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
     if (statement.includes("Setup_")) {
       if (state.compiledMarker === undefined) return missingFunction(res, "EXECUTEMCPV2.SETUP");
       if (statement.includes("Setup_IsConfigured")) {
-        reply(res, 200, envelope({ content: [{ Configured: state.configured ? 1 : 0 }] }));
+        reply(res, 200, envelope({ content: [{ Configured: isConfiguredReadsFalse ? false : state.configured ? 1 : 0 }] }));
       } else if (statement.includes("Setup_ConfigureMapping")) {
         state.mapped = true;
         reply(res, 200, envelope({ content: [{ MappingResult: 1 }] }));
@@ -364,6 +378,14 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
             namespaces: [namespace, "%SYS"],
           },
         }),
+      );
+      return;
+    }
+
+    if (webAppAbsent && url.pathname.toLowerCase().startsWith("/api/executemcp/")) {
+      res.writeHead(404, { "Content-Type": "text/html; charset=UTF-8" });
+      res.end(
+        `<HTML><HEAD>\n<TITLE>Not Found</TITLE>\n</HEAD><BODY>\n<H1>Not Found</H1>\nThe requested URL ${url.pathname} was not found on this server.\n</BODY></HTML>\n`,
       );
       return;
     }
@@ -546,6 +568,18 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
     },
     set failGuardRead(fail) {
       failGuardRead = fail;
+    },
+    get isConfiguredReadsFalse() {
+      return isConfiguredReadsFalse;
+    },
+    set isConfiguredReadsFalse(value) {
+      isConfiguredReadsFalse = value;
+    },
+    get webAppAbsent() {
+      return webAppAbsent;
+    },
+    set webAppAbsent(value) {
+      webAppAbsent = value;
     },
     close: () =>
       new Promise<void>((resolve) => {

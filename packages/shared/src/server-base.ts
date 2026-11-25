@@ -3315,7 +3315,8 @@ export class McpServerBase {
   /**
    * Arm a profile's client with the `IRIS_SIDE_NOT_INSTALLED` refusal when its bootstrap left the custom REST service
    * unavailable with the automatic install off (Story 45.2; AD-1, AD-14): from then on the client refuses every request to
-   * `/api/executemcp/` before any I/O. A bootstrap result without `customRestRefused` changes nothing.
+   * `/api/executemcp/` before any I/O. A result with `webAppUnconfirmed` arms the refusal for an absent web application
+   * only (DW-772). A bootstrap result with neither changes nothing.
    *
    * @param profileName - The profile name for the text (the startup config of `default` carries none).
    */
@@ -3325,8 +3326,15 @@ export class McpServerBase {
     profileName: string,
     result: BootstrapResult,
   ): void {
-    if (result.customRestRefused !== true) return;
-    client.refuseCustomRest(buildIrisSideRefusal({ ...config, name: profileName } as IrisConnectionConfig, result));
+    if (result.customRestRefused === true) {
+      client.refuseCustomRest(buildIrisSideRefusal({ ...config, name: profileName } as IrisConnectionConfig, result));
+    } else if (result.webAppUnconfirmed === true) {
+      // DW-772: the web application could not be confirmed (an account that cannot read %SYS reads the same), so the tools
+      // go on and only the 404 of an absent web application refuses, with `found: "unconfigured"`.
+      client.refuseCustomRestWhenAbsent(
+        buildIrisSideRefusal({ ...config, name: profileName } as IrisConnectionConfig, result),
+      );
+    }
   }
 
   // ── Accessors ──────────────────────────────────────────────────────
