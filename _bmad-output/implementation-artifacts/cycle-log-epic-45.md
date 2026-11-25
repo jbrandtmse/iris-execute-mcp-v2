@@ -10,3 +10,7 @@
 2026-11-25T14:06:54Z	Epic 45	epic_context_compiled	model=claude-opus-5-5 source=epics.md_Epic_45+proposal_rulings
 2026-11-25T14:06:54Z	Epic 45	quota	weekly=0%(reset_2026-11-25T14:00Z) watch=85%_pause,95%_hold planner_notified=cost_heads-up
 2026-11-25T14:06:59Z	Story 45.1	stage_spawned	stage=plan spawn_at=2026-11-25T14:06:59Z model=claude-opus-5-5 agent_name=45-1-sql-statements-honor-sql-privileges-plan-1 cycle_iteration=1 ledger_inbox=none
+2026-11-25T14:19:20Z	Story 45.1	story_created	model=claude-opus-5-5 path=_bmad-output/implementation-artifacts/spec-45-1-sql-statements-honor-sql-privileges.md build_status=ready-for-dev probes=throwaway_irishealth_2026.2(least-priv_user;checkPriv_1:-99_all_DML/DDL;GRANT/REVOKE_immediate;SqlProc_needs_EXECUTE;Atelier_action/query_bypasses;fix_loaded_byte-identical_%All)_removed
+2026-11-25T14:19:20Z	Epic 45	spine_updated	ad=AD-15,AD-25 reason=45.1_ordering_change_wider+SqlProc_EXECUTE by=lead story=45-1 lint=ok decision=157
+2026-11-25T14:19:20Z	Story 45.1	spec_validated	service_introducing=false integration_ac=present(live_gate_on_throwaway_via_prepublish-dev) adr_constrained_acs=AD-15,AD-25,Rule_9,Rule_19,Rule_24,Rule_26,Rule_59 decision_dependency=none owned_ledger=none amendments=epics_45.1.1/.3/.5 decision=157
+2026-11-25T14:19:20Z	Story 45.1	stage_spawned	stage=implement spawn_at=2026-11-25T14:19:20Z model=claude-sonnet-5-5 agent_name=45-1-sql-privileges-implement-1 cycle_iteration=1 prev_ci=none(first_story)

@@ -1,0 +1,151 @@
+---
+title: 'Story 45.1: SQL Statements Honor SQL Privileges'
+type: 'bugfix'
+created: '2026-11-25'
+status: 'ready-for-dev'
+review_loop_iteration: 0
+followup_review_recommended: false
+context:
+  - '{project-root}/_bmad-output/implementation-artifacts/epic-45-context.md'
+  - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
+warnings: ['oversized']
+deferred: []
+---
+
+<intent-contract>
+
+## Intent
+
+**Problem:** `ExecuteMCPv2.REST.Sql.Perform` prepares every statement with `%Prepare(.pQuery, 0)` (`src/ExecuteMCPv2/REST/Sql.cls:191`), which skips SQL privilege checking. An account with `%Development` and no SQL grants reads, writes and creates tables through `iris_sql_query` and `iris_sql_execute` (issue #1 point 4; reproduced live 2026-11-25, see Design Notes).
+
+**Approach:** Prepare with privilege checking on (`checkPriv` 1, literal, no off-switch), so a statement the account has no grant for fails at prepare, before classification, with IRIS's SQLCODE and message through `SanitizeError`. Regenerate the bootstrap embed, prove refusal, grant, revoke and the destructive refusal live on a throwaway through the tool, and pin the mode in the default suite.
+
+## Boundaries & Constraints
+
+**Always:**
+- `%Prepare(.pQuery, 1)` with a literal `1`. No parameter, request field, config key or environment variable reads or turns off privilege checking (AD-25).
+- A prepare failure keeps today's error path: `tSC` from `%Prepare` returns to `Execute`, one render through `SanitizeError` (AD-11, Rules #7/#9). No new refusal code, no TS-side privilege pre-check (AD-31).
+- For an account with `%All`, or with the grants a statement needs, every request and response is byte-identical (AD-15); only the refusal for an account without a grant is sanctioned (`S-45.1-sql-privileges`).
+- Privilege principals (user, role, GRANT/REVOKE) are created ONLY on a throwaway (`IRIS_THROWAWAY` set by `scripts/throwaway-iris.mjs`), removed in setup and teardown; a live leg that would create one skips with its reason otherwise.
+- Regenerate the embed in this story and record `BOOTSTRAP_VERSION` from `1.2.0+5.6cbac260e73f` to the new value (Rule #24). No class is added; rosters unchanged.
+
+**Never:**
+- No change to `packages/iris-dev-mcp/src/tools/sql.ts` behavior, tool descriptions, schemas, presets, governance keys or the tools-list snapshot.
+- Do not touch Atelier `action/query` callers (bootstrap `Setup_*`, `sqlAnalyze`, `execute`, `unit-test-results`, `test-status`): they are not this route.
+- Do not hand-load `Sql.cls` (or any bootstrapped class) into the shared instance (`localhost:52773`); no user, role, grant, compile or load there. IRIS-side proofs run on the throwaway.
+- Never run `gen:ipm` (only `gen:ipm:check`), the bare governance-baseline generator, `changeset version` or `pnpm run version`; never edit `ipm/**`, `module.xml`, `preload/**` or frozen goldens.
+- No blocking of SqlProc-in-SELECT, no `redact` filtering, no Atelier privilege change (epic out of scope).
+
+## I/O & Edge-Case Matrix
+
+Least-privilege account = role with `%Development:U` and the namespace database resource (`%DB_HSCUSTOM`), no `%All`, no SQL grant. All via the tool over the live route.
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|----------|--------------|---------------------------|----------------|
+| Ungranted SELECT | `iris_sql_query` and `iris_sql_execute` `SELECT ... FROM <fixture>` | tool error carrying `SQLCODE: -99` and `User <name> is not privileged for the operation`; no rows | isError result via existing `SQL error:` path |
+| After GRANT SELECT | same calls | rows equal to the `_SYSTEM` `action/query` rows | none |
+| After REVOKE | same calls | refused again (no privilege cache) | as ungranted |
+| Destructive refusal | `iris_sql_execute` `INSERT` (no readOnly) | privilege error; fixture `COUNT(*)` (read as `_SYSTEM`) unchanged | as ungranted |
+| Ordering: read-only | `iris_sql_execute` `INSERT` with `readOnly:true`; `iris_sql_query` with an UPDATE | privilege error, NOT `SQL_READ_ONLY`; count unchanged | as ungranted |
+| Ordering: cap decline | `iris_sql_execute` `CALL` of the fixture's `Bump` SqlProc with `maxRowsAffected:0` | privilege error, NOT `SQL_ROWS_AFFECTED_CAP`/`capNotCountable`; nothing runs | as ungranted |
+| SqlProc without EXECUTE | `iris_sql_query` `SELECT <fixture SqlProc>()` that increments a global | privilege error; the global unchanged | as ungranted |
+| Atelier residual (pinned, unchanged) | same least-priv account, Atelier `action/query` `SELECT` of the ungranted table | rows returned (IRIS's API, documented by 45.5) | none |
+| `%All` account | `_SYSTEM` runs the existing 38.5 gates | unchanged expectations pass | none |
+
+</intent-contract>
+
+## Code Map
+
+- `src/ExecuteMCPv2/REST/Sql.cls` -- `Perform` :183-254; the one `%Prepare` at :191; class banner :1-40 ("Neither" bullet :20-21 says the statement runs "as the Atelier `action/query` route runs it": no longer true for privileges); `Execute` :45-75 renders one envelope via `SanitizeError`; `ReadControls` :118-160 reads exactly `query`, `namespace`, `readOnly`, `countOnly`, `maxRowsAffected`, `parameters`; `Decline` :259-266 runs after prepare, so a prepare failure precedes every decline.
+- `irislib/%SQL/Statement.cls:513-519` -- `%Prepare(text, checkPriv=1, noAudit=0)`; `checkPriv` covers prepare-time checks only.
+- `irislib/%Api/Atelier/v1.cls:691`, `v6.cls:236` -- `action/query` prepares with `checkPriv` 0 (read-only reference; out of scope).
+- `packages/iris-dev-mcp/src/tools/sql.ts` -- the only production caller (`SQL_EXECUTE_PATH` :38, `runSql` :101, error path :258-260 `failure("SQL error: ...")`). Unchanged.
+- Rule #56 re-enumeration (2026-11-25, `git grep "sql/execute"` over packages, extensions, scripts, src): production caller `sql.ts` only; plus `scripts/lib/fake-iris-listener.mjs:255` (test fake), `packages/iris-dev-mcp/scripts/prepublish-gate.mjs:98` (roster comment), tests, and `Dispatch.cls:192` (route). Every other server-built query uses `atelierPath(..., "action/query")`: `packages/shared/src/bootstrap.ts:188,371,520,720,752,776` (all `Setup_*` SqlProc calls), `packages/iris-dev-mcp/src/tools/{execute.ts:506,sqlAnalyze.ts:309,555,unit-test-results.ts:27,test-status.ts}`.
+- `packages/shared/src/bootstrap-classes.ts:34` -- `BOOTSTRAP_VERSION = "1.2.0+5.6cbac260e73f"`; GENERATED by `pnpm run gen:bootstrap` (also writes `scripts/bootstrap-sequence.json`). `ipm/src/cls/ExecuteMCPv2/REST/Sql.cls` is the frozen release tree: do not touch.
+- `packages/iris-dev-mcp/src/__tests__/sql-safety-live-gate.test.ts` -- sibling to extend in shape: arming via `liveGateTarget()` (`@iris-mcp/shared/test-helpers/live-target`), `loadConfig(liveConnectionEnv(...))` + `IrisHttpClient` + `buildToolContext` :331-356, fixtures via `live-doc-helpers.ts` (`putDocLines`, `compileDocs`, `removeStored`, `runQuery`).
+- `scripts/throwaway-iris.mjs` -- `throwawayEnvProblems` / `assertThrowawayEnv` (exported pure helpers; precedent import from a test: `packages/iris-mcp-all/src/__tests__/bootstrap-guard-legs.ts`). `exec` sets `IRIS_THROWAWAY`, `IRIS_REQUIRE_LIVE=1`, `_SYSTEM`/`SYS`.
+- `src/ExecuteMCPv2/REST/Security.cls` -- `POST /api/executemcp/v2/security/role` `{action:"create"|"delete", name, resources}` and `/security/user` `{action, name, password, roles}` (Dispatch :49, :56): how the gate creates/removes principals as `_SYSTEM`.
+- `src/ExecuteMCPv2/REST/Config.cls:36,209` -- `GET /config/namespace` (`globals`) and `GET /config/database` (`resource`): derive the namespace database resource live instead of hard-coding `%DB_HSCUSTOM`.
+- `packages/iris-dev-mcp/scripts/prepublish-gate.mjs:79-121` -- `gateTestFiles`; `packages/iris-mcp-all/src/__tests__/live-gate-roster.test.ts` requires every armed file to be listed; `scripts/lib/ci-checks.mjs` derives the CI `prepublish-dev` suite (seeded throwaway, `HSCUSTOM`, `allowedSkips: []`) from that list.
+- `src/ExecuteMCPv2/Tests/BaseTest.cls` -- the only ObjectScript test that covers `Sql.cls` (handler roster; 7 `Test*`). No `Sql` %UnitTest class exists by Story 38.5 design.
+- `packages/iris-dev-mcp/README.md:181-200` -- SQL Tools section; `story-38-5-qa-doc-claims.test.ts` pins its table rows and examples (add a new blockquote; do not alter rows/examples).
+- `CHANGELOG.md` top -- convention `## [Unreleased] - Story 45.1: ...`; `.changeset/story-44-1-*.md` (git history, commit `3d7e87850762b28627851bc66b93127b22d26195`) -- changeset shape.
+
+## Tasks & Acceptance
+
+**Execution:**
+- `src/ExecuteMCPv2/REST/Sql.cls` -- change :191 to `Set tSC = tStmt.%Prepare(.pQuery, 1)`; update the banner (add a "SQL privileges" bullet: privileges are checked at prepare, nothing turns it off, a failure is the SQLCODE error envelope before any decline; reword the "Neither" bullet to "with no transaction from this handler") and the `Perform` doc comment. Contract-only comments (Rule 14). -- AC 45.1.2.
+- `packages/shared/src/bootstrap-classes.ts`, `scripts/bootstrap-sequence.json` -- run `pnpm run gen:bootstrap`; record `BOOTSTRAP_VERSION` from → to in `## Verification`; re-run to confirm no diff. -- AC 45.1.5, Rule #24.
+- `packages/iris-dev-mcp/src/__tests__/sql-privilege-mode.test.ts` (new, default suite, no IRIS) -- read `src/ExecuteMCPv2/REST/Sql.cls` and `BOOTSTRAP_CLASSES.get("ExecuteMCPv2.REST.Sql.cls")`; assert each holds exactly one `%Prepare(` call and it is `%Prepare(.pQuery, 1)`; assert `ReadControls` reads exactly the six control names above (no privilege/checkPriv control). -- AC 45.1.2, the default-suite pin of "no off-switch".
+- `packages/iris-dev-mcp/src/__tests__/sql-privileges-live-gate.test.ts` (new armed gate) -- extend the `sql-safety-live-gate` shape: armed by `IRIS_REQUIRE_LIVE` (unreachable fails). Principal legs additionally require a harness-shaped `IRIS_THROWAWAY` (reuse `throwawayEnvProblems`); otherwise they skip with that reason before any principal or fixture is written. Setup as `_SYSTEM`: remove leftovers; PUT + compile `ExecuteMCPv2.Temp.QaStory451Priv.cls` (persistent `Name`/`Qty`, plus `ClassMethod Bump() As %Integer [ SqlProc ]` that `$Increment`s `^ExecuteMCPv2.QaStory451PrivC`, used by both the SqlProc row and the CALL row), seed 3 rows; create role `QaStory451Role` (`%Development:U,<namespace globals DB resource>:RW`, derived live) and user `QaStory451Lp` (random per-run password, role only). Build a second `ToolContext` with the least-privilege credentials. Drive every I/O Matrix row through `sqlQueryTool`/`sqlExecuteTool` handlers; GRANT/REVOKE as `_SYSTEM` through `action/query`. Teardown deletes user, role, class, data and counter global and asserts nothing named `QaStory451` remains. -- AC 45.1.3, 45.1.4.
+- `packages/iris-dev-mcp/scripts/prepublish-gate.mjs` -- add the new gate to `gateTestFiles` with a one-line comment (what it writes; throwaway-only principals). -- Rule #59 (the CI `prepublish-dev` suite arms it).
+- `packages/iris-dev-mcp/README.md` -- in "SQL Tools", add a blockquote "SQL privileges (Story 45.1)": both tools prepare with SQL privilege checking on, so the account needs SELECT (INSERT/UPDATE/DELETE for writes) on each table and EXECUTE on each SqlProc function or procedure it calls; a missing grant is an `SQL error` with SQLCODE -99 before any read-only or cap check; minimum account for the SQL tools: `%Development:U` plus the namespace database resource (`R` for reads); residual: IRIS's own Atelier `action/query` (used by other tools and reachable by the same account) prepares with checking off; the full trust model lands in Story 45.5. Default state: always on, no setting. -- AC 45.1.7.
+- `CHANGELOG.md` -- `## [Unreleased] - Story 45.1: SQL Statements Honor SQL Privileges`, naming `S-45.1-sql-privileges`, the ordering change (every decline), the Atelier residual, and `BOOTSTRAP_VERSION` from → to. -- AC 45.1.7.
+- `.changeset/story-45-1-sql-statements-honor-sql-privileges.md` -- `"@iris-mcp/dev": patch`, `"@iris-mcp/shared": patch` (the Planner raises to minor at release), same content in brief. -- AC 45.1.7.
+
+**Acceptance Criteria:**
+- Given the rebuilt embed deployed on a seeded throwaway, when the least-privilege account calls `iris_sql_query` and `iris_sql_execute` per the I/O Matrix, then each row's outcome holds and fixture counts and the SqlProc counter are unchanged on every refusal (AC 45.1.3, 45.1.4).
+- Given `_SYSTEM` (`%All`) on the same throwaway, when `sql-safety-live-gate.test.ts` and `packages/iris-mcp-all/src/__tests__/story-38-5-qa-sql-wire-gate.test.ts` run, then they pass with `git diff` of both files empty (AC 45.1.6).
+- Given the default suite, when `Sql.cls` or the embed prepares with anything but a literal `1`, or a privilege control is read, then `sql-privilege-mode.test.ts` fails (AC 45.1.2).
+- Given `%Prepare(.pQuery, 1)` reverted to `0` and deployed on the throwaway, when the live gate runs through the tool over `/dev/sql/execute`, then its ungranted-refusal tests go red (AC 45.1.4 proven red; path named).
+- Given the throwaway after seeding, when `ExecuteMCPv2.Tests.BaseTest` runs, then `total` is 7 and all pass (AC 45.1.5 as amended).
+- Given the changed tree, when `pnpm gen:ipm:check`, `pnpm gen:governance-baseline:check` and `pnpm gen:tools-list-snapshot:check` run, then all pass unchanged.
+
+## Spec Change Log
+
+- 2026-11-25 (lead, spec gate, decision #157): the plan's three `epics.md` amendments were applied, each tagged. AC 45.1.1: the role holds the `%Development` resource. AC 45.1.3: the ordering change covers every refusal check. AC 45.1.5: `BaseTest` on the throwaway, plus the TypeScript live gate. The spine's AD-15 `S-45.1-sql-privileges` text and AD-25 "SQL privileges" bullet were amended to match.
+
+## Review Triage Log
+
+## Design Notes
+
+**Governing ADs:** AD-25 (SQL privileges rule, supersedes 38.5 parity), AD-31 (IRIS authorizes; errors via `SanitizeError`; trust model), AD-15 (`S-45.1-sql-privileges`), AD-14 (embed regen, IPM frozen), AD-11 (one envelope), AD-33 (route request shape unchanged).
+
+**Probe record, AC 45.1.1** (throwaway `intersystems/irishealth-community:2026.2@sha256:462de1fb...af0a`, IRIS 2026.2, `HSCUSTOM` seeded with `1.2.0+5.6cbac260e73f`, 2026-11-25; container removed, `docker ps -a --filter label=iris-mcp.owner=throwaway` empty). Account `qa451lp`: one role, `%Development:U,%DB_HSCUSTOM:RW`; table `Qa451.Secret` (3 rows), function `Qa451.Fn()` (DDL, `LANGUAGE OBJECTSCRIPT`).
+
+| Statement (ungranted) | `checkPriv` 1 (prepare) | `checkPriv` 0 (prepare, then execute) |
+|---|---|---|
+| SELECT, SELECT COUNT(*) | `ERROR #5540: SQLCODE: -99 Message: User qa451lp is not privileged for the operation` | OK; rows returned |
+| INSERT / UPDATE / DELETE | same -99 | OK; ran (rowcount 1 / 3 / 1) |
+| TRUNCATE TABLE | -99 `does not have %NOTRIGGER privileges` | OK; ran (rowcount -1) |
+| SELECT `Qa451.Fn()`, CALL `Qa451.Fn()`, SELECT `ExecuteMCPv2.Setup_GetBootstrapVersion()` | -99 not privileged (EXECUTE needed) | OK; ran (42 / 0 / version) |
+| CREATE TABLE | -99 `does not have %CREATE_TABLE privileges` | OK; table created |
+| CREATE INDEX | -99 `%ALTER_TABLE` | prepared; execute -99 `required %ALTER privilege` |
+| GRANT SELECT ... TO other | prepares | execute -112 `does not have required privileges to grant` (both) |
+
+- After `GRANT SELECT ON Qa451.Secret`: SELECT prepares and returns rows; INSERT/UPDATE still -99. After `GRANT EXECUTE ON Qa451.Fn` (syntax `GRANT EXECUTE ON <schema>.<fn>`; `ON FUNCTION`/`ON PROCEDURE` are syntax errors): SELECT and CALL of it prepare and run. After `REVOKE`: refused at once (no cached privilege).
+- **Execution-time checks with `checkPriv` 0:** only GRANT (-112) and the ALTER-type DDL tried (CREATE INDEX, -99) are checked at execution. SELECT, INSERT, UPDATE, DELETE, TRUNCATE, CALL, SqlProc functions and CREATE TABLE are not checked at all.
+- **SqlProc:** with checking on, a SELECT calling a `SqlProc` needs EXECUTE. Through the suite's SQL tools this narrows issue #1 point 2 for a least-privilege account (45.5 says so); an `%All` account is unaffected.
+- **Atelier `action/query`** as `qa451lp`: returns the ungranted rows and runs `Qa451.Fn()` without EXECUTE (unchanged after the route fix; C-1 residual for 45.5).
+- **Route through the patched class** (`%Prepare(.pQuery)` loaded on the throwaway only): least-priv SELECT/INSERT/`readOnly` INSERT/SqlProc/CREATE TABLE answer `{"status":{"errors":[{"error":"ERROR #5001: SQLCODE: -99 Message: User qa451lp is not privileged for the operation",...}]},"result":{}}` (HTTP 200, the existing error envelope); a `readOnly` INSERT gives this instead of `outcome:"readOnly"`. `qa451all` (`%All`): six route bodies (SELECT, readOnly UPDATE, capped UPDATE overCap, countOnly, missing table -30, SqlProc SELECT) byte-identical before and after (`diff` empty). Row count stayed 3 after the refused INSERTs.
+- **The account:** `%Development:U` (both `/api/executemcp/v2` and `/api/atelier` require it) plus the namespace database resource; `R` suffices for SELECT through both read paths (probed), `RW` for writes; then SQL grants per table/function.
+
+**Amendments for the lead (epics.md, apply-and-report tier):**
+1. AC 45.1.1 "`%Development` plus the database resources": `%Development` is a resource, not a role (the role is `%Developer`, which also grants `%DB_USER`, `%Service_*` and more). `Security.Users.Create` silently accepted the non-existent role name `%Development`, and that account could not log in (HTTP 401). Reword to "a role holding the `%Development` resource (`U`) and the namespace's database resource".
+2. AC 45.1.5 "the `Sql.cls` ObjectScript tests": none exist (Story 38.5 chose the armed live gate, review items VG7/BH4). The ObjectScript test that covers `Sql.cls` is `ExecuteMCPv2.Tests.BaseTest` (7), run on the throwaway; the privilege proof needs a non-`%All` principal, which the shared instance forbids, so it is the TS live gate.
+3. AC 45.1.3 / AD-15 `S-45.1-sql-privileges` / AD-25: the ordering change is wider than `SQL_READ_ONLY`: prepare precedes every decline, so an ungranted statement also answers the privilege error instead of `countOnly`, `capNotCountable` or `noJournal`. Nothing runs in any case. Same sanctioned scope ("the refusal for an account without a grant"); the text should say "any decline".
+
+**Extend, don't copy (Rule 2):** the new gate extends `sql-safety-live-gate.test.ts`'s shape and `live-doc-helpers.ts`; throwaway detection reuses `throwawayEnvProblems`. No copied helpers.
+
+**Integration ACs:** no new service. Consumes: the existing `/dev/sql/execute` route (exercised against a real instance). Consumed-by: Story 45.5 (capstone point 4 pins the privilege mode on the request path; README/`SECURITY.md` cite this probe record for the Atelier, execution-time and SqlProc residuals).
+
+## Verification
+
+Shared surfaces: the bootstrap embed and `BOOTSTRAP_VERSION` (`bootstrap.test.ts`, drift tests, seeded throwaway); the dev `gateTestFiles` roster (`live-gate-roster.test.ts`, `scripts/lib/ci-checks.mjs` `prepublish-dev`); the dev README SQL section (`story-38-5-qa-doc-claims.test.ts`); `CHANGELOG.md`. Every test added or changed passes on a fresh environment, in either order.
+
+**Commands:**
+- `pnpm run gen:bootstrap` twice -- expected: second run leaves `git diff --stat` unchanged; `BOOTSTRAP_VERSION` moved from `1.2.0+5.6cbac260e73f`.
+- `pnpm build` then `pnpm --filter @iris-mcp/shared test` and `pnpm --filter @iris-mcp/dev test` -- expected: green, `sql-privilege-mode.test.ts` included.
+- `IRIS_HOST=127.0.0.1 IRIS_PORT=1 pnpm --filter @iris-mcp/all test` -- expected: green (closed port).
+- `pnpm gen:ipm:check`, `pnpm gen:governance-baseline:check`, `pnpm gen:tools-list-snapshot:check` -- expected: OK, no writes.
+- Throwaway (state file in the scratchpad): `node scripts/throwaway-iris.mjs up --image intersystems/irishealth-community:2026.2@sha256:462de1fb3597272fde0e03afad006af1b18b59c90f1c1fb5566c79b027a7af0a --namespace HSCUSTOM --host-port 52792 --state <f>`; `... exec --state <f> -- node scripts/ci-seed-throwaway.mjs` (deploys the new embed); `... exec --state <f> -- pnpm --filter @iris-mcp/dev exec vitest run --no-file-parallelism src/__tests__/sql-privileges-live-gate.test.ts src/__tests__/sql-safety-live-gate.test.ts`; `... exec --state <f> -- pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-38-5-qa-sql-wire-gate.test.ts`; BaseTest through `... session --state <f> --namespace HSCUSTOM --script <file>` calling `##class(%UnitTest.Manager).DebugRunTestCase("","ExecuteMCPv2.Tests.BaseTest")` and counting `%UnitTest_Result.TestMethod` rows of that run (expect 7, all passed); then `... down --state <f>` and `docker ps -a --filter label=iris-mcp.owner=throwaway` empty. One test file or class per call, foreground, `timeout: 600000`.
+
+**Mutations (Rule 19), record each line here:**
+- AC 45.1.2: `Sql.cls` `%Prepare(.pQuery, 1)` -> `0` -> `sql-privilege-mode.test.ts` red (default suite).
+- AC 45.1.4: the same mutation PUT + compiled on the throwaway only (Atelier `PUT /doc` + `action/compile` as `_SYSTEM`) -> live gate ungranted-refusal tests red via the tool over `/dev/sql/execute`; redeploy the original and re-run green.
+- AC 45.1.6: none needed beyond the 38.5 gates' own mutations; their expectation files are untouched.
+
+## Auto Run Result
+
+Status: ready-for-dev
+Blocking condition: none. Halted after planning as directed. Probes for AC 45.1.1 ran on throwaway `iris-mcp-throwaway-372894a1e1b7` (127.0.0.1:52792), which was removed; no throwaway remains. The shared instance was not touched. Three epics.md amendments are recorded under Design Notes for the lead (the `%Development` resource-vs-role wording, the missing `Sql.cls` ObjectScript test host, and the ordering change covering every decline).
