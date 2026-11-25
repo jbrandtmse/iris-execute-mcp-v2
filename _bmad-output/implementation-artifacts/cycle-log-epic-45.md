@@ -52,3 +52,8 @@
 2026-11-25T22:24:15Z	Story 45.2	dev_complete	rework=1 model=claude-sonnet-5-5 build_sha=c3586e96 fix=install-off_unconfigured_warns(webAppUnconfirmed),gateway_html_404_maps_to_IRIS_SIDE_NOT_INSTALLED(found=unconfigured,JSON_dispatch_404_not_mapped) mutations=6(red_unit+built) all_suite=245f/6557p/737s live_probe=404_shapes(throwaway)
 2026-11-25T22:24:15Z	Story 45.2	smoke_complete	rework=1 lead=throwaway result=24/24 legs=least-privilege+read-only(probe_marker_read,classes_current,one_could-not-confirm_warn,no_unknown_path,custom-REST_runs,45.1_sql_-99_then_GRANT_rows,atelier_ok,no_write),webapp_deleted(_SYSTEM+LP_refused_found=unconfigured,no_raw_404,no_write),Configure_recovers_without_restart teardown=clean
 2026-11-25T22:24:15Z	Story 45.2	stage_spawned	stage=code-review(rework-1) spawn_at=2026-11-25T22:24:15Z model=claude-opus-5-5 agent_name=45-2-cr-2 cycle_iteration=2 scope=c3586e96~1..c3586e96
+2026-11-25T23:17:32Z	Story 45.2	cr_complete	rework=1 model=claude-opus-5-5 review_outcome=CLEAN failed_layers=none entries: patched=10 deferred=1 rejected=7 rows=29 unresolved_high_med=0 lead_spec_amendments=2(scoped_before_any_IO,zero_requests_row) ledger_new=DW-773(burndown) patches_sha=bc8e3861
+2026-11-25T23:17:32Z	Story 45.2	ledger_adjudicated	rework=1 slice=empty DW-772=resolved-by:45-2 DW-773=routed(burndown)
+2026-11-25T23:17:32Z	Story 45.2	smoke_complete	rework=1 rerun_on_patched_build=24/24 teardown=clean
+2026-11-25T23:17:32Z	Story 45.2	fresh_check	rework=1 files=shared8+all3 in_order=pass shuffle_seed7=pass tests=271 full_all=245f/6557p/737s live-guards=75/0
+2026-11-25T23:17:32Z	Story 45.2	story_cycle	rework=1 commits=c3586e96(rework),bc8e3861(re-review) ledger=DW-772(resolved),DW-773(burndown) decisions=165,166
