@@ -95,6 +95,17 @@ deferred:
 ## Spec Change Log
 
 - 2026-11-25 (lead, spec gate, decision #162): **form A accepted**, the documented one-liner `Do ##class(ExecuteMCPv2.Setup).Uninstall()`; `Uninstall` is never `SqlProc`. The six proposed `epics.md` amendments are applied as written (AC 45.3.1 self-removal, `%ALL` semantics, the record's home; AC 45.3.4 the running-server bullet; AC 45.3.5 the decided form; AC 45.3.6 the `:List` snapshot), each tagged. Spine AD-14 "The install record and the uninstall" now names the per-namespace global and the decided form, and says `Uninstall` is never an SQL procedure (Rule 20). The CI scope is accepted: a suite `uninstall-round-trip` with its own container on port 52790 after the two guard suites, plus `THROWAWAY_STATE_FILE`. `epic-45-context.md` predates these amendments; the spec and `epics.md` win where they differ.
+- 2026-11-25 (lead, Planner conditions on #162, decision #163; BINDING for implement and review):
+  1. **Ownership before deleting classes.** The every-namespace delete removes the `ExecuteMCPv2` package only in a namespace whose copy is shown to be ours: that namespace's install record (`("deployed")`), or a stamped release marker (`ExecuteMCPv2.Setup` `BOOTSTRAPVERSION` of the form `<semver>+<seq>.<hash>`) written by our bootstrap or IPM path. A namespace whose copy is foreign (a `dev` marker, no marker, or no `Setup` class) or IPM-owned (`InstallGuard`) is left alone, and the report names it with the command to remove it by hand. Pin it live with a second throwaway namespace holding a `dev`-marked copy: after `Uninstall` that copy is byte-for-byte untouched. Prove red: mutate the ownership check to always delete, and that leg fails.
+  2. **The record goes last.** `^ExecuteMCPv2.InstallRecord` in a namespace is killed only after every step it covers succeeded. On a partial failure it stays, so a re-run resumes. The report lists removed, left (with reason) and failed. A re-run after success is a clean no-op that reports nothing to do. (This already matches the Boundaries; pin it with the failing-step leg and the second-run leg.)
+  3. **Not SQL-reachable.** A test reads the compiled class (`%Dictionary.CompiledMethod`) and pins the exact set of `ExecuteMCPv2.Setup` methods with `SqlProc` as the five pre-story ones (`Configure`, `ConfigureMapping`, `IsConfigured`, `EnsureUnitTestRoot`, `GetBootstrapVersion`, which the bootstrap calls through SQL and AC 45.3.8 keeps). `Uninstall` and every new helper must not be in it. A live leg on a throwaway shows that `SELECT ExecuteMCPv2.Setup_Uninstall()` through the built server's `iris_sql_query` fails and removes nothing. (The Planner's literal "no `Setup` method carries `SqlProc`" contradicts AC 45.3.8; this is the lead's reading, sent to the Planner.)
+  4. **README "Removing the IRIS side"** covers:
+     - the one-liner and `%Admin_Manage`;
+     - IPM order (this command first, then `zpm "uninstall iris-execute-mcp-v2"`);
+     - the 1.2.0-and-earlier no-record case, with the manual `%ALL` and `^UnitTestRoot` commands;
+     - an explicit warning that deleting `%ALL` removes every mapping in it, so check for other mappings first.
+
+  Throwaways only: the uninstall is never run on the shared instance (localhost:52773).
 
 ## Review Triage Log
 
