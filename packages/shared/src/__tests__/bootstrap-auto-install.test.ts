@@ -428,7 +428,7 @@ describe("a least-privilege account, install off (DW-772)", () => {
     expect(lines("[WARN]")).toHaveLength(1);
   });
 
-  it("the profile's custom-REST call runs: the refusal is armed for an absent web application only", async () => {
+  it("a client armed for an absent web application from this result sends the profile's custom-REST call", async () => {
     const config = configFor("IRIS_GOVERNANCE_PRESET", "ro");
     const fetchMock = installFake(leastPrivilege);
     const http = new IrisHttpClient(config);

@@ -99,10 +99,10 @@ export class IrisHttpClient {
 
   /**
    * Arm the refusal for an absent web application (DW-772): requests to `/api/executemcp/` are sent as usual, and a
-   * 404 whose body is not JSON (the answer of the Web Gateway when no web application serves the path; probed on
-   * IRIS 2026.2) throws an {@link IrisSideNotInstalledError} carrying `refusal`. The 404 of an installed web
-   * application (an unknown route) carries the JSON envelope and stays an {@link IrisApiError}. Checked on every
-   * request, so a web application registered later needs no restart.
+   * 404 whose body is not the IRIS JSON envelope (the Web Gateway's HTML page when no web application serves the path,
+   * probed on IRIS 2026.2, or any other page a proxy puts in its place) throws an {@link IrisSideNotInstalledError}
+   * carrying `refusal`. The 404 of an installed web application (an unknown route) carries the envelope and stays an
+   * {@link IrisApiError}. Checked on every request, so a web application registered later needs no restart.
    */
   refuseCustomRestWhenAbsent(refusal: IrisSideRefusal): void {
     this.absentRefusal = refusal;
@@ -112,6 +112,19 @@ export class IrisHttpClient {
   private assertCustomRestAllowed(path: string): void {
     if (this.sideRefusal !== undefined && path.toLowerCase().startsWith(CUSTOM_REST_PREFIX)) {
       throw new IrisSideNotInstalledError(this.sideRefusal);
+    }
+  }
+
+  /**
+   * Throws the absent-web-application refusal when it is armed and a 404 under the custom REST prefix did not carry
+   * the IRIS envelope (`body` is the parsed body, or `undefined` when it was not JSON): no installed web application
+   * answered it.
+   */
+  private assertWebAppPresent(status: number, path: string, body: unknown): void {
+    if (this.absentRefusal === undefined || status !== 404 || !path.toLowerCase().startsWith(CUSTOM_REST_PREFIX)) return;
+    const envelopeStatus: unknown = typeof body === "object" && body !== null ? (body as { status?: unknown }).status : undefined;
+    if (typeof envelopeStatus !== "object" || envelopeStatus === null) {
+      throw new IrisSideNotInstalledError(this.absentRefusal);
     }
   }
 
@@ -411,13 +424,7 @@ export class IrisHttpClient {
       envelope = JSON.parse(rawText) as AtelierEnvelope<T>;
     } catch {
       // IRIS may return non-JSON responses (e.g., HTML error pages)
-      if (
-        response.status === 404 &&
-        this.absentRefusal !== undefined &&
-        path.toLowerCase().startsWith(CUSTOM_REST_PREFIX)
-      ) {
-        throw new IrisSideNotInstalledError(this.absentRefusal);
-      }
+      this.assertWebAppPresent(response.status, path, undefined);
       if (!response.ok) {
         throw new IrisApiError(
           response.status,
@@ -454,6 +461,7 @@ export class IrisHttpClient {
     // envelope carries no Atelier-level errors: a valid request that yields no
     // result answers 2xx, so an empty-error 400 is a rejected request.
     if (!response.ok) {
+      this.assertWebAppPresent(response.status, path, envelope);
       const errors = envelope?.status?.errors ?? [];
       // Pass the envelope's `result` through so fields the server placed there
       // (e.g. `truncated`) survive the throw instead of being dropped.

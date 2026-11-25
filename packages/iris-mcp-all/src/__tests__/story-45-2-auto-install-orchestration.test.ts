@@ -10,7 +10,7 @@
  *   `IRIS_SIDE_NOT_INSTALLED` with the fields of the spec, `iris_server_info` (Atelier only) works, and exactly one `[WARN]` is logged;
  * - `unconfigured` (DW-772, decision #165) is NOT refused up front: one `[WARN]`, no write, the tool runs and its request is sent, and
  *   only the Web Gateway's HTML 404 of an absent web application answers `IRIS_SIDE_NOT_INSTALLED` (`found: "unconfigured"`), while a
- *   least-privilege account (`IsConfigured` answers `{Configured: false}`, the web application exists) just works;
+ *   least-privilege account (`IsConfigured` answers `{Configured: false}`, the web application exists) is not refused;
  *   `current` is not refused (the custom REST call reaches the instance); and an
  *   `unknown` side (the version read fails over an existing `Setup` class) is not refused either: no write, one warning, the
  *   custom REST call runs (Planner ruling on decision #158);
@@ -282,14 +282,20 @@ describe("Story 45.2: the other branches with the install off", () => {
           fake.state.mapped = false;
           fake.webAppAbsent = true;
 
-          const { run, window } = await runOff(fake, via, channel);
+          const { run, window } = await runOff(fake, via, channel, [GLOBAL_GET, SERVER_INFO, EXECUTE_TESTS, TEST_COVERAGE], ENABLE_TEST_TOOLS);
 
           expect(writesIn(window)).toEqual([]);
           expect(fake.state.configured).toBe(false);
           expect(customRestIn(window).length, "the request was SENT: no up-front refusal").toBeGreaterThan(0);
-          expect(run.results[0]?.structuredContent).toMatchObject({ code: "IRIS_SIDE_NOT_INSTALLED", found: "unconfigured" });
-          expect(run.results[0]?.content?.[0]?.text).toContain(`Do ##class(ExecuteMCPv2.Setup).Configure("${NAMESPACE}") as a user with %Admin_Manage also fixes this`);
-          expect(run.results[1]?.isError, "iris_server_info (Atelier only) works").toBeFalsy();
+          expect(workIn(window), "the test tools' guard read refused: no /work request and no Setup_EnsureUnitTestRoot query").toEqual([]);
+          const [globalGet, serverInfo, executeTests, testCoverage] = run.results;
+          expect(globalGet?.structuredContent).toMatchObject({ code: "IRIS_SIDE_NOT_INSTALLED", found: "unconfigured" });
+          expect(globalGet?.content?.[0]?.text).toContain(`Do ##class(ExecuteMCPv2.Setup).Configure("${NAMESPACE}") as a user with %Admin_Manage also fixes this`);
+          expect(serverInfo?.isError, "iris_server_info (Atelier only) works").toBeFalsy();
+          for (const real of [executeTests, testCoverage]) {
+            expect(real?.isError).toBe(true);
+            expect(real?.structuredContent).toEqual(globalGet?.structuredContent);
+          }
           const warnings = warnLines(run.stderr);
           expect(warnings, "exactly one warning").toHaveLength(1);
           expect(warnings[0]).toContain("could not confirm that the /api/executemcp/v2 web application is registered");
@@ -300,7 +306,7 @@ describe("Story 45.2: the other branches with the install off", () => {
       );
 
       it(
-        `${channel.channel} via ${via}, a least-privilege account (IsConfigured answers {Configured:false}, the web application exists): the custom-REST tool runs, one warning, nothing written`,
+        `${channel.channel} via ${via}, a least-privilege account (IsConfigured answers {Configured:false}, the web application exists): the custom-REST request is sent and not refused, one warning, nothing written`,
         async () => {
           const fake = await startFake();
           await seedInstance(targetOf(fake), embedded, { marker: embedded.marker, perturb: false });
@@ -310,7 +316,10 @@ describe("Story 45.2: the other branches with the install off", () => {
 
           expect(writesIn(window)).toEqual([]);
           expect(customRestIn(window).length, "the custom-REST call went out").toBeGreaterThan(0);
-          // The fake's installed web application answers an unknown route with the JSON envelope: the tool's own 404, not a refusal.
+          // The fake serves no custom-REST route: its installed web application answers with the JSON error envelope, so the
+          // tool returns its own 404 error, which is not the refusal.
+          expect(run.results[0], "the tool answered").toBeDefined();
+          expect(run.results[0]?.isError, "the fake's envelope 404 reached the handler").toBe(true);
           expect(run.results[0]?.structuredContent?.["code"]).not.toBe("IRIS_SIDE_NOT_INSTALLED");
           expect(run.results[1]?.isError, "iris_server_info works").toBeFalsy();
           const warnings = warnLines(run.stderr);

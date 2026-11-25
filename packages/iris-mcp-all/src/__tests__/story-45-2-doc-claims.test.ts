@@ -159,7 +159,7 @@ describe("Story 45.2: the README refusal table row and the real refusal", () => 
     expect(text).toContain("is missing or older than this server, and the profile's automatic install is off");
     expect(text).not.toContain("older than this server or unconfigured");
     expect(text).toContain("the probe read `unconfigured` (the web application could not be confirmed) and the request was answered with the HTTP 404 of an absent web application (`found: \"unconfigured\"`)");
-    expect(text).toContain("For `missing` and `stale` no request reached the custom REST service for this call; for `unconfigured` one request was sent and answered 404.");
+    expect(text).toContain("For `missing` and `stale` no request reached the custom REST service for this call; for `unconfigured` the call's request was sent and answered 404 (requests the tool had already sent in parallel were answered the same way), and no IRIS code ran.");
   });
 });
 

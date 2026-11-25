@@ -135,6 +135,25 @@ describe("IrisHttpClient.refuseCustomRestWhenAbsent (DW-772)", () => {
     expect((error as IrisApiError).statusCode).toBe(404);
   });
 
+  it("a 404 under the prefix whose JSON body is not the IRIS envelope (a proxy's page for an absent web application) is mapped too", async () => {
+    const client = new IrisHttpClient(CONFIG);
+    client.refuseCustomRestWhenAbsent(ABSENT);
+    fetchMock.mockResolvedValueOnce(
+      new Response('{"message":"no Route matched with those values"}', { status: 404, headers: { "Content-Type": "application/json" } }),
+    );
+    await expect(client.get("/api/executemcp/v2/config/namespace")).rejects.toBeInstanceOf(IrisSideNotInstalledError);
+  });
+
+  it("no restart: after a mapped 404, the next request on the same client is sent and answered once the web application is back", async () => {
+    const client = new IrisHttpClient(CONFIG);
+    client.refuseCustomRestWhenAbsent(ABSENT);
+    fetchMock.mockResolvedValueOnce(html404());
+    await expect(client.get("/api/executemcp/v2/config/namespace")).rejects.toBeInstanceOf(IrisSideNotInstalledError);
+    fetchMock.mockClear();
+    await expect(client.get("/api/executemcp/v2/config/namespace")).resolves.toMatchObject({ result: {} });
+    expect(fetchMock, "the second request was sent").toHaveBeenCalledTimes(1);
+  });
+
   it("a request that succeeds is untouched, and the armed client sends every request (no up-front refusal)", async () => {
     const client = new IrisHttpClient(CONFIG);
     client.refuseCustomRestWhenAbsent(ABSENT);

@@ -32,6 +32,13 @@ deferred:
     location: >-
       packages/shared/src/bootstrap.ts probe/stale branch; scripts/gen-bootstrap.mjs marker stamping; AD-14 version marker
     severity: medium
+  - summary: >-
+      Setup.IsConfigured() cannot tell "web application not registered" from "this account cannot read %SYS", so a least-privilege account always reads unconfigured.
+    evidence: |-
+      Code review of rework 1 (Blind Hunter, verified live on a throwaway 2026.2: Atelier answers {"Configured":false} for %Development:U + the HSCUSTOM database resource, {"Configured":true} for _SYSTEM). Setup.cls:173-184 catches the <PROTECT> and returns 0. Install off (DW-772): the [WARN] comes back on every start and Configure cannot clear it. Install on (unchanged by 45.2): every connect of that account takes the unconfigured branch, recompiles the classes and fails Configure with the %Admin_Manage warning. A distinct return value for "cannot read" would remove both and the 404 heuristic; it is a .cls change (BOOTSTRAP_VERSION moves) and touches DW-771's procedures.
+    location: >-
+      src/ExecuteMCPv2/Setup.cls IsConfigured; packages/shared/src/bootstrap.ts probeCustomRest/isConfigured
+    severity: medium
 ---
 
 <intent-contract>
@@ -48,7 +55,7 @@ deferred:
 - Resolution per profile, first match wins: the profile's own `IRIS_PROFILES` `autoInstall` (JSON boolean) → `IRIS_AUTO_INSTALL` (`true`/`false`, any case; empty = unset) → `IRIS_GOVERNANCE_PRESET=read-only` forces off → on. Sources: `IRIS_PROFILES`, `IRIS_AUTO_INSTALL`, `IRIS_GOVERNANCE_PRESET`, `default`. Never inherited from the `default` entry; Server Manager profiles never carry the field; the governance file is not a channel (AD-9).
 - Fail fast at startup (AD-8): malformed `IRIS_AUTO_INSTALL` names the variable; a non-boolean `autoInstall` names the profile and `IRIS_PROFILES`; `IRIS_AUTO_INSTALL=true` or any profile's `autoInstall: true` together with the read-only preset names both settings (and the profile) and the way out. Never pick one silently.
 - Off: bootstrap sends reads only, on every branch: no `PUT doc`, no `action/compile`, no `Setup_Configure`, `Setup_ConfigureMapping` or `Setup_EnsureUnitTestRoot`. It still runs the IPM-ownership read before deciding, exactly where the write paths run it today.
-- The refusal is decided in `IrisHttpClient` (AD-1): a request path that starts with `/api/executemcp/` (case-insensitive) on a refused client throws `IrisSideNotInstalledError` before any I/O (no CSRF `HEAD`). The framework turns it into `refusalResult(REFUSAL_CODES.IRIS_SIDE_NOT_INSTALLED, ...)` even when the handler caught it, and refuses every later request of that call. No per-tool flag, no tool edit.
+- The refusal is decided in `IrisHttpClient` (AD-1): a request path that starts with `/api/executemcp/` (case-insensitive) on a refused client (a `missing` or `stale` side) throws `IrisSideNotInstalledError` before any I/O (no CSRF `HEAD`). *(Scoped by the lead at rework 1, decision #165: on `unconfigured` the client is armed for an absent web app instead; the request is sent, and only a 404 that is not the IRIS envelope maps to the refusal, so no IRIS code ran.)* The framework turns it into `refusalResult(REFUSAL_CODES.IRIS_SIDE_NOT_INSTALLED, ...)` even when the handler caught it, and refuses every later request of that call. No per-tool flag, no tool edit.
 - Back-compat (AD-15, Rule #19): with `IRIS_AUTO_INSTALL` unset, no `autoInstall` and no read-only preset, the startup requests and `BootstrapResult` are byte-identical; new `BootstrapResult` fields are present only when the setting is off. Startup with `IRIS_AUTO_INSTALL=true` (no preset) is identical to unset.
 - Credentials are never logged or put in a refusal.
 
@@ -76,7 +83,7 @@ deferred:
 
 | Scenario | Input / State | Expected Output / Behavior | Error Handling |
 |---|---|---|---|
-| Custom-REST tool | e.g. `iris_global_get` (read) on a refused profile | `isError`, `structuredContent` `{code:"IRIS_SIDE_NOT_INSTALLED", profile, namespace, found, deployedVersion?, requiredVersion, autoInstallSource}`; zero requests to IRIS for the call | text per Design Notes "Refusal and log wording"; never reaches older classes |
+| Custom-REST tool | e.g. `iris_global_get` (read) on a refused profile | `isError`, `structuredContent` `{code:"IRIS_SIDE_NOT_INSTALLED", profile, namespace, found, deployedVersion?, requiredVersion, autoInstallSource}`; zero requests to IRIS for the call on a `missing` or `stale` side (on `unconfigured`, one request that the absent web app answers with a gateway 404; rework 1, decision #165) | text per Design Notes "Refusal and log wording"; never reaches older classes |
 | Handler swallows the error | a tool that catches the custom-REST failure and continues | the refusal result replaces whatever the handler returned; no request after the first refusal | per-call recorder |
 | Mixed tool | `iris_execute_tests` (guard read on custom REST, then Atelier `Setup_EnsureUnitTestRoot`, `/work`) | refusal at the guard read; the Atelier calls are never sent | as above |
 | Atelier-only tool | `iris_server_info`, `iris_doc_get` on a refused profile | works as today | none |
@@ -163,6 +170,29 @@ Rejected:
 - low, spec-bound: the `[INFO]` text "found X, nothing to install." is the Design Notes wording (Blind).
 - by-design: the discovery description does not list the new fields (decision #158(c)); exposing the armed state is new scope (Blind).
 - by-design: the changeset test skips once `changeset version` consumes the file, as documented (VG).
+
+Code review of rework 1, 2026-11-25 (`bmad-code-review`, full mode, frozen diff `c3586e96~1..c3586e96`; Blind Hunter, Edge Case Hunter, Verification Gap and Acceptance Auditor all DELIVERED; review CLEAN). 29 raw rows, 10 patched root causes, 1 deferred, 7 rejected; high 0.
+
+- [x] [Review][Patch] An absent web application answered with a JSON 404 (a proxy or gateway page) was not mapped, so `readProductionGuard` swallowed the `IrisApiError` 404 and `iris_execute_tests`/`iris_test_coverage` ran unguarded: the mapping now keys on "not the IRIS envelope" (non-JSON, or JSON without a `status` object), in both branches of `request()` (Edge) [packages/shared/src/http-client.ts assertWebAppPresent]
+- [x] [Review][Patch] "No restart is needed" was not pinned: a refusal that latched after the first mapped 404 passed every test (VG gap + Blind) [http-client-side-refusal.test.ts "no restart: ..."]
+- [x] [Review][Patch] The test tools' refusal on the `unconfigured` + absent path had no built-server test (Rule #59) (Auditor + Blind) [story-45-2-auto-install-orchestration.test.ts `REALLY absent` legs now drive `iris_execute_tests` and `iris_test_coverage`, `workIn` empty]
+- [x] [Review][Patch] CHANGELOG "Startup logs one `[WARN]` for a refused profile and one `[INFO]` line for the other cases" left out `unconfigured` (Auditor + Blind + Edge) [CHANGELOG.md:12]
+- [x] [Review][Patch] CHANGELOG known limitation "If the tools answer 404" while the user sees `IRIS_SIDE_NOT_INSTALLED` (Auditor + Blind + VG) [CHANGELOG.md:25]
+- [x] [Review][Patch] README refusal row "for `unconfigured` one request was sent" is wrong for a tool that sends requests in parallel (`env-diff` `fetchMappings`) (Blind) [README.md:527; doc-claims needle]
+- [x] [Review][Patch] Comments still said the refusal sends no request (Auditor + Blind) [packages/shared/src/errors.ts IrisSideNotInstalledError; packages/iris-dev-mcp/src/tools/test-production-guard.ts @returns]
+- [x] [Review][Patch] Least-privilege orchestration leg: header said "just works" and the `not.toBe` passed on an undefined result (Auditor + Blind + VG) [story-45-2-auto-install-orchestration.test.ts: header, title, positive `isError` on the fake's envelope 404]
+- [x] [Review][Patch] `bootstrap-auto-install` "the refusal is armed for an absent web application only" arms the client itself; title overstated (VG + Edge) [renamed]
+- [x] [Review][Patch] Missing `mutation:` lines for the `[WARN]` text and the mapping's limits (VG) [## Verification, Rework 1]
+- [x] [Review][Defer] `Setup.IsConfigured()` folds the `%SYS` `<PROTECT>` into 0, so a least-privilege account always reads `unconfigured`: install off, the `[WARN]` comes back on every start and `Configure` cannot clear it; install on, every connect recompiles and fails `Configure` (Blind) [src/ExecuteMCPv2/Setup.cls:173-184; bootstrap.ts probeCustomRest] — deferred: pre-existing (install-on path, decision #165 accepted the warning), the fix is a `.cls` change (frontmatter `deferred:`)
+
+Rejected:
+- spec edit: the Boundaries "before any I/O (no CSRF `HEAD`)" bullet and the "Custom-REST tool on a refused profile: zero requests" matrix row read as universal; the Spec Change Log entry of rework 1 scopes them, and the README row is correct. For the lead: amend both in place to "`missing`/`stale`" (Auditor + Blind).
+- spec-bound: the `[WARN]` says "If they answer 404"; the matrix row prescribes that text (Auditor + Blind + VG).
+- low, no realistic reach: an empty-body 404, or a body read that fails part-way, on the prefix maps too; an installed web application always answers with the envelope, nothing ran, and narrowing adds guards (Edge + Blind).
+- out of scope, pre-existing: install off with `current` from a throwing `IsConfigured()` (essentially unreachable), IPM-owned or `unknown` plus an absent web application is not armed; `unknown`/IPM are as today by the spec (Edge).
+- low, cosmetic: `not.toHaveProperty`/`not.toContain` after an exact `toStrictEqual`/`toBe` cannot fail on their own (VG).
+- low: the README read-only bullet states the `unconfigured` point in the behavior text and again in the residual list (C-4's place); both are pinned (Blind).
+- low, trivial: the test at `bootstrap-auto-install` "a client armed ..." leaks its client only when it fails (VG).
 
 ## Spec Change Log
 
@@ -308,6 +338,15 @@ Shared surfaces: `REFUSAL_CODES` (catalog test, README refusal table), the disco
 - `mutation: server-base does not arm the client for webAppUnconfirmed -> red`: `server-base-auto-install` 2 failed (HTML 404 refusal, lazy profile); orchestration 6 failed. Restored, `cmp` identical.
 - `mutation: the unconfigured refusal text keeps "Then restart this server" -> red`: `bootstrap-auto-install` 1 failed (`buildIrisSideRefusal ... unconfigured`). Restored, `cmp` identical.
 - `mutation: README read-only section back to "missing, stale (older than this server) or unconfigured, ... are refused" -> red`: `story-45-2-doc-claims` 1 failed (`the Quick Start line says the install can be off, and the read-only section ...`; a second failure there was the freshness check, the dist being one mutation behind). Restored, `cmp` identical.
+
+Re-review of rework 1 (code review, 2026-11-25; each mutation applied with the Edit tool, run, observed red, restored from a copy and checked with `cmp`, `git status --short` and `git diff --stat` unchanged; `pnpm turbo run build --force` after the last restore):
+- `mutation: the post-parse envelope check removed (only a non-JSON 404 maps) -> red`: `http-client-side-refusal` 1 failed (`a 404 under the prefix whose JSON body is not the IRIS envelope ... is mapped too`).
+- `mutation: the first mapped 404 latches (this.sideRefusal = this.absentRefusal before the throw) -> red`: `http-client-side-refusal` 1 failed (`no restart: after a mapped 404, the next request on the same client is sent ...`).
+- `mutation: the custom-REST prefix check dropped from the mapping -> red`: `http-client-side-refusal` 1 failed (`only the 404 of the custom REST prefix maps ...`).
+- `mutation: the [WARN] text loses "The account may not be able to read %SYS, or the web application is not registered." -> red`: `bootstrap-auto-install` 3 failed (`unconfigured: sends reads only, refuses nothing, logs exactly one warning`, three channels).
+- `mutation: the mapping never fires (absentRefusal compared with null), shared dist rebuilt -> red`: orchestration 6 failed (every `REALLY absent` leg, now also driving `iris_execute_tests` and `iris_test_coverage`): the guard read's 404 stayed an `IrisApiError`, the test tools ran unguarded and sent `Setup_EnsureUnitTestRoot` (`writesIn` received `POST /api/atelier/v8/USER/action/query`).
+
+Live shape probe (code review, throwaway `intersystems/irishealth-community:2026.2@sha256:462de1fb…af0a`, `HSCUSTOM`, port 52792, installed with the built dist as `_SYSTEM`, removed afterwards, `docker ps -a --filter label=iris-mcp.owner=throwaway` empty): `SELECT ExecuteMCPv2.Setup_IsConfigured() AS Configured` through Atelier `action/query` answered `{"Configured":false}` for an account with role `%Development:U` + the `HSCUSTOM` database resource `:RW` and `{"Configured":true}` for `_SYSTEM` (Atelier renders `%Boolean` as a JSON boolean; `isConfigured()` accepts `1`/`true`, so the 1/0 rows of the older fakes reach the same branch). The same least-privilege account's `GET /api/executemcp/v2/global` answered 200. A DISABLED web application (`Enabled=0`) answers the same Web Gateway HTML 404 as a deleted one for `GET` and `POST`, so it maps too; `Setup.Configure` sets `Enabled=1`, so the refusal's way out holds.
 
 **Oracle and shape pins.** The fake's `isConfiguredReadsFalse` answers `{Configured: false}` (the JSON boolean the lead's probe returned) and `webAppAbsent` answers the verbatim HTML 404 above; the unit tests carry the same two body shapes as constants. The stateful fake's installed web application keeps answering an unknown route with the JSON envelope, so the orchestration also proves a dispatch 404 is not mapped on the built server.
 
