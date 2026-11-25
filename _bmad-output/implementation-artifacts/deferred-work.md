@@ -4305,3 +4305,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: server-manager-source.ts discoverScopedSettingsFiles treats IRIS_SM_SETTINGS_PATHS files as the operator's own; unprobed whether a repo can set it
 - 2026-11-23T22:31:21Z status=routed owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=harvest note=lead triage at dev_complete (decision #155)
 - 2026-11-23T22:31:21Z status=by-design owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=lead note=decision #155: whoever sets a server's launch env (a committed .mcp.json env block, approved by the client) also chooses its command, which is arbitrary code execution, and can equally set IRIS_HOST with IRIS_CREDENTIAL_NAME; the launch config is inside the trust boundary the client's project-server approval guards, so this adds no new capability. The guard defends against settings files, which are data, not against launch config.
+
+### DW-763: The Story 45.1 live gate's userExists treats any IrisApiError as user absent, so a teardown assertion could pass vacuously on a 401 or 500
+- source: spec-45-1-sql-statements-honor-sql-privileges.md | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: sql-privileges-live-gate.test.ts:165 userExists catches every IrisApiError and returns false; the status the Security route gives for a missing user was not probed (throwaway-only gate)
+- 2026-11-25T15:40:17Z status=routed owner=45-1-sql-statements-honor-sql-privileges by=harvest note=lead triage at dev_complete: owned by this story; QA/CR to narrow the catch to the not-found status, probed on the throwaway
+
+### DW-764: The 45.1 default-suite privilege pin reads source text only; a bypass that keeps the literal 1 is caught only by the armed live gate in CI
+- source: spec-45-1-sql-statements-honor-sql-privileges.md | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: sql-privilege-mode.test.ts never executes the handler; Sql.cls has no ObjectScript test host by Story 38.5 design
+- 2026-11-25T15:40:17Z status=routed owner=45-1-sql-statements-honor-sql-privileges by=harvest note=lead triage at dev_complete
+- 2026-11-25T15:40:17Z status=by-design owner=45-1-sql-statements-honor-sql-privileges by=lead note=the static pin plus the armed live gate (prepublish roster, CI throwaway job with allowedSkips []) is the Story 38.5 design for Sql.cls: no ObjectScript host can run Perform under a non-%All user in the default suite. The live gate is the executing proof and is mutation-verified red (12/15) with checkPriv 0.
