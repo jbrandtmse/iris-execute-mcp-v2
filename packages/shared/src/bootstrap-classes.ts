@@ -31,7 +31,7 @@
  * packages/shared/package.json. Compared against
  * `ExecuteMCPv2.Setup_GetBootstrapVersion()` at MCP server startup.
  */
-export const BOOTSTRAP_VERSION = "1.2.0+10.109d0129528f";
+export const BOOTSTRAP_VERSION = "1.2.0+11.6ef86aefc48e";
 
 export interface BootstrapClass {
   name: string;
@@ -1249,6 +1249,12 @@ ClassMethod ReadRequestBody(Output pBody As %DynamicObject) As %Status
 /// <example>
 /// Do ##class(ExecuteMCPv2.Setup).Uninstall()
 /// </example>
+/// <p><method>Configure</method> and <method>ConfigureMapping</method> are SQL procedures, so a
+/// read-only <code>SELECT</code> over the web can reach them. They refuse, and change nothing,
+/// when called inside a transaction (<code>$TLEVEL</code> above 0) during a web request (a
+/// <code>%request</code> object exists), which is how <code>iris_sql_query</code> runs a SELECT.
+/// The automatic install (Atelier, no transaction), an IPM install (a transaction, no
+/// <code>%request</code>) and a terminal call run as before.</p>
 Class ExecuteMCPv2.Setup Extends %RegisteredObject
 {
 
@@ -1268,6 +1274,11 @@ Parameter MAPNOTFOUNDCODE = 421;
 /// The embed never names it in full: that class is not a bootstrapped class.
 Parameter GUARDCLASS = "InstallGuard";
 
+/// The rest of the refusal text of <method>Configure</method> and <method>ConfigureMapping</method>
+/// (each puts its own name in front) when either is called inside a transaction during a web
+/// request, as <code>iris_sql_query</code> runs a SELECT.
+Parameter GUARDTEXT = "changed nothing: it was called inside a transaction during a web request, as iris_sql_query runs a SELECT. Run it in an IRIS terminal, or let the automatic install or IPM run it.";
+
 /// Bootstrap version marker, injected by <code>scripts/gen-bootstrap.mjs</code>
 /// at generation time. The marker is
 /// <code>&lt;semver&gt;+&lt;sequence&gt;.&lt;hash&gt;</code>: the version of
@@ -1286,7 +1297,7 @@ Parameter GUARDCLASS = "InstallGuard";
 /// deployment, an equal semver and sequence with a different hash, the
 /// <code>"dev"</code> placeholder and any unparseable value are left in place
 /// with a warning.</p>
-Parameter BOOTSTRAPVERSION = "1.2.0+10.109d0129528f";
+Parameter BOOTSTRAPVERSION = "1.2.0+11.6ef86aefc48e";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -1298,6 +1309,8 @@ Parameter BOOTSTRAPVERSION = "1.2.0+10.109d0129528f";
 ///        Defaults to the current namespace before switching to %SYS.
 ClassMethod Configure(pNamespace As %String = "") As %Status [ SqlProc ]
 {
+    ; The transaction guard (see the class doc): refuse inside a transaction during a web request
+    If ($TLevel > 0) && $IsObject($Get(%request)) Quit $$$ERROR($$$GeneralError, "Configure " _ ..#GUARDTEXT)
     Set tSC = $$$OK
     Try {
         ; Capture the target namespace before switching to %SYS
@@ -1373,7 +1386,9 @@ ClassMethod Configure(pNamespace As %String = "") As %Status [ SqlProc ]
 /// records, only when no step failed. A failed step therefore leaves this class and the
 /// records in place, and the command can run again once the cause is fixed.
 /// Without any install record (an install by 1.2.0 or earlier) <code>%ALL</code> and
-/// <code>^UnitTestRoot</code> are never removed and the report gives the commands.
+/// <code>^UnitTestRoot</code> are never removed and the report gives the commands. The same
+/// holds for a <code>%ALL</code> that every record says the install found, and for the
+/// <code>^UnitTestRoot</code> of a namespace that holds no record of its own.
 /// If the web application, the mapping or the namespace list cannot be read or removed,
 /// <code>%ALL</code>, <code>^UnitTestRoot</code>, the classes and the records are left
 /// alone.</p>
@@ -1576,7 +1591,7 @@ ClassMethod Uninstall(pVerbose As %Boolean = 1, Output pReport As %DynamicObject
                 Set tN = $Order(tScan(tN))
                 If tN = "" Quit
                 If '$Data(tScan(tN, "error")) {
-                    Set tCode = ..DecideUnitTestRoot(tScan(tN, "recUTR"), tScan(tN, "utrCurrent"), $Get(tAnyRecord))
+                    Set tCode = ..DecideUnitTestRoot(tScan(tN, "recUTR"), tScan(tN, "utrCurrent"), tScan(tN, "hasRecord"))
                     If tCode = "remove" {
                         Try {
                             Kill ^|tN|UnitTestRoot
@@ -1587,7 +1602,8 @@ ClassMethod Uninstall(pVerbose As %Boolean = 1, Output pReport As %DynamicObject
                     } ElseIf tCode = "changed" {
                         Do ..AddEntry(pReport, "left", "^UnitTestRoot", tN, "reason", "it changed since the install set it", "in " _ tN _ ": Kill ^UnitTestRoot")
                     } ElseIf tCode = "norecord" {
-                        Do ..AddEntry(pReport, "left", "^UnitTestRoot", tN, "reason", "no install record says the install set it (an install by 1.2.0 or earlier writes none)", "in " _ tN _ ": Kill ^UnitTestRoot")
+                        Set tWhyUTR = $Select($Get(tAnyRecord): "no install record in " _ tN _ " says the install set it", 1: "no install record says the install set it")
+                        Do ..AddEntry(pReport, "left", "^UnitTestRoot", tN, "reason", tWhyUTR _ " (an install by 1.2.0 or earlier writes none)", "in " _ tN _ ": Kill ^UnitTestRoot")
                     }
                 }
             }
@@ -1727,7 +1743,8 @@ ClassMethod DecideAll(pExists As %Boolean, pAnyRecord As %Boolean, pAnyCreated A
         Quit "left"
     }
     If 'pAnyCreated {
-        Set pReason = "the install did not create it"
+        Set pReason = "the install found it already there; an install by 1.2.0 or earlier that created it writes no record"
+        Set pManual = "in %SYS: Do ##class(Config.Namespaces).Delete(""%ALL""). This deletes %ALL together with every mapping in it, so check what else is mapped there first"
         Quit "left"
     }
     If pMappings '= "" {
@@ -1740,19 +1757,20 @@ ClassMethod DecideAll(pExists As %Boolean, pAnyRecord As %Boolean, pAnyCreated A
 /// Decide what the uninstall does with <code>^UnitTestRoot</code> of one namespace.
 /// Returns <code>remove</code> (the install set it and the value is unchanged),
 /// <code>changed</code> (it differs from what the install set), <code>norecord</code>
-/// (no install record exists anywhere and the global is defined), or <code>none</code>
-/// (nothing to do, nothing to report).
+/// (the namespace holds no install record and the global is defined), or <code>none</code>
+/// (nothing to do, nothing to report). A namespace whose own record has no
+/// <code>unitTestRoot</code> node is left alone: the global was there before that install.
 /// @param pRecorded The record's <code>("unitTestRoot")</code> value, or "".
 /// @param pCurrent The current value of <code>^UnitTestRoot</code>, or "".
-/// @param pAnyRecord 1 when any namespace holds an install record.
-ClassMethod DecideUnitTestRoot(pRecorded As %String, pCurrent As %String, pAnyRecord As %Boolean) As %String
+/// @param pHasRecord 1 when this namespace holds an install record.
+ClassMethod DecideUnitTestRoot(pRecorded As %String, pCurrent As %String, pHasRecord As %Boolean) As %String
 {
     If pRecorded '= "" {
         If pCurrent = "" Quit "none"
         If pCurrent = pRecorded Quit "remove"
         Quit "changed"
     }
-    If 'pAnyRecord && (pCurrent '= "") Quit "norecord"
+    If 'pHasRecord && (pCurrent '= "") Quit "norecord"
     Quit "none"
 }
 
@@ -1962,6 +1980,8 @@ ClassMethod PrintReport(pReport As %DynamicObject)
 /// @param pNamespace The namespace where ExecuteMCPv2 is installed (e.g., HSCUSTOM).
 ClassMethod ConfigureMapping(pNamespace As %String = "") As %Status [ SqlProc ]
 {
+    ; The transaction guard (see the class doc): refuse inside a transaction during a web request
+    If ($TLevel > 0) && $IsObject($Get(%request)) Quit $$$ERROR($$$GeneralError, "ConfigureMapping " _ ..#GUARDTEXT)
     Set tSC = $$$OK
     Try {
         If pNamespace = "" Set pNamespace = $NAMESPACE
@@ -2012,7 +2032,8 @@ ClassMethod ConfigureMapping(pNamespace As %String = "") As %Status [ SqlProc ]
 }
 
 /// Check whether the <code>/api/executemcp/v2</code> web application exists.
-/// <p>Returns 1 if registered, 0 if not.</p>
+/// <p>Returns 1 if registered, 0 if not. An account that cannot read <code>%SYS</code>
+/// gets the answer from <method>WebAppRegistered</method> instead of 0.</p>
 ClassMethod IsConfigured() As %Boolean [ SqlProc ]
 {
     Set tResult = 0
@@ -2020,6 +2041,20 @@ ClassMethod IsConfigured() As %Boolean [ SqlProc ]
         New $NAMESPACE
         Set $NAMESPACE = "%SYS"
         Set tResult = ##class(Security.Applications).Exists(..#WEBAPP)
+    } Catch ex {
+        Set tResult = ..WebAppRegistered()
+    }
+    Quit tResult
+}
+
+/// Whether the CSP application lookup finds the <code>/api/executemcp/v2</code> web
+/// application. The lookup needs no privilege on <code>%SYS</code>, so it answers for an
+/// account that cannot read <code>Security.Applications</code>. Returns 0 when the lookup fails.
+ClassMethod WebAppRegistered() As %Boolean
+{
+    Set tResult = 0
+    Try {
+        Set tResult = ($System.CSP.GetAppName(..#WEBAPP _ "/") = (..#WEBAPP _ "/"))
     } Catch ex {
         Set tResult = 0
     }
@@ -7473,25 +7508,31 @@ ClassMethod DatabaseList() As %Status
                 ; Size, MaxSize, and ExpansionSize live on SYS.Database (runtime
                 ; state) — Config.Databases.Get() only returns configuration and
                 ; has no Size/MaxSize/ExpansionSize properties. Open SYS.Database
-                ; per row the same way Monitor:DatabaseCheck does.
+                ; per row the same way Monitor:DatabaseCheck does. Resource, ReadOnly
+                ; and GlobalJournalState live there too: Config.Databases has none of
+                ; the three (Story 45.6, DW-765).
                 Set tSizeMB = 0, tMaxMB = 0, tExpMB = 0
+                Set tResName = "", tReadOnly = 0, tJournal = 0
                 Try {
                     Set tDBObj = ##class(SYS.Database).%OpenId(tDir)
                     If $IsObject(tDBObj) {
                         Set tSizeMB = +tDBObj.Size
                         Set tMaxMB = +tDBObj.MaxSize
                         Set tExpMB = +tDBObj.ExpansionSize
+                        Set tResName = tDBObj.ResourceName
+                        Set tReadOnly = +tDBObj.ReadOnly
+                        Set tJournal = +tDBObj.GlobalJournalState
                     }
                 }
                 Catch { }
                 Do tEntry.%Set("size", tSizeMB, "number")
                 Do tEntry.%Set("maxSize", tMaxMB, "number")
                 Do tEntry.%Set("expansionSize", tExpMB, "number")
-                Do tEntry.%Set("globalJournalState", $Get(tProps("GlobalJournalState")), "number")
+                Do tEntry.%Set("globalJournalState", tJournal, "number")
                 Do tEntry.%Set("mountRequired", $Get(tProps("MountRequired")), "boolean")
                 Do tEntry.%Set("mountAtStartup", $Get(tProps("MountAtStartup")), "boolean")
-                Do tEntry.%Set("readOnly", $Get(tProps("ReadOnly")), "boolean")
-                Do tEntry.%Set("resource", $Get(tProps("Resource")))
+                Do tEntry.%Set("readOnly", tReadOnly, "boolean")
+                Do tEntry.%Set("resource", tResName)
             }
             Do tResult.%Push(tEntry)
         }
@@ -7516,17 +7557,16 @@ ClassMethod DatabaseList() As %Status
 /// <method>Config.Databases.Modify</method>.</p>
 /// <p>Runtime sizing properties (<code>Size</code>, <code>MaxSize</code>,
 /// <code>ExpansionSize</code>) live on <class>SYS.Database</class>, not
-/// <class>Config.Databases</class>. Call
+/// <class>Config.Databases</class>, and so do <code>Resource</code>, <code>ReadOnly</code>
+/// and <code>GlobalJournalState</code> (Story 45.6, DW-765): <code>Config.Databases</code> has
+/// none of the three. Call
 /// <method>BuildDatabaseRuntimeProps</method> to collect those
 /// separately and route them via <code>SYS.Database.%OpenId().%Save()</code>.</p>
 ClassMethod BuildDatabaseConfigProps(pBody As %DynamicObject, Output pConfigProps) [ Private ]
 {
     If pBody.%Get("directory") '= "" Set pConfigProps("Directory") = pBody.%Get("directory")
-    If pBody.%Get("globalJournalState") '= "" Set pConfigProps("GlobalJournalState") = +pBody.%Get("globalJournalState")
     If pBody.%Get("mountRequired") '= "" Set pConfigProps("MountRequired") = +pBody.%Get("mountRequired")
     If pBody.%Get("mountAtStartup") '= "" Set pConfigProps("MountAtStartup") = +pBody.%Get("mountAtStartup")
-    If pBody.%Get("readOnly") '= "" Set pConfigProps("ReadOnly") = +pBody.%Get("readOnly")
-    If pBody.%Get("resource") '= "" Set pConfigProps("Resource") = pBody.%Get("resource")
 }
 
 /// Build the runtime-layer props array for database create/modify.
@@ -7542,6 +7582,9 @@ ClassMethod BuildDatabaseRuntimeProps(pBody As %DynamicObject, Output pRuntimePr
     If pBody.%Get("size") '= "" Set pRuntimeProps("Size") = +pBody.%Get("size")
     If pBody.%Get("maxSize") '= "" Set pRuntimeProps("MaxSize") = +pBody.%Get("maxSize")
     If pBody.%Get("expansionSize") '= "" Set pRuntimeProps("ExpansionSize") = +pBody.%Get("expansionSize")
+    If pBody.%Get("resource") '= "" Set pRuntimeProps("ResourceName") = pBody.%Get("resource")
+    If pBody.%Get("readOnly") '= "" Set pRuntimeProps("ReadOnly") = +pBody.%Get("readOnly")
+    If pBody.%Get("globalJournalState") '= "" Set pRuntimeProps("GlobalJournalState") = +pBody.%Get("globalJournalState")
 }
 
 /// Apply runtime sizing props to a SYS.Database instance opened by directory.
@@ -7562,6 +7605,9 @@ ClassMethod ApplyRuntimeProps(pDirectory As %String, ByRef pRuntimeProps) As %St
         If $Data(pRuntimeProps("Size")) Set tDBObj.Size = pRuntimeProps("Size")
         If $Data(pRuntimeProps("MaxSize")) Set tDBObj.MaxSize = pRuntimeProps("MaxSize")
         If $Data(pRuntimeProps("ExpansionSize")) Set tDBObj.ExpansionSize = pRuntimeProps("ExpansionSize")
+        If $Data(pRuntimeProps("ResourceName")) Set tDBObj.ResourceName = pRuntimeProps("ResourceName")
+        If $Data(pRuntimeProps("ReadOnly")) Set tDBObj.ReadOnly = pRuntimeProps("ReadOnly")
+        If $Data(pRuntimeProps("GlobalJournalState")) Set tDBObj.GlobalJournalState = pRuntimeProps("GlobalJournalState")
         Set tSC = tDBObj.%Save()
     }
     Catch ex {
@@ -7634,7 +7680,7 @@ ClassMethod DatabaseManage() As %Status
             ; it only writes to the CPF configuration. To create the actual IRIS.DAT,
             ; we use SYS.Database.CreateDatabase(), which also accepts Size, MaxSize,
             ; and ExpansionSize directly. Then we register the name->directory mapping
-            ; in Config.Databases with config-only props (mount, readOnly, etc.).
+            ; in Config.Databases with config-only props (directory and the mount flags).
 
             ; Build runtime props first to get Size/MaxSize/ExpansionSize
             Do ..BuildDatabaseRuntimeProps(tBody, .tRuntimeProps)
@@ -7653,8 +7699,14 @@ ClassMethod DatabaseManage() As %Status
                 }
             }
 
-            ; Create the physical database file (IRIS.DAT) via SYS.Database
-            Set tSC = ##class(SYS.Database).CreateDatabase(tDir, tSize, , , , , , , , tMaxSize, tExpSize)
+            ; Create the physical database file (IRIS.DAT) via SYS.Database. Resource (argument
+            ; 5) and GlobalJournalState (6) are passed only when the body names them, so an
+            ; omitted one keeps IRIS's own default; ReadOnly is applied after the create.
+            Kill tCreateArgs
+            Set tCreateArgs = 11, tCreateArgs(1) = tDir, tCreateArgs(2) = tSize, tCreateArgs(10) = tMaxSize, tCreateArgs(11) = tExpSize
+            If $Data(tRuntimeProps("ResourceName")) Set tCreateArgs(5) = tRuntimeProps("ResourceName")
+            If $Data(tRuntimeProps("GlobalJournalState")) Set tCreateArgs(6) = tRuntimeProps("GlobalJournalState")
+            Set tSC = $ClassMethod("SYS.Database", "CreateDatabase", tCreateArgs...)
             If $$$ISERR(tSC) {
                 Set $NAMESPACE = tOrigNS
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
@@ -7672,6 +7724,19 @@ ClassMethod DatabaseManage() As %Status
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
+            }
+
+            ; ReadOnly lives on SYS.Database and CreateDatabase does not take it
+            If $Data(tRuntimeProps("ReadOnly")) {
+                Kill tReadOnlyProps
+                Set tReadOnlyProps("ReadOnly") = tRuntimeProps("ReadOnly")
+                Set tSC = ..ApplyRuntimeProps(tDir, .tReadOnlyProps)
+                If $$$ISERR(tSC) {
+                    Set $NAMESPACE = tOrigNS
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
             }
 
             Set $NAMESPACE = tOrigNS
@@ -12852,7 +12917,10 @@ ClassMethod ValidateHostClassName(pClassName As %String) As %Status
 /// Ens.Config.Item property keys. The setting Target defaults to "Adapter"; a key may
 /// carry a trailing <code>@Host</code> or <code>@Adapter</code> suffix to force the target.
 /// The item is NOT saved here — the caller saves and refreshes the production.</p>
-ClassMethod ApplyArbitrarySetting(pItem As Ens.Config.Item, pKey As %String, pValue As %String) As %Status
+/// <p><var>pItem</var> is an <code>Ens.Config.Item</code>. The formal spec names no class from the
+/// interoperability packages, because a type named there is resolved when this class compiles, and
+/// the class then fails to compile in a namespace that is not interoperability-enabled (DW-787).</p>
+ClassMethod ApplyArbitrarySetting(pItem As %RegisteredObject, pKey As %String, pValue As %String) As %Status
 {
     Set tSC = $$$OK
     Try {
@@ -21939,7 +22007,7 @@ Class ExecuteMCPv2.InstallGuard Extends %RegisteredObject
 /// This package's bootstrap version marker, <code>&lt;semver&gt;+&lt;sequence&gt;.&lt;hash&gt;</code>.
 /// <p>The value on disk is <code>"dev"</code>, a placeholder. <code>scripts/gen-bootstrap.mjs</code>
 /// stamps the real marker into the copy it embeds and packages, and this file is not edited for it.</p>
-Parameter BOOTSTRAPVERSION = "1.2.0+10.109d0129528f";
+Parameter BOOTSTRAPVERSION = "1.2.0+11.6ef86aefc48e";
 
 /// The class whose compiled BOOTSTRAPVERSION parameter is the deployed marker.
 Parameter SETUPCLASS = "ExecuteMCPv2.Setup";

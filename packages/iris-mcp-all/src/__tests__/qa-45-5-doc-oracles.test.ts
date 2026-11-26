@@ -148,7 +148,9 @@ describe("Story 45.5 QA: DW-771 points 1 to 4 against A2, Probe B and decision #
     expect(probe).toContain("`iris.cpf` holds `Package_ExecuteMCPv2=HSCUSTOM`");
     expect(probe).toContain("`Config.Namespaces.Exists(\"%ALL\")` = 0");
     expect(probe).toContain("`iris.cpf` has `%ALL=%DEFAULTDB` and the mapping back");
-    expect(residual).toContain("`iris_sql_query` rolls the statement back. That undoes the change `Configure` makes to the web application, but not the effect of `ConfigureMapping`");
+    // Story 45.6 (DW-786): the residual now says the route's rollback was what left `ConfigureMapping`'s effect behind, and that the guard refuses the call.
+    expect(residual).toContain("Before `1.3.0`, `iris_sql_query` rolled the statement back, which undid the change `Configure` makes to the web application but not the effect of `ConfigureMapping`");
+    expect(residual).toContain("From `1.3.0` both methods refuse that call and change nothing");
   });
 
   it("the code can do what the residual says: Configure takes a namespace argument and sets the web application's namespace from it", async () => {
@@ -309,7 +311,8 @@ describe("Story 45.5 QA: DW-773, a least-privilege account with the automatic in
 
   it("the README states exactly the two outcomes, only shipped behavior, and the one-time administrator install with the upgrade caveat", () => {
     const paragraph = squash(section.slice(section.indexOf("**A least-privilege account and the automatic install.**"), section.indexOf("\n---")));
-    expect(paragraph).toContain("Install on: every connect recompiles the classes, and the web application step fails with a warning that says `registration requires %Admin_Manage privileges`. The tools run.");
+    // Story 45.6 (DW-773): this outcome now belongs to a web application that is not registered; an installed side reads `current`.
+    expect(paragraph).toContain("The web application is not registered, install on: every connect recompiles the classes, and the web application step fails with a warning that says `registration requires %Admin_Manage privileges`. The tools run.");
     expect(paragraph).toContain("After an upgrade of the servers, repeat the install once: see [Installs nothing on IRIS](#read-only-mode--point-it-at-production-with-one-environment-variable).");
     // Only the shipped behavior: no promise of a fix and no "will".
     expect(paragraph).not.toMatch(/\bwill (?:be|soon|later)\b|\bplanned\b|\bin a future\b|\bfixed in\b|\bDW-77\d\b/i);

@@ -188,25 +188,31 @@ ClassMethod DatabaseList() As %Status
                 ; Size, MaxSize, and ExpansionSize live on SYS.Database (runtime
                 ; state) — Config.Databases.Get() only returns configuration and
                 ; has no Size/MaxSize/ExpansionSize properties. Open SYS.Database
-                ; per row the same way Monitor:DatabaseCheck does.
+                ; per row the same way Monitor:DatabaseCheck does. Resource, ReadOnly
+                ; and GlobalJournalState live there too: Config.Databases has none of
+                ; the three (Story 45.6, DW-765).
                 Set tSizeMB = 0, tMaxMB = 0, tExpMB = 0
+                Set tResName = "", tReadOnly = 0, tJournal = 0
                 Try {
                     Set tDBObj = ##class(SYS.Database).%OpenId(tDir)
                     If $IsObject(tDBObj) {
                         Set tSizeMB = +tDBObj.Size
                         Set tMaxMB = +tDBObj.MaxSize
                         Set tExpMB = +tDBObj.ExpansionSize
+                        Set tResName = tDBObj.ResourceName
+                        Set tReadOnly = +tDBObj.ReadOnly
+                        Set tJournal = +tDBObj.GlobalJournalState
                     }
                 }
                 Catch { }
                 Do tEntry.%Set("size", tSizeMB, "number")
                 Do tEntry.%Set("maxSize", tMaxMB, "number")
                 Do tEntry.%Set("expansionSize", tExpMB, "number")
-                Do tEntry.%Set("globalJournalState", $Get(tProps("GlobalJournalState")), "number")
+                Do tEntry.%Set("globalJournalState", tJournal, "number")
                 Do tEntry.%Set("mountRequired", $Get(tProps("MountRequired")), "boolean")
                 Do tEntry.%Set("mountAtStartup", $Get(tProps("MountAtStartup")), "boolean")
-                Do tEntry.%Set("readOnly", $Get(tProps("ReadOnly")), "boolean")
-                Do tEntry.%Set("resource", $Get(tProps("Resource")))
+                Do tEntry.%Set("readOnly", tReadOnly, "boolean")
+                Do tEntry.%Set("resource", tResName)
             }
             Do tResult.%Push(tEntry)
         }
@@ -231,17 +237,16 @@ ClassMethod DatabaseList() As %Status
 /// <method>Config.Databases.Modify</method>.</p>
 /// <p>Runtime sizing properties (<code>Size</code>, <code>MaxSize</code>,
 /// <code>ExpansionSize</code>) live on <class>SYS.Database</class>, not
-/// <class>Config.Databases</class>. Call
+/// <class>Config.Databases</class>, and so do <code>Resource</code>, <code>ReadOnly</code>
+/// and <code>GlobalJournalState</code> (Story 45.6, DW-765): <code>Config.Databases</code> has
+/// none of the three. Call
 /// <method>BuildDatabaseRuntimeProps</method> to collect those
 /// separately and route them via <code>SYS.Database.%OpenId().%Save()</code>.</p>
 ClassMethod BuildDatabaseConfigProps(pBody As %DynamicObject, Output pConfigProps) [ Private ]
 {
     If pBody.%Get("directory") '= "" Set pConfigProps("Directory") = pBody.%Get("directory")
-    If pBody.%Get("globalJournalState") '= "" Set pConfigProps("GlobalJournalState") = +pBody.%Get("globalJournalState")
     If pBody.%Get("mountRequired") '= "" Set pConfigProps("MountRequired") = +pBody.%Get("mountRequired")
     If pBody.%Get("mountAtStartup") '= "" Set pConfigProps("MountAtStartup") = +pBody.%Get("mountAtStartup")
-    If pBody.%Get("readOnly") '= "" Set pConfigProps("ReadOnly") = +pBody.%Get("readOnly")
-    If pBody.%Get("resource") '= "" Set pConfigProps("Resource") = pBody.%Get("resource")
 }
 
 /// Build the runtime-layer props array for database create/modify.
@@ -257,6 +262,9 @@ ClassMethod BuildDatabaseRuntimeProps(pBody As %DynamicObject, Output pRuntimePr
     If pBody.%Get("size") '= "" Set pRuntimeProps("Size") = +pBody.%Get("size")
     If pBody.%Get("maxSize") '= "" Set pRuntimeProps("MaxSize") = +pBody.%Get("maxSize")
     If pBody.%Get("expansionSize") '= "" Set pRuntimeProps("ExpansionSize") = +pBody.%Get("expansionSize")
+    If pBody.%Get("resource") '= "" Set pRuntimeProps("ResourceName") = pBody.%Get("resource")
+    If pBody.%Get("readOnly") '= "" Set pRuntimeProps("ReadOnly") = +pBody.%Get("readOnly")
+    If pBody.%Get("globalJournalState") '= "" Set pRuntimeProps("GlobalJournalState") = +pBody.%Get("globalJournalState")
 }
 
 /// Apply runtime sizing props to a SYS.Database instance opened by directory.
@@ -277,6 +285,9 @@ ClassMethod ApplyRuntimeProps(pDirectory As %String, ByRef pRuntimeProps) As %St
         If $Data(pRuntimeProps("Size")) Set tDBObj.Size = pRuntimeProps("Size")
         If $Data(pRuntimeProps("MaxSize")) Set tDBObj.MaxSize = pRuntimeProps("MaxSize")
         If $Data(pRuntimeProps("ExpansionSize")) Set tDBObj.ExpansionSize = pRuntimeProps("ExpansionSize")
+        If $Data(pRuntimeProps("ResourceName")) Set tDBObj.ResourceName = pRuntimeProps("ResourceName")
+        If $Data(pRuntimeProps("ReadOnly")) Set tDBObj.ReadOnly = pRuntimeProps("ReadOnly")
+        If $Data(pRuntimeProps("GlobalJournalState")) Set tDBObj.GlobalJournalState = pRuntimeProps("GlobalJournalState")
         Set tSC = tDBObj.%Save()
     }
     Catch ex {
@@ -349,7 +360,7 @@ ClassMethod DatabaseManage() As %Status
             ; it only writes to the CPF configuration. To create the actual IRIS.DAT,
             ; we use SYS.Database.CreateDatabase(), which also accepts Size, MaxSize,
             ; and ExpansionSize directly. Then we register the name->directory mapping
-            ; in Config.Databases with config-only props (mount, readOnly, etc.).
+            ; in Config.Databases with config-only props (directory and the mount flags).
 
             ; Build runtime props first to get Size/MaxSize/ExpansionSize
             Do ..BuildDatabaseRuntimeProps(tBody, .tRuntimeProps)
@@ -368,8 +379,14 @@ ClassMethod DatabaseManage() As %Status
                 }
             }
 
-            ; Create the physical database file (IRIS.DAT) via SYS.Database
-            Set tSC = ##class(SYS.Database).CreateDatabase(tDir, tSize, , , , , , , , tMaxSize, tExpSize)
+            ; Create the physical database file (IRIS.DAT) via SYS.Database. Resource (argument
+            ; 5) and GlobalJournalState (6) are passed only when the body names them, so an
+            ; omitted one keeps IRIS's own default; ReadOnly is applied after the create.
+            Kill tCreateArgs
+            Set tCreateArgs = 11, tCreateArgs(1) = tDir, tCreateArgs(2) = tSize, tCreateArgs(10) = tMaxSize, tCreateArgs(11) = tExpSize
+            If $Data(tRuntimeProps("ResourceName")) Set tCreateArgs(5) = tRuntimeProps("ResourceName")
+            If $Data(tRuntimeProps("GlobalJournalState")) Set tCreateArgs(6) = tRuntimeProps("GlobalJournalState")
+            Set tSC = $ClassMethod("SYS.Database", "CreateDatabase", tCreateArgs...)
             If $$$ISERR(tSC) {
                 Set $NAMESPACE = tOrigNS
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
@@ -387,6 +404,19 @@ ClassMethod DatabaseManage() As %Status
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
+            }
+
+            ; ReadOnly lives on SYS.Database and CreateDatabase does not take it
+            If $Data(tRuntimeProps("ReadOnly")) {
+                Kill tReadOnlyProps
+                Set tReadOnlyProps("ReadOnly") = tRuntimeProps("ReadOnly")
+                Set tSC = ..ApplyRuntimeProps(tDir, .tReadOnlyProps)
+                If $$$ISERR(tSC) {
+                    Set $NAMESPACE = tOrigNS
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
             }
 
             Set $NAMESPACE = tOrigNS

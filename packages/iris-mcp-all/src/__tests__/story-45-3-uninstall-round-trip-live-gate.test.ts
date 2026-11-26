@@ -17,7 +17,8 @@
  * is the baseline.
  *
  * LEGS. plain round trip (with the extra `ConfigureMapping` call an IPM reinstall makes, and a second run), foreign `%ALL`, a
- * foreign mapping added after the install, an `ExecuteMCPv2` mapping that existed before it, `^UnitTestRoot` preset, `^UnitTestRoot` changed, no record (an install by 1.2.0), two
+ * foreign mapping added after the install, an `ExecuteMCPv2` mapping that existed before it, `^UnitTestRoot` preset, `^UnitTestRoot` changed, no record (an install by 1.2.0),
+ * `^UnitTestRoot` in a namespace with no record of its own while another holds one (Story 45.6, DW-780), two
  * namespaces with a shadowed copy, a `dev`-marked copy in a second namespace (ownership), a dev Setup over a recorded install and a
  * marker-less copy over a recorded install (ownership), IPM-owned (the guard stub) with a second
  * run, a failing step (a namespace whose only database is dismounted), a failing `^UnitTestRoot` step (a database mounted read-only) that
@@ -72,6 +73,8 @@ const SERVER_LINE =
 const NAMESPACES_LINE_START = "Namespaces USER, HSCUSTOM used the suite: the instance has one web application and one %ALL mapping, so none of them has either now;";
 const ALL_MANUAL =
   'in %SYS: Do ##class(Config.Namespaces).Delete("%ALL"). This deletes %ALL together with every mapping in it, so check what else is mapped there first';
+/** Story 45.6 (DW-780): the reason of a `%ALL` that every record says the install found, with its manual command (`ALL_MANUAL`). */
+const ALL_FOUND_REASON = "the install found it already there; an install by 1.2.0 or earlier that created it writes no record";
 /** The README's one-line check that the uninstall finished in a namespace (decision #168): it prints `record=0 webapp=0` when nothing is left. */
 const DONE_CHECK =
   'Set ns=$NAMESPACE Write "record=",$Data(^ExecuteMCPv2.InstallRecord) Set $NAMESPACE="%SYS" Write " webapp=",##class(Security.Applications).Exists("/api/executemcp/v2"),! Set $NAMESPACE=ns';
@@ -400,7 +403,7 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
       "Removed: ^UnitTestRoot (USER)",
       classesLine("USER", embedded.classes.size),
       "Removed: install record (USER)",
-      "Left: %ALL (the install did not create it)",
+      `Left: %ALL (${ALL_FOUND_REASON}). To remove it by hand: ${ALL_MANUAL}`,
       SERVER_LINE,
     ]);
     const after = snapshot();
@@ -458,7 +461,7 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
       "Removed: ^UnitTestRoot (USER)",
       classesLine("USER", embedded.classes.size),
       "Removed: install record (USER)",
-      "Left: %ALL (the install did not create it)",
+      `Left: %ALL (${ALL_FOUND_REASON}). To remove it by hand: ${ALL_MANUAL}`,
       SERVER_LINE,
     ]);
     expect(differences(baselinePlus({ "%ALL": "1" }), snapshot())).toEqual([]);
@@ -506,6 +509,27 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
       SERVER_LINE,
     ]);
     expect(differences(baselinePlus({ "%ALL": "1", "utr USER": installed["utr USER"] as string }), snapshot())).toEqual([]);
+  });
+
+  leg("^UnitTestRoot in a namespace with no record of its own, while another namespace holds one (DW-780): the value survives and is reported with its command", async () => {
+    await install("USER");
+    terminal("HSCUSTOM", ['Set ^UnitTestRoot="/set/by/someone/else/in/hscustom/"']);
+    const installed = snapshot();
+    expect(installed["record USER"], "USER holds the install's record").toContain("all=created;");
+    expect(installed["record HSCUSTOM"], "HSCUSTOM holds no record").toMatch(/^0\b/);
+
+    const run = runOneLiner("USER");
+    expect(run.lines).toEqual([
+      WEBAPP_LINE,
+      MAPPING_LINE,
+      "Removed: %ALL",
+      "Removed: ^UnitTestRoot (USER)",
+      classesLine("USER", embedded.classes.size),
+      "Removed: install record (USER)",
+      "Left: ^UnitTestRoot (HSCUSTOM) (no install record in HSCUSTOM says the install set it (an install by 1.2.0 or earlier writes none)). To remove it by hand: in HSCUSTOM: Kill ^UnitTestRoot",
+      SERVER_LINE,
+    ]);
+    expect(differences(baselinePlus({ "utr HSCUSTOM": "/set/by/someone/else/in/hscustom/" }), snapshot())).toEqual([]);
   });
 
   leg("two namespaces with a shadowed copy: both lose the web application, the mapping and their classes, and the report names both with their outcome", async () => {
@@ -722,6 +746,55 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(runOneLiner().lines).toContain(WEBAPP_LINE);
   });
 
+  leg("DW-786: SELECT ExecuteMCPv2.Setup_ConfigureMapping and Setup_Configure through the built server's iris_sql_query are refused as an administrator, and %ALL, the mapping, iris.cpf and the web application stay as they were", async () => {
+    await install("USER");
+    // %ALL and the mapping removed: a call that ran would put them back in iris.cpf, which the route's rollback does not undo.
+    terminal("%SYS", ['Set sc=##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")', 'Set sc=##class(Config.Namespaces).Delete("%ALL")']);
+    const cpfLines = (): number => {
+      const printed = terminal("%SYS", [
+        `Set f=##class(%Stream.FileCharacter).%New() Set sc=f.LinkToFile($System.Util.InstallDirectory()_"iris.cpf") Set n=0 While 'f.AtEnd { Set l=f.ReadLine() If l["%ALL" Set n=n+1 } Write "CPFALL=",n,!`,
+      ]);
+      const line = outputLines(printed).find((entry) => entry.startsWith("CPFALL="));
+      if (line === undefined) throw new Error(`the iris.cpf read printed no count: ${printed.slice(-400)}`);
+      return Number(line.slice("CPFALL=".length));
+    };
+    const webAppNamespace = (): string => {
+      const printed = terminal("%SYS", ['Set sc=##class(Security.Applications).Get("/api/executemcp/v2",.p) Write "WEBAPPNS=",$Get(p("NameSpace")),!']);
+      return (outputLines(printed).find((entry) => entry.startsWith("WEBAPPNS=")) ?? "").slice("WEBAPPNS=".length);
+    };
+    const before = snapshot();
+    expect(before["%ALL"], "precondition: %ALL is absent").toBe("0");
+    expect(cpfLines(), "precondition: iris.cpf holds no %ALL line").toBe(0);
+    const appNamespaceBefore = webAppNamespace();
+    expect(appNamespaceBefore, "precondition: the web application points at the install namespace").toBe("USER");
+
+    // The automatic install is off, so no startup repair can put anything back and hide a call that ran.
+    const served = await runServerCalls("startup", { repoRoot: REPO_ROOT, sdkEsmDir, target }, { IRIS_AUTO_INSTALL: "false" }, [
+      { tool: "iris_sql_query", args: { query: "SELECT ExecuteMCPv2.Setup_ConfigureMapping('USER') AS Result" } },
+      { tool: "iris_sql_query", args: { query: "SELECT ExecuteMCPv2.Setup_Configure('HSCUSTOM') AS Result" } },
+    ]);
+    expect(served.results, "both calls were answered").toHaveLength(2);
+    expect(JSON.stringify(served.results[0]), "ConfigureMapping names the refusal").toContain("ConfigureMapping changed nothing: it was called inside a transaction during a web request");
+    expect(JSON.stringify(served.results[1]), "Configure names the refusal").toContain("Configure changed nothing: it was called inside a transaction during a web request");
+    expect(differences(before, snapshot()), "%ALL, the mapping and the classes are as they were").toEqual([]);
+    expect(cpfLines(), "iris.cpf still holds no %ALL line").toBe(0);
+    expect(webAppNamespace(), "the web application still points at the install namespace").toBe(appNamespaceBefore);
+  });
+
+  leg("DW-787: the real bootstrap into a namespace that is not interoperability-enabled compiles every class, ExecuteMCPv2.REST.Interop included", async () => {
+    terminal("%SYS", SCRATCH_NAMESPACE_SCRIPT);
+    await install("UNINSTALLNS");
+    const names = [...embedded.classes.keys()].map((name) => name.replace(/\.cls$/, ""));
+    expect(names, "the embed holds ExecuteMCPv2.REST.Interop").toContain("ExecuteMCPv2.REST.Interop");
+    const printed = terminal("UNINSTALLNS", [
+      `For c=${names.map((name) => `"${name}"`).join(",")} { If '##class(%Dictionary.CompiledClass).%ExistsId(c) Write "NOTCOMPILED ",c,! }`,
+      'Write "CHECKED",!',
+    ]);
+    const lines = outputLines(printed);
+    expect(lines.filter((line) => line.startsWith("NOTCOMPILED ")), "every bootstrapped class is compiled in UNINSTALLNS").toEqual([]);
+    expect(lines, "the check ran").toContain("CHECKED");
+  });
+
   leg("back-compat (AC 45.3.8): the five install methods return, through the SQL route the bootstrap uses, what they returned before the record existed, and a repeat call changes nothing", async () => {
     await install();
     const installed = snapshot();
@@ -805,6 +878,22 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     for (const entry of noSys.report?.failed ?? []) expect(entry["error"], `${entry["item"]} carries IRIS's text`).toContain("PROTECT");
     expect(noSys.lines.some((line) => line.startsWith("Left: %ALL, ^UnitTestRoot, classes and the install records")), "the rest is left, with the reason").toBe(true);
     expect(differences(installed, snapshot()), "the instance is unchanged").toEqual([]);
+
+    // DW-773: the same account cannot read %SYS, yet IsConfigured answers from the CSP application lookup, both ways.
+    const lp1Configured = (): string => {
+      const printed = terminal("USER", [
+        'Set ok=$System.Security.Login("uninstalllp1","Pa55word!lp1")',
+        'Write "LOGIN-AS=",$Username,!',
+        'Write "ISCONF=",##class(ExecuteMCPv2.Setup).IsConfigured(),!',
+      ]);
+      const lines = outputLines(printed);
+      expect(lines.find((entry) => entry.startsWith("LOGIN-AS=")), "the terminal logged in as lp1").toBe("LOGIN-AS=uninstalllp1");
+      return (lines.find((entry) => entry.startsWith("ISCONF=")) ?? "").slice("ISCONF=".length);
+    };
+    expect(lp1Configured(), "lp1 reads the registered web application as configured").toBe("1");
+    terminal("%SYS", ['Set sc=##class(Security.Applications).Delete("/api/executemcp/v2")']);
+    expect(lp1Configured(), "lp1 reads the absent web application as not configured").toBe("0");
+    terminal("USER", ['Set sc=##class(ExecuteMCPv2.Setup).Configure("USER")']);
 
     // lp2 can read %SYS but is not allowed to change it.
     const readOnly = runUninstall("USER", { user: "uninstalllp2", password: "Pa55word!lp2" });

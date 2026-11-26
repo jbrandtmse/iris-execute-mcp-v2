@@ -231,20 +231,29 @@ describe("Story 45.5: the read-only preset, SQL privileges and the five setup pr
     expect(body.match(/Do \.\.WriteRecord\(\$NAMESPACE, "unitTestRoot", \^UnitTestRoot\)/g)?.length, "the install-record write").toBe(1);
   });
 
-  it("point 3 (amendment A2, Probe B): the ConfigureMapping residual is stated as probed, and the code can create what it puts back", () => {
+  // Story 45.6 (DW-786) moved this bullet: Probe B's residual (the `ConfigureMapping` effect that survives the route's rollback) is
+  // closed for `iris_sql_query` by a guard in `Configure` and `ConfigureMapping`, and what is left is the direct Atelier call.
+  it("point 3 (amendment A2, Probe B; closed for iris_sql_query by Story 45.6): the residual says what the guard refuses and what a direct call still does, and the code agrees", () => {
     expect(sec).toContain("An administrator account, such as one with `%All`, can call `Configure` and `ConfigureMapping` through a `SELECT` in `iris_sql_query`, the read tool a read-only server keeps.");
     // Probe B made every call as `_SYSTEM` (`%All`), so that is the account the residual names.
     expect(probeRecord()).toContain("Every call below is made as `_SYSTEM`");
-    expect(sec).toContain("`iris_sql_query` rolls the statement back. That undoes the change `Configure` makes to the web application, but not the effect of `ConfigureMapping`:");
-    expect(sec).toContain("when the `%ALL` namespace or the `ExecuteMCPv2` mapping is missing, the call puts them back in `iris.cpf` and in the running configuration, while `Config.Namespaces` and `Config.MapPackages` report them absent.");
-    expect(sec).toContain("Called without a rollback, through Atelier's `action/query`, `Configure` can point the web application at another namespace.");
-    expect(sec).toContain("This release documents this and does not change it.");
+    expect(sec).toContain("From `1.3.0` both methods refuse that call and change nothing: inside a transaction during a web request, which is how `iris_sql_query` runs a SELECT,");
+    expect(sec).toContain("Before `1.3.0`, `iris_sql_query` rolled the statement back, which undid the change `Configure` makes to the web application but not the effect of `ConfigureMapping`:");
+    expect(sec).toContain("the call put them back in `iris.cpf` and in the running configuration, while `Config.Namespaces` and `Config.MapPackages` reported them absent.");
+    expect(sec).toContain("A direct call through Atelier's `action/query` is not a web request inside a transaction, so it is not refused: called there, `Configure` can point the web application at another namespace and `ConfigureMapping` can create a missing `%ALL` and mapping. The account's privileges are the boundary.");
+    expect(sec).toContain("`iris_execute_command` and `iris_execute_classmethod`, are off under the read-only preset.");
+    expect(sec, "the guard is no longer 'documented and not changed'").not.toContain("This release documents this and does not change it.");
     expect(probeRecord()).toContain("**Probe B: DW-771 point 3 (Rule #42).**");
     const setup = embed.get("ExecuteMCPv2.Setup.cls") ?? "";
     const body = setup.slice(setup.indexOf("ClassMethod ConfigureMapping("), setup.indexOf("ClassMethod IsConfigured("));
     expect(body).toContain('Config.Namespaces).Create("%ALL"');
     expect(body).toContain('Config.MapPackages).Create("%ALL", "ExecuteMCPv2"');
-    expect(sec, "the residual does not claim a fix").not.toMatch(/\b(?:is|was|has been) fixed\b/);
+    // The guard the README describes: both methods open with it, it needs a transaction AND a %request object, and its text says it changed nothing.
+    const configure = setup.slice(setup.indexOf("ClassMethod Configure("), setup.indexOf("ClassMethod Uninstall("));
+    expect(configure.split("\n").find((line) => line.trim() !== "" && !line.trim().startsWith(";") && line.includes("TLevel"))).toContain("If ($TLevel > 0) && $IsObject($Get(%request)) Quit $$$ERROR($$$GeneralError, \"Configure \" _ ..#GUARDTEXT)");
+    expect(body).toContain("If ($TLevel > 0) && $IsObject($Get(%request)) Quit $$$ERROR($$$GeneralError, \"ConfigureMapping \" _ ..#GUARDTEXT)");
+    expect(setup).toContain('Parameter GUARDTEXT = "changed nothing: it was called inside a transaction during a web request, as iris_sql_query runs a SELECT.');
+    expect(sec, "the residual does not claim a fix of the direct call").not.toMatch(/\b(?:is|was|has been) fixed\b/);
   });
 
   it("point 4: the mitigations are a least-privilege account or `block`", () => {
@@ -309,8 +318,12 @@ describe("Story 45.5: the data policy, the audit log and a least-privilege accou
     expect(sec).toContain("**A least-privilege account and the automatic install.**");
     expect(sec).toContain(`which says it \`${unconfirmed}\`. The tools run.`);
     expect(sec).toContain(`a warning that says \`${needsAdmin}\`. The tools run.`);
-    expect(sec).toContain("Install off (`IRIS_AUTO_INSTALL=false`, or the read-only preset): the server logs one warning on every start");
-    expect(sec).toContain("Install on: every connect recompiles the classes");
+    // Story 45.6 (DW-773): an account that cannot read %SYS reads `current` against an installed side, so each outcome names its starting state.
+    expect(sec).toContain("The IRIS side is installed and current, install off (`IRIS_AUTO_INSTALL=false`, or the read-only preset): the server reads `current`, writes nothing and logs no warning about the web application.");
+    expect(sec).toContain("The web application is not registered, install off: the server logs one warning on every start");
+    expect(sec).toContain("The web application is not registered, install on: every connect recompiles the classes");
+    expect(sec).toContain("`Bootstrap completed with errors: Compile failed: 35 of 35 classes did not compile` on every connect, although every class is compiled.");
+    expect(sec).toContain("This release does not fix the warning.");
     expect(sec).toContain("So install the IRIS side once as an administrator (start one server with the install on, or use IPM), and then connect the limited account with `IRIS_AUTO_INSTALL=false` or the read-only preset.");
     expect(sec).toContain("[Removing the IRIS Side](#removing-the-iris-side)");
     expect(sec).toContain("[Set environment variables](#2-set-environment-variables)");
@@ -582,7 +595,7 @@ describe("Story 45.5: the CHANGELOG section and the changeset", () => {
     expect(entry).toContain("### Release handoff (1.3.0)");
     expect(entry).toContain("The release notes must state the narrowed `SECURITY.md` scope");
     expect(entry).toContain("the new warning pointer");
-    expect(entry).toContain("This release documents it and changes no code.");
+    expect(entry).toContain("Story 45.6 closes that residual for `iris_sql_query`: see its section above.");
     expect(entry, "no compliance claim").not.toMatch(/\bcompliant\b|\bcertif/i);
   });
 

@@ -1071,7 +1071,10 @@ ClassMethod ValidateHostClassName(pClassName As %String) As %Status
 /// Ens.Config.Item property keys. The setting Target defaults to "Adapter"; a key may
 /// carry a trailing <code>@Host</code> or <code>@Adapter</code> suffix to force the target.
 /// The item is NOT saved here — the caller saves and refreshes the production.</p>
-ClassMethod ApplyArbitrarySetting(pItem As Ens.Config.Item, pKey As %String, pValue As %String) As %Status
+/// <p><var>pItem</var> is an <code>Ens.Config.Item</code>. The formal spec names no class from the
+/// interoperability packages, because a type named there is resolved when this class compiles, and
+/// the class then fails to compile in a namespace that is not interoperability-enabled (DW-787).</p>
+ClassMethod ApplyArbitrarySetting(pItem As %RegisteredObject, pKey As %String, pValue As %String) As %Status
 {
     Set tSC = $$$OK
     Try {

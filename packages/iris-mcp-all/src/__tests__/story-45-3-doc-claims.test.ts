@@ -223,7 +223,10 @@ describe("Story 45.3 QA: the README claims against their oracles", () => {
   });
 
   it("says a preset ^UnitTestRoot is not mentioned, and the gate leg pins that report", () => {
-    expect(removing).toContain("except the preset `^UnitTestRoot`, which it does not mention, because the install never touched it");
+    // Story 45.6 (DW-780): the rule is per namespace, so the README says "in a namespace whose own install record exists" and names the other case.
+    expect(removing).toContain("except a preset `^UnitTestRoot` in a namespace whose own install record exists, which it does not mention, because the install never touched it there");
+    expect(removing).toContain("A `^UnitTestRoot` in a namespace that holds no install record of its own is reported with its command even when another namespace holds one");
+    expect(gateSource).toContain("^UnitTestRoot in a namespace with no record of its own, while another namespace holds one (DW-780)");
     expect(gateSource).toContain("^UnitTestRoot set before the install: the value survives and is not reported");
   });
 

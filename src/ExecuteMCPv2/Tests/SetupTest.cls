@@ -114,6 +114,132 @@ Method TestWriteRecordNeverThrows() As %Status
     Quit $$$OK
 }
 
+/// The namespace the <code>/api/executemcp/v2</code> web application points to ("" when absent).
+Method WebAppNamespace() As %String
+{
+    Set tNS = ""
+    Try {
+        ; Read the name before the switch: %SYS sees ExecuteMCPv2 only through the %ALL mapping, which a test may have removed
+        Set tApp = ##class(ExecuteMCPv2.Setup).#WEBAPP
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+        If ##class(Security.Applications).Get(tApp, .tProps) = 1 Set tNS = $Get(tProps("NameSpace"))
+    } Catch ex {
+        Set tNS = "ERROR " _ ex.DisplayString()
+    }
+    Quit tNS
+}
+
+/// Whether the <code>ExecuteMCPv2</code> package mapping exists in <code>%ALL</code>.
+Method MappingExists() As %Boolean
+{
+    Set tExists = 0
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+        Set tExists = +##class(Config.MapPackages).Exists("%ALL", "ExecuteMCPv2")
+    } Catch ex {
+        Set tExists = 0
+    }
+    Quit tExists
+}
+
+/// Remove the <code>ExecuteMCPv2</code> package mapping from <code>%ALL</code> (a no-op when absent).
+Method RemoveMapping()
+{
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+        Set tSC = ##class(Config.MapPackages).Delete("%ALL", "ExecuteMCPv2")
+    } Catch ex {
+    }
+}
+
+/// DW-786: inside a transaction during a web request (a <code>%request</code> object, as
+/// <code>iris_sql_query</code> runs a SELECT) both install methods refuse and change nothing.
+/// The state is read INSIDE the transaction, before the rollback that would hide it, and the
+/// call targets a namespace other than the web application's and runs with the mapping absent,
+/// so an unguarded call would change what is read. The transaction is rolled back and the mapping
+/// is put back on every path.
+Method TestGuardRefusesInTransactionDuringWebRequest() As %Status
+{
+    Do $$$AssertStatusOK(##class(ExecuteMCPv2.Setup).Configure(), "set up: Configure at transaction level 0")
+    Kill ^ExecuteMCPv2.InstallRecord
+    Set tNSBefore = ..WebAppNamespace()
+    ; The first existing namespace other than the web application's: an unguarded Configure would move the web application there
+    Set tOther = "", tCandidates = $ListBuild("USER", "HSCUSTOM", "SAMPLES", "DOCBOOK")
+    For tI = 1:1:$ListLength(tCandidates) {
+        Set tName = $List(tCandidates, tI)
+        If (tName '= tNSBefore) && ##class(%SYS.Namespace).Exists(tName) Set tOther = tName Quit
+    }
+    Do $$$AssertTrue(tOther '= "", "set up: a namespace other than the web application's exists, so an unguarded Configure would move the web application")
+    Do ..RemoveMapping()
+    Set tMapBefore = ..MappingExists()
+    Do $$$AssertEquals(tMapBefore, 0, "set up: the mapping is absent, so an unguarded ConfigureMapping would create it")
+    Set tCaught = "", tCfg = "", tMap = "", tLevelBefore = $TLevel
+    Set tNSIn = "<unread>", tMapIn = "<unread>", tRecIn = "<unread>"
+    TSTART
+    Try {
+        New %request
+        Set %request = ##class(%CSP.Request).%New()
+        Set tCfg = ##class(ExecuteMCPv2.Setup).Configure(tOther)
+        Set tMap = ##class(ExecuteMCPv2.Setup).ConfigureMapping(tOther)
+        Set tNSIn = ..WebAppNamespace(), tMapIn = ..MappingExists(), tRecIn = $Data(^ExecuteMCPv2.InstallRecord)
+    } Catch ex {
+        Set tCaught = ex.DisplayString()
+    }
+    TROLLBACK 1
+    Do ##class(ExecuteMCPv2.Setup).ConfigureMapping()
+    Do $$$AssertEquals(tCaught, "", "neither call raised")
+    Do $$$AssertStatusNotOK(tCfg, "Configure is refused")
+    Do $$$AssertTrue($System.Status.GetErrorText(tCfg) [ "Configure changed nothing: it was called inside a transaction during a web request", "Configure names the refusal")
+    Do $$$AssertStatusNotOK(tMap, "ConfigureMapping is refused")
+    Do $$$AssertTrue($System.Status.GetErrorText(tMap) [ "ConfigureMapping changed nothing: it was called inside a transaction during a web request", "ConfigureMapping names the refusal")
+    Do $$$AssertEquals(tNSIn, tNSBefore, "inside the transaction the web application's namespace is unchanged (before: " _ tNSBefore _ ", inside: " _ tNSIn _ ")")
+    Do $$$AssertEquals(tMapIn, 0, "inside the transaction the package mapping was not created")
+    Do $$$AssertEquals(tRecIn, 0, "inside the transaction a refused call wrote no install record")
+    Do $$$AssertEquals($TLevel, tLevelBefore, "the test left no transaction open")
+
+    Quit $$$OK
+}
+
+/// DW-786: inside a transaction WITHOUT a web request (how IPM runs its Configure phase) the
+/// install methods run as before. A terminal call and the Atelier bootstrap run at level 0.
+Method TestGuardPassesInTransactionWithoutWebRequest() As %Status
+{
+    Do $$$AssertStatusOK(##class(ExecuteMCPv2.Setup).ConfigureMapping(), "set up: the mapping exists")
+    Set tCaught = "", tCfg = "", tMap = "", tLevelBefore = $TLevel, tHasRequest = -1, tLevelIn = -1
+    ; No assertion runs inside the transaction: the rollback would take its result with it
+    TSTART
+    Try {
+        New %request
+        Set tHasRequest = $IsObject($Get(%request)), tLevelIn = $TLevel
+        Set tMap = ##class(ExecuteMCPv2.Setup).ConfigureMapping()
+        Set tCfg = ##class(ExecuteMCPv2.Setup).Configure()
+    } Catch ex {
+        Set tCaught = ex.DisplayString()
+    }
+    TROLLBACK 1
+    Do $$$AssertEquals(tCaught, "", "neither call raised")
+    Do $$$AssertEquals(tHasRequest, 0, "no %request object inside the transaction")
+    Do $$$AssertEquals(tLevelIn, tLevelBefore + 1, "the calls ran inside a transaction")
+    Do $$$AssertStatusOK(tMap, "ConfigureMapping on an existing mapping returns OK inside a transaction")
+    Do $$$AssertStatusOK(tCfg, "Configure returns OK inside a transaction")
+    Do $$$AssertEquals($TLevel, tLevelBefore, "the test left no transaction open")
+
+    Quit $$$OK
+}
+
+/// DW-773: the CSP application lookup that IsConfigured falls back to agrees with it.
+Method TestWebAppRegisteredMatchesIsConfigured() As %Status
+{
+    Do $$$AssertStatusOK(##class(ExecuteMCPv2.Setup).Configure(), "Configure should succeed")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).WebAppRegistered(), 1, "the lookup finds the web application")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).WebAppRegistered(), ##class(ExecuteMCPv2.Setup).IsConfigured(), "the lookup equals IsConfigured")
+
+    Quit $$$OK
+}
+
 /// EnsureUnitTestRoot returns an already-set value unchanged and records nothing for it.
 Method TestEnsureUnitTestRootKeepsPresetValue() As %Status
 {

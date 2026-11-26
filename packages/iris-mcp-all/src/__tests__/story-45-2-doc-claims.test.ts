@@ -224,7 +224,9 @@ describe("Story 45.2: the README read-only section, the Quick Start line and the
       "Where the IRIS side is `missing` or `stale` (older than this server), the server's custom-REST tools of that profile are refused",
       "With the install off, an `unconfigured` reading (the classes are current, but the `/api/executemcp/v2` web application could not be confirmed) only warns once at startup and the tools go on",
       "a call refuses with `IRIS_SIDE_NOT_INSTALLED` (`found: \"unconfigured\"`) only if the web application then answers the HTTP 404 of an absent application",
-      "with the install off, an `unconfigured` reading only warns, because an account that cannot read `%SYS` cannot tell \"not registered\" apart; a truly missing web application answers 404, the call refuses with `IRIS_SIDE_NOT_INSTALLED`, and nothing runs",
+      "with the install off, an `unconfigured` reading only warns, because the lookup can fail for a reason other than absence; a truly missing web application answers 404, the call refuses with `IRIS_SIDE_NOT_INSTALLED`, and nothing runs",
+      // Story 45.6 (DW-773): a least-privilege account reads `current` through the CSP application lookup.
+      "reads `current` when the web application is registered (from `1.3.0` the check falls back to the CSP application lookup, which needs no `%SYS` privilege) and `unconfigured` when it is not",
       "`iris_execute_tests` and `iris_test_coverage` refuse on a profile whose IRIS side is not installed while the install is off",
     ]) {
       expect(section, needle).toContain(needle);

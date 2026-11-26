@@ -13,6 +13,12 @@
 /// <example>
 /// Do ##class(ExecuteMCPv2.Setup).Uninstall()
 /// </example>
+/// <p><method>Configure</method> and <method>ConfigureMapping</method> are SQL procedures, so a
+/// read-only <code>SELECT</code> over the web can reach them. They refuse, and change nothing,
+/// when called inside a transaction (<code>$TLEVEL</code> above 0) during a web request (a
+/// <code>%request</code> object exists), which is how <code>iris_sql_query</code> runs a SELECT.
+/// The automatic install (Atelier, no transaction), an IPM install (a transaction, no
+/// <code>%request</code>) and a terminal call run as before.</p>
 Class ExecuteMCPv2.Setup Extends %RegisteredObject
 {
 
@@ -31,6 +37,11 @@ Parameter MAPNOTFOUNDCODE = 421;
 /// The name, inside the <code>ExecuteMCPv2</code> package, of the class only IPM installs.
 /// The embed never names it in full: that class is not a bootstrapped class.
 Parameter GUARDCLASS = "InstallGuard";
+
+/// The rest of the refusal text of <method>Configure</method> and <method>ConfigureMapping</method>
+/// (each puts its own name in front) when either is called inside a transaction during a web
+/// request, as <code>iris_sql_query</code> runs a SELECT.
+Parameter GUARDTEXT = "changed nothing: it was called inside a transaction during a web request, as iris_sql_query runs a SELECT. Run it in an IRIS terminal, or let the automatic install or IPM run it.";
 
 /// Bootstrap version marker, injected by <code>scripts/gen-bootstrap.mjs</code>
 /// at generation time. The marker is
@@ -62,6 +73,8 @@ Parameter BOOTSTRAPVERSION = "dev";
 ///        Defaults to the current namespace before switching to %SYS.
 ClassMethod Configure(pNamespace As %String = "") As %Status [ SqlProc ]
 {
+    ; The transaction guard (see the class doc): refuse inside a transaction during a web request
+    If ($TLevel > 0) && $IsObject($Get(%request)) Quit $$$ERROR($$$GeneralError, "Configure " _ ..#GUARDTEXT)
     Set tSC = $$$OK
     Try {
         ; Capture the target namespace before switching to %SYS
@@ -137,7 +150,9 @@ ClassMethod Configure(pNamespace As %String = "") As %Status [ SqlProc ]
 /// records, only when no step failed. A failed step therefore leaves this class and the
 /// records in place, and the command can run again once the cause is fixed.
 /// Without any install record (an install by 1.2.0 or earlier) <code>%ALL</code> and
-/// <code>^UnitTestRoot</code> are never removed and the report gives the commands.
+/// <code>^UnitTestRoot</code> are never removed and the report gives the commands. The same
+/// holds for a <code>%ALL</code> that every record says the install found, and for the
+/// <code>^UnitTestRoot</code> of a namespace that holds no record of its own.
 /// If the web application, the mapping or the namespace list cannot be read or removed,
 /// <code>%ALL</code>, <code>^UnitTestRoot</code>, the classes and the records are left
 /// alone.</p>
@@ -340,7 +355,7 @@ ClassMethod Uninstall(pVerbose As %Boolean = 1, Output pReport As %DynamicObject
                 Set tN = $Order(tScan(tN))
                 If tN = "" Quit
                 If '$Data(tScan(tN, "error")) {
-                    Set tCode = ..DecideUnitTestRoot(tScan(tN, "recUTR"), tScan(tN, "utrCurrent"), $Get(tAnyRecord))
+                    Set tCode = ..DecideUnitTestRoot(tScan(tN, "recUTR"), tScan(tN, "utrCurrent"), tScan(tN, "hasRecord"))
                     If tCode = "remove" {
                         Try {
                             Kill ^|tN|UnitTestRoot
@@ -351,7 +366,8 @@ ClassMethod Uninstall(pVerbose As %Boolean = 1, Output pReport As %DynamicObject
                     } ElseIf tCode = "changed" {
                         Do ..AddEntry(pReport, "left", "^UnitTestRoot", tN, "reason", "it changed since the install set it", "in " _ tN _ ": Kill ^UnitTestRoot")
                     } ElseIf tCode = "norecord" {
-                        Do ..AddEntry(pReport, "left", "^UnitTestRoot", tN, "reason", "no install record says the install set it (an install by 1.2.0 or earlier writes none)", "in " _ tN _ ": Kill ^UnitTestRoot")
+                        Set tWhyUTR = $Select($Get(tAnyRecord): "no install record in " _ tN _ " says the install set it", 1: "no install record says the install set it")
+                        Do ..AddEntry(pReport, "left", "^UnitTestRoot", tN, "reason", tWhyUTR _ " (an install by 1.2.0 or earlier writes none)", "in " _ tN _ ": Kill ^UnitTestRoot")
                     }
                 }
             }
@@ -491,7 +507,8 @@ ClassMethod DecideAll(pExists As %Boolean, pAnyRecord As %Boolean, pAnyCreated A
         Quit "left"
     }
     If 'pAnyCreated {
-        Set pReason = "the install did not create it"
+        Set pReason = "the install found it already there; an install by 1.2.0 or earlier that created it writes no record"
+        Set pManual = "in %SYS: Do ##class(Config.Namespaces).Delete(""%ALL""). This deletes %ALL together with every mapping in it, so check what else is mapped there first"
         Quit "left"
     }
     If pMappings '= "" {
@@ -504,19 +521,20 @@ ClassMethod DecideAll(pExists As %Boolean, pAnyRecord As %Boolean, pAnyCreated A
 /// Decide what the uninstall does with <code>^UnitTestRoot</code> of one namespace.
 /// Returns <code>remove</code> (the install set it and the value is unchanged),
 /// <code>changed</code> (it differs from what the install set), <code>norecord</code>
-/// (no install record exists anywhere and the global is defined), or <code>none</code>
-/// (nothing to do, nothing to report).
+/// (the namespace holds no install record and the global is defined), or <code>none</code>
+/// (nothing to do, nothing to report). A namespace whose own record has no
+/// <code>unitTestRoot</code> node is left alone: the global was there before that install.
 /// @param pRecorded The record's <code>("unitTestRoot")</code> value, or "".
 /// @param pCurrent The current value of <code>^UnitTestRoot</code>, or "".
-/// @param pAnyRecord 1 when any namespace holds an install record.
-ClassMethod DecideUnitTestRoot(pRecorded As %String, pCurrent As %String, pAnyRecord As %Boolean) As %String
+/// @param pHasRecord 1 when this namespace holds an install record.
+ClassMethod DecideUnitTestRoot(pRecorded As %String, pCurrent As %String, pHasRecord As %Boolean) As %String
 {
     If pRecorded '= "" {
         If pCurrent = "" Quit "none"
         If pCurrent = pRecorded Quit "remove"
         Quit "changed"
     }
-    If 'pAnyRecord && (pCurrent '= "") Quit "norecord"
+    If 'pHasRecord && (pCurrent '= "") Quit "norecord"
     Quit "none"
 }
 
@@ -726,6 +744,8 @@ ClassMethod PrintReport(pReport As %DynamicObject)
 /// @param pNamespace The namespace where ExecuteMCPv2 is installed (e.g., HSCUSTOM).
 ClassMethod ConfigureMapping(pNamespace As %String = "") As %Status [ SqlProc ]
 {
+    ; The transaction guard (see the class doc): refuse inside a transaction during a web request
+    If ($TLevel > 0) && $IsObject($Get(%request)) Quit $$$ERROR($$$GeneralError, "ConfigureMapping " _ ..#GUARDTEXT)
     Set tSC = $$$OK
     Try {
         If pNamespace = "" Set pNamespace = $NAMESPACE
@@ -776,7 +796,8 @@ ClassMethod ConfigureMapping(pNamespace As %String = "") As %Status [ SqlProc ]
 }
 
 /// Check whether the <code>/api/executemcp/v2</code> web application exists.
-/// <p>Returns 1 if registered, 0 if not.</p>
+/// <p>Returns 1 if registered, 0 if not. An account that cannot read <code>%SYS</code>
+/// gets the answer from <method>WebAppRegistered</method> instead of 0.</p>
 ClassMethod IsConfigured() As %Boolean [ SqlProc ]
 {
     Set tResult = 0
@@ -784,6 +805,20 @@ ClassMethod IsConfigured() As %Boolean [ SqlProc ]
         New $NAMESPACE
         Set $NAMESPACE = "%SYS"
         Set tResult = ##class(Security.Applications).Exists(..#WEBAPP)
+    } Catch ex {
+        Set tResult = ..WebAppRegistered()
+    }
+    Quit tResult
+}
+
+/// Whether the CSP application lookup finds the <code>/api/executemcp/v2</code> web
+/// application. The lookup needs no privilege on <code>%SYS</code>, so it answers for an
+/// account that cannot read <code>Security.Applications</code>. Returns 0 when the lookup fails.
+ClassMethod WebAppRegistered() As %Boolean
+{
+    Set tResult = 0
+    Try {
+        Set tResult = ($System.CSP.GetAppName(..#WEBAPP _ "/") = (..#WEBAPP _ "/"))
     } Catch ex {
         Set tResult = 0
     }

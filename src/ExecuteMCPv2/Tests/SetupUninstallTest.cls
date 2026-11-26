@@ -107,10 +107,13 @@ Method TestDecideAll() As %Status
     Do $$$AssertEquals(tD, "remove", "created by the install and empty: remove")
     Set tD = ##class(ExecuteMCPv2.Setup).DecideAll(1, 1, 0, 1, "", .tWhy, .tManual)
     Do $$$AssertEquals(tD, "left", "found, not created: left")
-    Do $$$AssertEquals(tWhy, "the install did not create it", "the foreign-%ALL reason")
+    Do $$$AssertEquals(tWhy, "the install found it already there; an install by 1.2.0 or earlier that created it writes no record", "the found-%ALL reason names the 1.2.0 caveat")
+    Do $$$AssertTrue(tManual [ "Do ##class(Config.Namespaces).Delete(""%ALL"")", "a found %ALL carries the manual command (DW-780)")
+    Do $$$AssertTrue(tManual [ "every mapping", "a found %ALL carries the warning about every mapping")
     Set tD = ##class(ExecuteMCPv2.Setup).DecideAll(1, 1, 0, 1, "global ForeignThing", .tWhy, .tManual)
     Do $$$AssertEquals(tD, "left", "found and holding a foreign mapping: left")
-    Do $$$AssertEquals(tWhy, "the install did not create it", "the record decides before the mappings")
+    Do $$$AssertEquals(tWhy, "the install found it already there; an install by 1.2.0 or earlier that created it writes no record", "the record decides before the mappings")
+    Do $$$AssertTrue(tManual [ "Delete(""%ALL"")", "the command is given here too")
     Set tD = ##class(ExecuteMCPv2.Setup).DecideAll(1, 1, 1, 1, "global ForeignThing, routine Other", .tWhy, .tManual)
     Do $$$AssertEquals(tD, "left", "created but a foreign mapping was added: left")
     Do $$$AssertEquals(tWhy, "it still holds mappings: global ForeignThing, routine Other", "the mappings are listed")
@@ -120,19 +123,23 @@ Method TestDecideAll() As %Status
     Do $$$AssertTrue(tManual [ "every mapping", "the warning about every mapping is given")
     Set tD = ##class(ExecuteMCPv2.Setup).DecideAll(1, 1, 1, 0, "", .tWhy, .tManual)
     Do $$$AssertEquals(tD, "left", "the mapping step failed: left")
-    Do $$$AssertEquals(tManual, "", "no manual command when the record exists")
+    Do $$$AssertEquals(tManual, "", "no manual command when the mapping step failed")
+    Set tD = ##class(ExecuteMCPv2.Setup).DecideAll(1, 1, 1, 1, "global ForeignThing", .tWhy, .tManual)
+    Do $$$AssertEquals(tManual, "", "no manual command when the install created it and a foreign mapping holds it")
 
     Quit $$$OK
 }
 
-/// The ^UnitTestRoot decision over every I/O matrix row.
+/// The ^UnitTestRoot decision over every I/O matrix row. The third argument is the flag of
+/// the namespace's OWN install record (DW-780): a namespace with no record of its own is
+/// reported even when another namespace holds one.
 Method TestDecideUnitTestRoot() As %Status
 {
     Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).DecideUnitTestRoot("/mgr/", "/mgr/", 1), "remove", "set by the install and unchanged: remove")
     Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).DecideUnitTestRoot("/mgr/", "/other/", 1), "changed", "changed since the install: left")
     Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).DecideUnitTestRoot("/mgr/", "", 1), "none", "recorded but already gone: nothing to remove")
     Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).DecideUnitTestRoot("", "/preset/", 1), "none", "set before the install, a record exists: survives, not reported")
-    Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).DecideUnitTestRoot("", "/preset/", 0), "norecord", "no record anywhere and defined: left with the manual command")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).DecideUnitTestRoot("", "/preset/", 0), "norecord", "no record in the namespace and the global defined: left with the manual command")
     Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).DecideUnitTestRoot("", "", 0), "none", "no record anywhere and undefined: nothing")
 
     Quit $$$OK
