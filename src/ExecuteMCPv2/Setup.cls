@@ -18,7 +18,10 @@
 /// when called inside a transaction (<code>$TLEVEL</code> above 0) during a web request (a
 /// <code>%request</code> object exists), which is how <code>iris_sql_query</code> runs a SELECT.
 /// The automatic install (Atelier, no transaction), an IPM install (a transaction, no
-/// <code>%request</code>) and a terminal call run as before.</p>
+/// <code>%request</code>) and a terminal call run as before. Inside an IPM install's transaction,
+/// <method>ConfigureMapping</method> keeps the <code>%ALL</code> namespace, the mapping and their
+/// install record out of the transaction's rollback, so an install that fails later leaves them in
+/// place, consistent, for <method>Uninstall</method> to remove.</p>
 Class ExecuteMCPv2.Setup Extends %RegisteredObject
 {
 
@@ -741,12 +744,21 @@ ClassMethod PrintReport(pReport As %DynamicObject)
 /// the current namespace at call time.</p>
 /// <p>The mapping points to the database where ExecuteMCPv2 classes are
 /// compiled (determined by the routines database of <code>pNamespace</code>).</p>
+/// <p>Inside a transaction with no web request (an IPM install), the creation of <code>%ALL</code>
+/// and of the mapping, and their install-record entries, are made with transactions suspended, so a
+/// later failure of the install and its rollback leave them in place: <code>%ALL</code>, the mapping
+/// and the record stay consistent, and <method>Uninstall</method> removes them. A rolled-back
+/// <code>%ALL</code> would leave the namespace table refusing every new namespace. The previous
+/// suspension state is restored before the method returns, on every path. With no transaction (the
+/// automatic install, a terminal call) nothing is suspended.</p>
 /// @param pNamespace The namespace where ExecuteMCPv2 is installed (e.g., HSCUSTOM).
 ClassMethod ConfigureMapping(pNamespace As %String = "") As %Status [ SqlProc ]
 {
     ; The transaction guard (see the class doc): refuse inside a transaction during a web request
     If ($TLevel > 0) && $IsObject($Get(%request)) Quit $$$ERROR($$$GeneralError, "ConfigureMapping " _ ..#GUARDTEXT)
     Set tSC = $$$OK
+    Set tSuspendedHere = 0
+    Set tPreviousSuspended = 0
     Try {
         If pNamespace = "" Set pNamespace = $NAMESPACE
 
@@ -767,6 +779,12 @@ ClassMethod ConfigureMapping(pNamespace As %String = "") As %Status [ SqlProc ]
             Do ..WriteRecord(pNamespace, "all", "found")
             Do ..WriteRecord(pNamespace, "mapping", "found", tExistingDB)
             Quit  ; Already mapped
+        }
+
+        ; Inside a transaction (an IPM install), keep %ALL, the mapping and their record out of its rollback
+        If $TLevel > 0 {
+            Set tPreviousSuspended = ##class(%SYSTEM.Process).TransactionsSuspended(1)
+            Set tSuspendedHere = 1
         }
 
         ; %ALL is a virtual namespace that must exist before creating mappings.
@@ -792,6 +810,8 @@ ClassMethod ConfigureMapping(pNamespace As %String = "") As %Status [ SqlProc ]
     } Catch ex {
         Set tSC = ex.AsStatus()
     }
+    ; Restore the suspension state this call found, on every path, before the method returns
+    If tSuspendedHere Do ##class(%SYSTEM.Process).TransactionsSuspended(tPreviousSuspended)
     Quit tSC
 }
 

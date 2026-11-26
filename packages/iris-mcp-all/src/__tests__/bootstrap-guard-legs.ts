@@ -242,12 +242,16 @@ export async function seedInstance(
     );
   }
   for (const statement of [
-    "SELECT ExecuteMCPv2.Setup_Configure(?) AS ConfigureResult",
-    "SELECT ExecuteMCPv2.Setup_ConfigureMapping(?) AS MappingResult",
+    "SELECT %ODBCOUT(ExecuteMCPv2.Setup_Configure(?)) AS ConfigureResult",
+    "SELECT %ODBCOUT(ExecuteMCPv2.Setup_ConfigureMapping(?)) AS MappingResult",
   ]) {
     const answer = await atelierWrite(target, "POST", "action/query", { query: statement, parameters: [target.namespace] });
     const failure = failureOf(answer, [200]);
     if (failure !== undefined) throw new Error(`${statement}: ${failure}`);
+    // The status is in the row (DW-790): Atelier answers 200 whatever the procedure returned, `%ODBCOUT` renders success as "1".
+    const column = statement.includes("ConfigureResult") ? "ConfigureResult" : "MappingResult";
+    const value = String(((answer.json as { result?: { content?: Array<Record<string, unknown>> } } | undefined)?.result?.content ?? [])[0]?.[column] ?? "");
+    if (value !== "1") throw new Error(`${statement}: the procedure returned ${JSON.stringify(value)}, not "1".`);
   }
   const configured = await atelierQuery(target, "SELECT ExecuteMCPv2.Setup_IsConfigured() AS Configured");
   const flag = String(configured[0]?.["Configured"] ?? "0").toLowerCase();

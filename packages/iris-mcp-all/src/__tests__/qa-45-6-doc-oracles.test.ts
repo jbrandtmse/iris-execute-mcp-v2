@@ -99,12 +99,13 @@ describe("Story 45.6 QA: the read-only claim and the compile warning against the
     expect(serverBaseSource).toContain("`Bootstrap completed with errors: ${result.errors.join(\"; \")}`");
     const count = BOOTSTRAP_CLASSES.size;
     const text = `Bootstrap completed with errors: Compile failed: ${count} of ${count} classes did not compile`;
-    expect(readme, "the install-on outcome").toContain(`\`${text}\` on every connect`);
+    // Story 45.7 (DW-788) fixed the warning: the documents name it only as what 1.2.x logged.
+    expect(readme, "the install-on outcome names what 1.2.x logged").toContain(`it logged \`${text}\` on every connect`);
     expect(changelog).toContain(`\`${text}\``);
-    // A least-privilege account logs it with the install off as well (run live), so the install-off outcome must not read as warning-free.
+    // The install-off outcome says the warning is gone from 1.3.0, together with the web application warning.
     const installOff = readme.slice(readme.indexOf("The IRIS side is installed and current, install off"), readme.indexOf("The web application is not registered, install off"));
-    expect(installOff, "found the install-off outcome").toContain("logs no warning about the web application");
-    expect(installOff, "and it names the compile warning").toContain(`\`Compile failed: ${count} of ${count} classes did not compile\``);
+    expect(installOff, "found the install-off outcome").toContain("logs no warning about the web application or the compile check (from `1.3.0`");
+    expect(installOff, "and it no longer reads as logging the compile warning").not.toContain("This release does not fix");
   });
 
   it("the README no longer says that an account that cannot read %SYS reads unconfigured when the web application is registered", () => {

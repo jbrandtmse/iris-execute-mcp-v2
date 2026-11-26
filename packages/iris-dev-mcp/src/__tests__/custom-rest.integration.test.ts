@@ -332,7 +332,8 @@ describe.skipIf(!IRIS_OK || !CUSTOM_REST_OK)(
         ["ExecuteMCPv2.Tests.DatabaseDeleteTest", 7],
         // Story 45.6 (DW-778): the two Setup unit classes ran in no suite. Totals are the Test methods of each class after this
         // story's edits: `grep -c "^Method Test" src/ExecuteMCPv2/Tests/SetupTest.cls` (10) and `.../SetupUninstallTest.cls` (12).
-        ["ExecuteMCPv2.Tests.SetupTest", 10],
+        // Story 45.7 (DW-792) adds `TestMappingSurvivesRollbackOfOuterTransaction`: SetupTest is 11 (the same grep).
+        ["ExecuteMCPv2.Tests.SetupTest", 11],
         ["ExecuteMCPv2.Tests.SetupUninstallTest", 12],
       ] as const)("iris_execute_tests runs %s: all %i tests pass", async (target, expectedTotal) => {
         const result = await executeTestsTool.handler({ target, level: "class" }, ctx);

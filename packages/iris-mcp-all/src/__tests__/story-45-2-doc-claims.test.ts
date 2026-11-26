@@ -217,8 +217,10 @@ describe("Story 45.2: the README read-only section, the Quick Start line and the
       "The default state is on; the preset forces it off",
       "**Upgrading is a deliberate admin step.**",
       "restart the refusing server",
-      // Every release restamps the marker's semver (gen-bootstrap.mjs at the version step), so every upgrade reads as stale.
-      "After every upgrade of the servers (each release stamps its version into the IRIS-side classes",
+      // Every release restamps the marker's semver (gen-bootstrap.mjs at the version step); since Story 45.7 (DW-770) only a release that
+      // changes the classes (the hash, so `BOOTSTRAP_VERSION` moves) reads as stale with the install off.
+      "After a release that changes the IRIS-side classes (the release's CHANGELOG says so in its IRIS side section, and `BOOTSTRAP_VERSION` moves; 1.3.0 does)",
+      "A release that only restamps the version (a new semver with the same classes, so the same content hash) asks for nothing",
       "an `unknown` IRIS side whose marker reads older",
       // DW-772 (decision #165): the unconfigured reading warns, it does not refuse, and the residual is stated plainly.
       "Where the IRIS side is `missing` or `stale` (older than this server), the server's custom-REST tools of that profile are refused",
@@ -271,7 +273,8 @@ describe("Story 45.2: the CHANGELOG entry", () => {
       "`IRIS_AUTO_INSTALL`",
       "`autoInstall` and `autoInstallSource`",
       "after `dataPolicySource`",
-      "After every upgrade of the servers (each release stamps its version into the IRIS-side classes",
+      "After a release that changes the IRIS-side classes (the release's CHANGELOG says so in its IRIS side section, and `BOOTSTRAP_VERSION` moves; 1.3.0 does)",
+      "A release that only restamps the version (the same classes, so the same content hash) asks for nothing",
       "Upgrading is a deliberate admin step.",
       "An `unknown` IRIS side is not refused.",
       "With the install off and the IRIS side `missing` or `stale` (older than this server), every call that reaches the `/api/executemcp/` service of that profile is refused before a request is sent",
@@ -308,7 +311,7 @@ describe("Story 45.2: the changeset", () => {
       "On a `missing` or `stale` IRIS side, a call that would reach the `/api/executemcp/` custom REST service of that profile is refused before any request is sent",
       "An `unconfigured` reading only logs one `[WARN]` and the tools go on",
       "Upgrading is a deliberate admin step.",
-      "after every upgrade of the servers (each release stamps its version into the IRIS-side classes",
+      "after a release that changes the IRIS-side classes (its CHANGELOG says so in its IRIS side section, and `BOOTSTRAP_VERSION` moves; 1.3.0 does)",
       "No `.cls` changed, so `BOOTSTRAP_VERSION` is unchanged.",
     ]) {
       expect(body, needle).toContain(needle);

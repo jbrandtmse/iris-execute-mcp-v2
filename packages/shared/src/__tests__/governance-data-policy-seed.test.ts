@@ -112,7 +112,7 @@ const DENIED = { value: false, source: "dataPolicy" };
 const WORLD_COVERED = ["iris_sql_query", "iris_sql_execute", "iris_global_get", "iris_execute_command"];
 
 describe("the declaration", () => {
-  it("is the 12 keys of decisions #169 and #172, in order, as of 2026-11-25, and frozen", () => {
+  it("is the 12 keys of decisions #169 and #172 and the 3 iris_sql_analyze keys of Story 45.7 (DW-784), in order, as of 2026-11-26, and frozen", () => {
     expect([...DATA_POLICY_BLOCK_KEYS]).toEqual([
       "iris_sql_query",
       "iris_sql_execute",
@@ -126,8 +126,11 @@ describe("the declaration", () => {
       "iris_docdb_document:get",
       "iris_docdb_document:delete",
       "iris_docdb_find",
+      "iris_sql_analyze:stats",
+      "iris_sql_analyze:running",
+      "iris_sql_analyze:advise",
     ]);
-    expect(DATA_POLICY_BLOCK_KEYS_AS_OF).toBe("2026-11-25");
+    expect(DATA_POLICY_BLOCK_KEYS_AS_OF).toBe("2026-11-26");
     expect(Object.isFrozen(DATA_POLICY_BLOCK_KEYS)).toBe(true);
   });
 });

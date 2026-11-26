@@ -8,7 +8,7 @@
  * fail if broken" are different claims, and only the second is evidence). The mutations are recorded in the story spec under
  * `## Verification`; each one is a temporary edit that is restored, with the tree byte-identical afterwards.
  *
- *  P1  issue point 1: `IRIS_DATA_POLICY=block` turns off the 12 declared raw-read and code-execution keys.
+ *  P1  issue point 1: `IRIS_DATA_POLICY=block` turns off the 15 declared raw-read and code-execution keys (12 of Story 45.4, 3 of Story 45.7).
  *      Oracle: the denial of each key (`GOVERNANCE_DISABLED` + `dataPolicyApplied: "block"`), the 503 listener's request count (0), the
  *      hand-written startup warning text and its pointer, and the declaration `DATA_POLICY_BLOCK_KEYS` of the built shared dist.
  *      Mutation: delete the `dataPolicySeed(...)` term of the cascade (`governance.ts`, the `effective` function) and rebuild shared.
@@ -163,6 +163,10 @@ const COVERED: Record<Server, Covered[]> = {
     { key: "iris_execute_classmethod", tool: "iris_execute_classmethod", args: { className: "Epic45.Probe", methodName: "Run" } },
     { key: "iris_execute_tests", tool: "iris_execute_tests", args: { target: "Epic45.Tests", level: "package" } },
     { key: "iris_test_coverage", tool: "iris_test_coverage", args: { target: "Epic45.Tests", level: "package", classes: ["Epic45.Probe"] } },
+    // Story 45.7 (DW-784): the three iris_sql_analyze actions that return other sessions' literals.
+    { key: "iris_sql_analyze:stats", tool: "iris_sql_analyze", args: { action: "stats" } },
+    { key: "iris_sql_analyze:running", tool: "iris_sql_analyze", args: { action: "running" } },
+    { key: "iris_sql_analyze:advise", tool: "iris_sql_analyze", args: { action: "advise", workload: true } },
   ],
   interop: [{ key: "iris_transform_test", tool: "iris_transform_test", args: { className: "Epic45.Dtl", sourceClass: "Epic45.Source" } }],
   data: [
@@ -244,9 +248,9 @@ describe("Epic 45 capstone P1 (issue point 1): block turns off the declared raw-
     prepared = await hermetic();
   });
 
-  it("the keys this gate drives are exactly the declaration of the built shared dist (12 keys)", () => {
+  it("the keys this gate drives are exactly the declaration of the built shared dist (15 keys)", () => {
     const driven = Object.values(COVERED).flat().map((entry) => entry.key);
-    expect(prepared.blockKeys).toHaveLength(12);
+    expect(prepared.blockKeys).toHaveLength(15);
     expect([...driven].sort()).toEqual([...prepared.blockKeys].sort());
     expect(new Set(driven).size).toBe(driven.length);
   });
@@ -296,7 +300,7 @@ describe("Epic 45 capstone P1 (issue point 1): block turns off the declared raw-
   );
 
   it(
-    "the default policy (redact) keeps every tool and names the open ones: dev 7, interop 1 and data 3 keys, each enabled in iris_server_profiles, and the pointer resolves in the README",
+    "the default policy (redact) keeps every tool and names the open ones: dev 10, interop 1 and data 3 keys, each enabled in iris_server_profiles, and the pointer resolves in the README",
     async () => {
       for (const server of ["dev", "interop", "data"] as const) {
         await serve(prepared.sdkEsmDir, server, {}, async (served) => {
@@ -719,6 +723,9 @@ describe("Epic 45 capstone LP-armed (issue points 3 and 4): a least-privilege ac
     const couldNotConfirm = readOnlyStderr.split(/\r?\n/).filter((line) => line.includes(COULD_NOT_CONFIRM));
     expect(couldNotConfirm, "no could-not-confirm warning: the account reads the registered web application").toEqual([]);
     expect(readOnlyStderr).not.toContain("IRIS_SIDE_NOT_INSTALLED");
+    // Story 45.7 (DW-788): the compile check reads the up-to-date flag of the classes the filtered document list leaves out
+    // (it is empty for an account without SQL privileges), so the account no longer logs `Compile failed: 35 of 35`.
+    expect(readOnlyStderr, "no Compile failed line: the account's compile check confirms every class through action/index").not.toContain("Compile failed");
   });
 
   it("a granted SELECT through iris_sql_query returns the rows that _SYSTEM's Atelier route returns (the one-database minimum, checked live)", async (ctx) => {

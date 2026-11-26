@@ -22,6 +22,14 @@ Property MappingRemoved As %Boolean [ InitialExpression = 0 ];
 /// The database the removed mapping pointed to.
 Property SavedMappingDB As %String;
 
+/// 1 while <method>RemoveALL</method> has removed the <code>%ALL</code> namespace that
+/// <method>RestoreALL</method> has not put back yet.
+Property ALLRemoved As %Boolean [ InitialExpression = 0 ];
+
+/// The <code>Globals</code>, <code>Routines</code>, <code>Library</code> and <code>TempGlobals</code>
+/// databases of the removed <code>%ALL</code>, as a list.
+Property SavedALL As %String;
+
 Method OnBeforeOneTest(testname As %String) As %Status
 {
     Kill i%SavedRecord
@@ -33,8 +41,10 @@ Method OnBeforeOneTest(testname As %String) As %Status
 
 Method OnAfterOneTest(testname As %String) As %Status
 {
-    ; A test that stopped between RemoveMapping and RestoreMapping still gets the mapping back
+    ; A test that stopped between RemoveALL/RemoveMapping and their restore still gets %ALL and the mapping back
+    Do ..RestoreALL()
     Do ..RestoreMapping()
+    Do ..ActivateAll()
     Kill ^ExecuteMCPv2.InstallRecord
     If ..HadRecord Merge ^ExecuteMCPv2.InstallRecord = i%SavedRecord
     Kill i%SavedRecord
@@ -153,6 +163,20 @@ Method MappingExists() As %Boolean
     Quit tExists
 }
 
+/// Whether the <code>%ALL</code> namespace exists in the configuration.
+Method ALLExists() As %Boolean
+{
+    Set tExists = 0
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+        Set tExists = +##class(Config.Namespaces).Exists("%ALL")
+    } Catch ex {
+        Set tExists = 0
+    }
+    Quit tExists
+}
+
 /// Remove the <code>ExecuteMCPv2</code> package mapping from <code>%ALL</code> (a no-op when absent),
 /// saving the database it pointed to for <method>RestoreMapping</method>.
 Method RemoveMapping()
@@ -178,7 +202,14 @@ Method RestoreMapping() As %Status
     Try {
         New $NAMESPACE
         Set $NAMESPACE = "%SYS"
-        If '##class(Config.MapPackages).Exists("%ALL", "ExecuteMCPv2") {
+        ; A mapping a test's own call created points where that call chose: put back the one that was found
+        If ##class(Config.MapPackages).Exists("%ALL", "ExecuteMCPv2") {
+            Kill tFound
+            If $$$ISOK(##class(Config.MapPackages).Get("%ALL", "ExecuteMCPv2", .tFound)) && ($Get(tFound("Database")) '= ..SavedMappingDB) {
+                Set tSC = ##class(Config.MapPackages).Delete("%ALL", "ExecuteMCPv2")
+            }
+        }
+        If $$$ISOK(tSC) && '##class(Config.MapPackages).Exists("%ALL", "ExecuteMCPv2") {
             Kill tProps
             Set tProps("Database") = ..SavedMappingDB
             Set tSC = ##class(Config.MapPackages).Create("%ALL", "ExecuteMCPv2", .tProps)
@@ -188,6 +219,101 @@ Method RestoreMapping() As %Status
         Set tSC = ex.AsStatus()
     }
     Quit tSC
+}
+
+/// The number of mappings in <code>%ALL</code> other than the <code>ExecuteMCPv2</code> package mapping
+/// (package, global and routine mappings together). <code>%ALL</code> is removed by a test only when
+/// this is 0, so no one else's mapping is ever lost.
+Method ForeignALLMappings() As %Integer
+{
+    Set tCount = 0
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+        If '##class(Config.Namespaces).Exists("%ALL") Quit
+        For tQuery = "Config.MapPackages:List", "Config.MapGlobals:List", "Config.MapRoutines:List" {
+            Set tRS = ##class(%ResultSet).%New(tQuery)
+            If $$$ISERR(tRS.Execute("%ALL")) Set tCount = tCount + 1000 Continue
+            While tRS.Next() {
+                If (tQuery '= "Config.MapPackages:List") || (tRS.GetData(2) '= "ExecuteMCPv2") Set tCount = tCount + 1
+            }
+            Do tRS.Close()
+        }
+    } Catch ex {
+        Set tCount = tCount + 1000
+    }
+    Quit tCount
+}
+
+/// Remove the <code>%ALL</code> namespace (a no-op when absent), saving its databases for
+/// <method>RestoreALL</method>. The caller has removed the <code>ExecuteMCPv2</code> mapping and
+/// checked <method>ForeignALLMappings</method> is 0.
+Method RemoveALL()
+{
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+        Kill tProps
+        If '..ALLRemoved && ##class(Config.Namespaces).Exists("%ALL") && $$$ISOK(##class(Config.Namespaces).Get("%ALL", .tProps)) {
+            Set ..SavedALL = $ListBuild($Get(tProps("Globals")), $Get(tProps("Routines")), $Get(tProps("Library")), $Get(tProps("TempGlobals")))
+            If $$$ISOK(##class(Config.Namespaces).Delete("%ALL")) Set ..ALLRemoved = 1
+        }
+    } Catch ex {
+    }
+}
+
+/// Put back the <code>%ALL</code> namespace <method>RemoveALL</method> removed, with the databases it had (a
+/// no-op when nothing was removed or it exists again).
+Method RestoreALL() As %Status
+{
+    Set tSC = $$$OK
+    If '..ALLRemoved Quit tSC
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+        If '##class(Config.Namespaces).Exists("%ALL") {
+            Kill tProps
+            Set tProps("Globals") = $List(..SavedALL, 1)
+            Set tProps("Routines") = $List(..SavedALL, 2)
+            Set tProps("Library") = $List(..SavedALL, 3)
+            Set tProps("TempGlobals") = $List(..SavedALL, 4)
+            Set tSC = ##class(Config.Namespaces).Create("%ALL", .tProps)
+        }
+        If $$$ISOK(tSC) Set ..ALLRemoved = 0
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Activate every namespace mapping from the configuration, so a test that created or removed
+/// <code>%ALL</code> leaves the live namespace table as the configuration says.
+Method ActivateAll()
+{
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+        Do ##class(Config.Namespaces).ActivateAll()
+    } Catch ex {
+    }
+}
+
+/// 1 when the live package map of <code>ExecuteMCPv2</code> disagrees with the configuration (the state a rolled-back
+/// <code>%ALL</code> leaves): no mapping in <code>%ALL</code> in the configuration, while <code>%SYS</code> still
+/// resolves <code>ExecuteMCPv2</code> outside the <code>%SYS</code> routines directory.
+Method MapDisagrees() As %Boolean
+{
+    Set tBroken = 0
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+        Set tSysDir = $Piece(##class(%SYS.Namespace).GetRoutineDest("%SYS", ""), "^", *)
+        Set tDest = $Piece(##class(%SYS.Namespace).GetPackageDest("%SYS", "ExecuteMCPv2"), "^", *)
+        Set tBroken = ('##class(Config.MapPackages).Exists("%ALL", "ExecuteMCPv2")) && (tDest '= tSysDir)
+    } Catch ex {
+        Set tBroken = 1
+    }
+    Quit tBroken
 }
 
 /// The install record of namespace <var>pNamespace</var> as one string ("" when it has none).
@@ -280,6 +406,56 @@ Method TestGuardPassesInTransactionWithoutWebRequest() As %Status
     Do $$$AssertEquals(tLevelIn, tLevelBefore + 1, "the calls ran inside a transaction")
     Do $$$AssertStatusOK(tMap, "ConfigureMapping on an existing mapping returns OK inside a transaction")
     Do $$$AssertStatusOK(tCfg, "Configure returns OK inside a transaction")
+    Do $$$AssertEquals($TLevel, tLevelBefore, "the test left no transaction open")
+
+    Quit $$$OK
+}
+
+/// DW-792: an IPM install runs <code>ConfigureMapping</code> inside a transaction (no <code>%request</code>)
+/// and rolls it back when a later step fails. The creation of <code>%ALL</code>, of the mapping and their
+/// install record must survive that rollback: a rolled-back <code>%ALL</code> leaves the namespace table
+/// refusing every new namespace. The suspension of transactions that keeps them out of the rollback is
+/// undone before the call returns. The state is read AFTER the rollback; <code>%ALL</code> and the
+/// mapping are put back as found on every path (<code>OnAfterOneTest</code>).
+Method TestMappingSurvivesRollbackOfOuterTransaction() As %Status
+{
+    Do $$$AssertStatusOK(##class(ExecuteMCPv2.Setup).ConfigureMapping(), "set up: %ALL and the mapping exist")
+    Set tForeign = ..ForeignALLMappings()
+    If tForeign '= 0 {
+        Do $$$AssertSkipped("%ALL holds " _ tForeign _ " mapping(s) of other software: this test does not remove it")
+        Quit $$$OK
+    }
+    Set tNS = $NAMESPACE
+    Do ..RemoveMapping()
+    Do ..RemoveALL()
+    Kill ^ExecuteMCPv2.InstallRecord
+    Set tCaught = "", tMap = "", tLevelBefore = $TLevel, tHasRequest = -1, tLevelIn = -1, tSuspendedBefore = -1, tSuspendedAfter = -1
+    ; No assertion runs inside the transaction: the rollback would take its result with it
+    TSTART
+    Try {
+        New %request
+        Set tHasRequest = $IsObject($Get(%request)), tLevelIn = $TLevel
+        Set tSuspendedBefore = ##class(%SYSTEM.Process).TransactionsSuspended()
+        Set tMap = ##class(ExecuteMCPv2.Setup).ConfigureMapping(tNS)
+        Set tSuspendedAfter = ##class(%SYSTEM.Process).TransactionsSuspended()
+    } Catch ex {
+        Set tCaught = ex.DisplayString()
+    }
+    TROLLBACK 1
+    Set tALLExists = ..ALLExists(), tMapExists = ..MappingExists()
+    Set tBroken = ..MapDisagrees()
+    Set tRecAll = $Get(^ExecuteMCPv2.InstallRecord("all")), tRecMapping = $Get(^ExecuteMCPv2.InstallRecord("mapping"))
+    Do $$$AssertEquals(tCaught, "", "nothing raised")
+    Do $$$AssertEquals(tHasRequest, 0, "no %request object inside the transaction")
+    Do $$$AssertEquals(tLevelIn, tLevelBefore + 1, "the call ran inside a transaction")
+    Do $$$AssertStatusOK(tMap, "ConfigureMapping succeeds inside a transaction")
+    Do $$$AssertEquals(tSuspendedAfter, tSuspendedBefore, "ConfigureMapping restored the transaction suspension it found")
+    Do $$$AssertEquals(tSuspendedAfter, 0, "transactions are not suspended after ConfigureMapping returns")
+    Do $$$AssertEquals(tALLExists, 1, "%ALL survives the rollback")
+    Do $$$AssertEquals(tMapExists, 1, "the ExecuteMCPv2 mapping survives the rollback")
+    Do $$$AssertEquals(tRecAll, "created", "the install record keeps %ALL as created")
+    Do $$$AssertEquals(tRecMapping, "created", "the install record keeps the mapping as created")
+    Do $$$AssertEquals(tBroken, 0, "the live package map agrees with the configuration")
     Do $$$AssertEquals($TLevel, tLevelBefore, "the test left no transaction open")
 
     Quit $$$OK

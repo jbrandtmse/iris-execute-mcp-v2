@@ -167,6 +167,17 @@ export interface StatefulFakeAtelier {
    * installed web application answers an unknown route with the JSON envelope instead, which is what the fake does when this is off).
    */
   webAppAbsent: boolean;
+  /**
+   * Set to `true` to model an account without SQL privileges (Story 45.7, DW-788): `GET docnames/CLS?filter=` answers HTTP 200 with
+   * NO entries (plan probe P-788: IRIS answers an empty list, no error), while `POST action/index` answers the entries as usual.
+   */
+  docnamesEmpty: boolean;
+  /**
+   * Set to a text to model an account without `%Admin_Manage` on the install path as the bootstrap's `%ODBCOUT` queries see it (Story
+   * 45.7, DW-790): `Setup_Configure(...)` answers HTTP 200 with that text in its `ConfigureResult` column (IRIS's own status text,
+   * plan probe P-X) and leaves `state.configured` as it was. `Setup_ConfigureMapping` is unaffected.
+   */
+  configureRowText: string | undefined;
   close: () => Promise<void>;
 }
 
@@ -272,6 +283,8 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
   let isConfiguredReadsFalse = false;
   let configureFails = false;
   let webAppAbsent = false;
+  let docnamesEmpty = false;
+  let configureRowText: string | undefined;
   let versionQueries = 0;
   const visibleClasses = new Set(options.visibleClasses ?? []);
 
@@ -337,12 +350,15 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
         reply(res, 200, envelope({ content: [{ Configured: isConfiguredReadsFalse ? false : state.configured ? 1 : 0 }] }));
       } else if (statement.includes("Setup_ConfigureMapping")) {
         state.mapped = true;
-        reply(res, 200, envelope({ content: [{ MappingResult: 1 }] }));
+        reply(res, 200, envelope({ content: [{ MappingResult: statement.includes("%ODBCOUT(") ? "1" : 1 }] }));
       } else if (statement.includes("Setup_Configure") && configureFails) {
         reply(res, 500, errorEnvelope("ERROR #5002: ObjectScript error: <PROTECT>", 5002));
+      } else if (statement.includes("Setup_Configure") && configureRowText !== undefined) {
+        reply(res, 200, envelope({ content: [{ ConfigureResult: configureRowText }] }));
       } else if (statement.includes("Setup_Configure")) {
         state.configured = true;
-        reply(res, 200, envelope({ content: [{ ConfigureResult: 1 }] }));
+        // The bootstrap's query wraps the call in `%ODBCOUT(...)` (DW-790): a success renders as the string "1".
+        reply(res, 200, envelope({ content: [{ ConfigureResult: statement.includes("%ODBCOUT(") ? "1" : 1 }] }));
       } else if (statement.includes("Setup_EnsureUnitTestRoot")) {
         reply(res, 200, envelope({ content: [{ UnitTestRoot: "/fake/mgr/" }] }));
       } else {
@@ -421,9 +437,27 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
         return;
       }
       const filter = (url.searchParams.get("filter") ?? "").toLowerCase();
-      const content = [...state.docs.entries()]
-        .filter(([name]) => name.endsWith(".cls") && name.toLowerCase().includes(filter))
-        .map(([name, stored]) => ({ name, cat: "CLS", ts: stored.ts, upd: classUpdated(name), db: namespace, gen: false }));
+      const content = docnamesEmpty
+        ? []
+        : [...state.docs.entries()]
+            .filter(([name]) => name.endsWith(".cls") && name.toLowerCase().includes(filter))
+            .map(([name, stored]) => ({ name, cat: "CLS", ts: stored.ts, upd: classUpdated(name), db: namespace, gen: false }));
+      reply(res, 200, envelope({ content }));
+      return;
+    }
+
+    // `POST action/index` (DW-788): one entry per name asked, ordered by name as IRIS orders them. A stored class carries `upd`; a
+    // name with no document has an empty `ts`, no `upd` and the status text of IRIS (shape captured 2026-11-26, plan probe P-788).
+    if (method === "POST" && action === "action/index") {
+      const names = Array.isArray(body) ? (body as unknown[]).map(String) : [];
+      const content = names
+        .map((name) => {
+          const stored = state.docs.get(name);
+          return stored === undefined
+            ? { name, db: "", ts: "", cat: "CLS", gen: false, status: `ERROR #16005: Document '${name}' does NOT exist` }
+            : { name, db: namespace, ts: stored.ts, upd: classUpdated(name), cat: "CLS", gen: false, status: "" };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
       reply(res, 200, envelope({ content }));
       return;
     }
@@ -594,6 +628,18 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
     },
     set webAppAbsent(value) {
       webAppAbsent = value;
+    },
+    get docnamesEmpty() {
+      return docnamesEmpty;
+    },
+    set docnamesEmpty(value) {
+      docnamesEmpty = value;
+    },
+    get configureRowText() {
+      return configureRowText;
+    },
+    set configureRowText(value) {
+      configureRowText = value;
     },
     close: () =>
       new Promise<void>((resolve) => {

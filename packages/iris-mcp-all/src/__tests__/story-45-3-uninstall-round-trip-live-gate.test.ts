@@ -44,6 +44,8 @@ import {
   runServer,
   runServerCalls,
   seedInstance,
+  snapshotInstance,
+  stampedEmbedded,
   throwawayGatePlan,
   type EmbeddedBootstrap,
 } from "./bootstrap-guard-legs.js";
@@ -828,6 +830,20 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
       expect(cpfLines(), "iris.cpf still holds no %ALL line").toBe(0);
       expect(differences(before, snapshot()), "%ALL, the mapping and the classes (also as HSCUSTOM sees them) are as they were").toEqual([]);
       expect(webAppNamespace(), "side check: the web application still points at the install namespace").toBe(appNamespaceBefore);
+
+      // Story 45.7 (DW-792, binding): after the refusal the namespace table still works, BEFORE the teardown's ActivateAll could hide a
+      // repair. The list reads, and a namespace created now can be entered from a terminal and over Atelier. A refusal that had let a
+      // ConfigureMapping run inside the route's transaction leaves a table that refuses every new namespace (iris session exits 233,
+      // Atelier answers 500, plan probe P-792).
+      const listed = terminal("%SYS", ['Set rs=##class(%ResultSet).%New("Config.Namespaces:List") Set sc=rs.Execute("*") Write "NSLIST-SC=",sc,!']);
+      expect(outputLines(listed), "Config.Namespaces:List reads").toContain("NSLIST-SC=1");
+      terminal("%SYS", SCRATCH_NAMESPACE_SCRIPT);
+      expect(outputLines(terminal("UNINSTALLNS", ['Write "ENTERED=",$NAMESPACE,!'])), "iris session -U <new namespace> exits 0 and enters it").toContain("ENTERED=UNINSTALLNS");
+      const entered = await fetch(`http://${target.host}:${target.port}/api/atelier/v8/UNINSTALLNS`, {
+        headers: { Accept: "application/json", Authorization: `Basic ${Buffer.from(`${target.username}:${target.password}`).toString("base64")}` },
+        signal: AbortSignal.timeout(60_000),
+      });
+      expect(entered.status, "Atelier GET /api/atelier/v8/<new namespace> answers 200").toBe(200);
     } finally {
       // The leg's own teardown. A configuration write that ran inside the route's transaction is rolled back with it, and IRIS then
       // keeps a namespace table that no namespace created afterwards can be entered through, so the legs that create a namespace
@@ -949,6 +965,78 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     // The oracle can vary: the superuser's Configure succeeds and writes the node.
     terminal("USER", ['Set sc=##class(ExecuteMCPv2.Setup).Configure("USER")']);
     expect(snapshot()["record USER"], "a step that succeeded wrote its node").toContain(`deployed=${embedded.marker};`);
+  });
+
+  leg("DW-770 (Story 45.7): with the install off, a deployed marker with this build's hash and a lower semver reads current, runs, and writes nothing; another hash is refused", async () => {
+    const parsed = stampedEmbedded(embedded);
+    const lower = `${parsed.semver[0]}.${Number(parsed.semver[1]) - 1}.0+${parsed.sequence - 1n}.${parsed.hash}`;
+    const otherHash = parsed.hash === "0123456789ab" ? "ba9876543210" : "0123456789ab";
+    const names = [...embedded.classes.keys()];
+    const readOnly = { IRIS_GOVERNANCE_PRESET: "read-only" };
+
+    // Same hash, lower semver and sequence: current. The custom-REST call runs, nothing is uploaded, compiled or configured.
+    await seedInstance(target, embedded, { marker: lower, perturb: false });
+    const beforeSame = await snapshotInstance(target, names);
+    const stateBeforeSame = snapshot();
+    const same = await runServerCalls("startup", { repoRoot: REPO_ROOT, sdkEsmDir, target }, readOnly, [{ tool: "iris_global_get", args: { global: "Story457Probe" } }]);
+    expect(same.results[0]?.structuredContent?.["code"], "the call was not refused").not.toBe("IRIS_SIDE_NOT_INSTALLED");
+    expect(same.stderr).toContain(
+      `Bootstrap: the automatic install is off for profile "default" (IRIS_GOVERNANCE_PRESET=read-only); found current (the deployed marker "${lower}" has the same IRIS-side classes as this server's ${embedded.marker}), nothing to install.`,
+    );
+    expect(same.stderr, "no Bootstrap warning").not.toMatch(/\[WARN\] Bootstrap:/);
+    expect(await snapshotInstance(target, names), "no document was uploaded or compiled, and the compiled marker is the seeded one").toEqual(beforeSame);
+    expect(beforeSame.compiledMarker).toBe(lower);
+    expect(differences(stateBeforeSame, snapshot()), "nothing was configured either").toEqual([]);
+
+    // Another hash at a lower sequence: stale, refused, nothing written.
+    const other = `${parsed.semver[0]}.${Number(parsed.semver[1]) - 1}.0+${parsed.sequence - 1n}.${otherHash}`;
+    await seedInstance(target, embedded, { marker: other, perturb: false });
+    const beforeOther = await snapshotInstance(target, names);
+    const refused = await runServerCalls("startup", { repoRoot: REPO_ROOT, sdkEsmDir, target }, readOnly, [{ tool: "iris_global_get", args: { global: "Story457Probe" } }]);
+    expect(refused.results[0]?.structuredContent?.["code"], "another hash is refused").toBe("IRIS_SIDE_NOT_INSTALLED");
+    expect(refused.results[0]?.structuredContent?.["found"]).toBe("stale");
+    expect(refused.results[0]?.structuredContent?.["deployedVersion"]).toBe(other);
+    expect(await snapshotInstance(target, names), "nothing was written").toEqual(beforeOther);
+  });
+
+  leg("DW-788 and DW-790 (Story 45.7): an account without %Admin_Manage and without SQL privileges compiles without a false warning, and a refused Configure is reported as one", async () => {
+    await install();
+    terminal("%SYS", [
+      'Set $NAMESPACE="%SYS"',
+      'Set sc=##class(Security.Roles).Create("uninstalllprole1","uninstall gate account","%Development:U,%DB_USER:RW")',
+      'Set sc=##class(Security.Users).Create("uninstalllp1","uninstalllprole1","Pa55word!lp1")',
+    ]);
+    const lp = { ...target, username: "uninstalllp1", password: "Pa55word!lp1" };
+    const installed = snapshot();
+    const names = [...embedded.classes.keys()];
+    const docsBefore = await snapshotInstance(target, names);
+
+    // Installed side, the install on and then off: the probe reads current, the compile check confirms every class through action/index,
+    // and no `Compile failed` line is logged. (Before Story 45.7 the install-on run logged `Compile failed: 35 of 35`, plan probe P-788.)
+    for (const [label, env] of [
+      ["install on", {}],
+      ["install off", { IRIS_AUTO_INSTALL: "false" }],
+    ] as const) {
+      const run = await runServerCalls("startup", { repoRoot: REPO_ROOT, sdkEsmDir, target: lp }, env, []);
+      expect(run.stderr, `${label}: no Compile failed line`).not.toContain("Compile failed");
+      expect(run.stderr, `${label}: no bootstrap error line`).not.toContain("Bootstrap completed with errors");
+      expect(run.stderr, `${label}: the account was not refused`).not.toContain("IRIS_SIDE_NOT_INSTALLED");
+    }
+    expect(await snapshotInstance(target, names), "nothing was uploaded or compiled").toEqual(docsBefore);
+    expect(differences(installed, snapshot()), "nothing was configured").toEqual([]);
+
+    // The web application deleted, the install on: the account cannot register it. IRIS answers HTTP 200 with the status in the row, so the
+    // bootstrap reports `Configure failed:` with IRIS's own text (before Story 45.7 it logged success), and the web application stays absent.
+    terminal("%SYS", [`Set sc=##class(Security.Applications).Delete("${WEBAPP}")`]);
+    const absent = snapshot();
+    expect(absent["webapp"], "precondition: the web application is gone").toBe("0");
+    const failed = await runServerCalls("startup", { repoRoot: REPO_ROOT, sdkEsmDir, target: lp }, {}, []);
+    expect(failed.stderr, "the Configure status of IRIS is reported").toMatch(/Bootstrap completed with errors: .*Configure failed: .*PROTECT/);
+    expect(failed.stderr, "the mapping step reports its refusal too").toContain("Package mapping failed: ");
+    expect(failed.stderr, "the manual instructions follow").toContain("registration requires %Admin_Manage privileges");
+    expect(failed.stderr, "no success line for the web application").not.toContain("Bootstrap: web application configured successfully");
+    expect(snapshot()["webapp"], "the web application stays absent").toBe("0");
+    expect(differences(absent, snapshot()), "nothing else changed").toEqual([]);
   });
 
   leg("least privilege: an account without %Admin_Manage refuses cleanly, each impossible step a failed item with IRIS's text, and nothing is removed", async () => {

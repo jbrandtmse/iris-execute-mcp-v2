@@ -25,7 +25,7 @@ import { atelierPath } from "./atelier.js";
 import { IrisApiError } from "./errors.js";
 import { logger } from "./logger.js";
 import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION, IPM_INSTALL_GUARD, IPM_MODULE_NAME } from "./bootstrap-classes.js";
-import { classifyDeployedMarker, parseBootstrapMarker } from "./bootstrap-version.js";
+import { classifyDeployedMarker, parseBootstrapMarker, sameBootstrapClasses } from "./bootstrap-version.js";
 import type { AutoInstallSource } from "./auto-install.js";
 import type { IrisSideRefusal } from "./errors.js";
 
@@ -72,7 +72,10 @@ const PACKAGE_SEMVER = BOOTSTRAP_VERSION.split("+")[0] as string;
  *    (a lower semver, the same semver with a lower sequence, or a legacy bare
  *    hash). Bootstrap redeploys and recompiles the classes, but skips the
  *    one-time privileged steps (web app registration + package mapping),
- *    because those aren't affected by class-content drift.
+ *    because those aren't affected by class-content drift. With the profile's
+ *    automatic install off, a deployed marker whose hash equals this build's
+ *    reads `current` (or `unconfigured`) whatever its semver and sequence
+ *    (DW-770): the marker then carries `deployedVersion`.
  *
  * - `newer`: the REST service is deployed from a NEWER build than this one.
  *    Bootstrap changes nothing and warns, so an older server on a shared
@@ -84,8 +87,8 @@ const PACKAGE_SEMVER = BOOTSTRAP_VERSION.split("+")[0] as string;
  */
 export type ProbeResult =
   | { status: "missing" }
-  | { status: "current" }
-  | { status: "unconfigured" }
+  | { status: "current"; deployedVersion?: string }
+  | { status: "unconfigured"; deployedVersion?: string }
   | { status: "stale"; deployedVersion: string }
   | { status: "newer"; deployedVersion: string }
   | { status: "foreign"; deployedVersion: string }
@@ -102,7 +105,10 @@ export interface BootstrapResult {
    * instead.
    */
   probeStatus: "missing" | "current" | "unconfigured" | "stale" | "newer" | "foreign" | "unknown";
-  /** The marker found on the instance, when it was `stale`, `newer` or `foreign`. */
+  /**
+   * The marker found on the instance, when it was `stale`, `newer` or `foreign`, and when the install is off and a
+   * marker other than this build's has the same IRIS-side classes (`current` or `unconfigured`, DW-770).
+   */
   deployedVersion?: string;
   /**
    * Why the deployed marker could not be read, or why the IPM ownership of the
@@ -327,6 +333,12 @@ async function ipmOwnership(
  *   webapp registration and package mapping (privileged, one-time
  *   operations) can be skipped.
  *
+ * - With the profile's automatic install off (`config.autoInstall === false`), a deployed marker of any order whose
+ *   content hash equals the embedded one (a restamp: another semver and sequence, or the legacy bare hash) reads like the
+ *   embedded marker itself: `{ status: "current" | "unconfigured", deployedVersion }`, after the same `IsConfigured()`
+ *   check (DW-770, {@link sameBootstrapClasses}). Nothing can be written with the install off, so the classes the tools
+ *   call are the classes this build would install. With the install on, the order above decides, as before.
+ *
  * - Returned marker is NEWER → `{ status: "newer", deployedVersion }`, and
  *   FOREIGN (same semver and sequence with another hash, `dev`, anything
  *   unparseable) → `{ status: "foreign", deployedVersion }`. Neither makes an
@@ -347,12 +359,23 @@ export async function probeCustomRest(
   }
   const deployedVersion = read.marker;
   const classification = classifyDeployedMarker(deployedVersion, BOOTSTRAP_VERSION);
-  if (classification === "older") {
-    return { status: "stale", deployedVersion };
+  // DW-770: with the automatic install off, nothing here can write, so a marker that stamps the SAME IRIS-side classes
+  // (the same content hash) as this build is as good as the build's own marker, whatever its semver or sequence. The
+  // classes are what the tools call; the semver only says which release stamped them. The deployed marker is reported
+  // on the result so the one log line can name both.
+  const sameClassesOff =
+    config.autoInstall === false &&
+    classification !== "current" &&
+    sameBootstrapClasses(deployedVersion, BOOTSTRAP_VERSION);
+  if (!sameClassesOff) {
+    if (classification === "older") {
+      return { status: "stale", deployedVersion };
+    }
+    if (classification === "newer" || classification === "foreign") {
+      return { status: classification, deployedVersion };
+    }
   }
-  if (classification === "newer" || classification === "foreign") {
-    return { status: classification, deployedVersion };
-  }
+  const carried = sameClassesOff ? { deployedVersion } : {};
   // The marker matches, but that only proves the classes are present —
   // not that the privileged web-app registration ever completed.
   // Verify the actual configured state before declaring "current".
@@ -364,9 +387,9 @@ export async function probeCustomRest(
     // deployment, so a throw here means an indeterminate SQL/infra
     // failure — not evidence the web app is absent. Preserve the
     // fast skip path rather than re-attempting privileged steps.
-    return { status: "current" };
+    return { status: "current", ...carried };
   }
-  return configured ? { status: "current" } : { status: "unconfigured" };
+  return configured ? { status: "current", ...carried } : { status: "unconfigured", ...carried };
 }
 
 /**
@@ -514,11 +537,12 @@ function assertClassDocuments(names: readonly string[]): void {
  * - the class dictionary has a compiled class for it (`%Dictionary.CompiledClass`);
  * - that compiled class carries no compile error (`ClassCompileError`);
  * - Atelier's `docnames` lists the class with `upd` true, which is IRIS's own up-to-date judgment (it also holds for a
- *   rollback to identical content, and is false for a class skipped because a dependency failed).
+ *   rollback to identical content, and is false for a class skipped because a dependency failed). For a class the filtered
+ *   list leaves out (it is empty for an account without SQL privileges, DW-788), Atelier's `action/index` carries the same flag.
  *
- * The reads: one `action/query` over the dictionary per {@link COMPILE_CHECK_BATCH} names, and one `docnames/CLS?filter=` GET
- * per distinct first name segment (the package root) of `names`. Returns the documents that are not confirmed, in the order of
- * `names`.
+ * The reads: one `action/query` over the dictionary per {@link COMPILE_CHECK_BATCH} names, one `docnames/CLS?filter=` GET
+ * per distinct first name segment (the package root) of `names`, and one `POST action/index` per {@link COMPILE_CHECK_BATCH}
+ * of the names that list did not contain. Returns the documents that are not confirmed, in the order of `names`.
  *
  * @throws {Error} When a name does not end in `.cls`, and whatever the two requests throw: a check that cannot run is never
  *   a pass.
@@ -558,6 +582,13 @@ export async function verifyCompiled(
  * The lower-cased names of the documents of `category` that IRIS lists as up to date (`upd: true`): one
  * `docnames/<category>?filter=` GET per distinct first name segment (the package root) of `stems` (document names without
  * their extension). The filter is a "name contains" read, so the entries of other packages come back too; the callers match by name.
+ *
+ * DW-788: the filtered list runs as SQL on `%Studio.OpenDialogItems`, and IRIS answers it with zero entries (no error) for an
+ * account without SQL privileges (plan probe P-788, 2026-11-26). So for the stems that no listed entry names, one
+ * `POST action/index` per {@link COMPILE_CHECK_BATCH} documents reads the same `upd` flag per document, which needs no SQL
+ * privilege (probe P-788/P-X: identical to the list's flag for `_SYSTEM`, and 409 KB for the 35 bootstrap classes against 1.7 MB
+ * for the unfiltered list). With an account that sees the list, every stem is listed and no index request is sent. A document
+ * that does not exist comes back with an error `status` and no `upd`, so it stays unconfirmed.
  */
 async function upToDateDocuments(
   http: IrisHttpClient,
@@ -567,12 +598,24 @@ async function upToDateDocuments(
   stems: readonly string[],
 ): Promise<Set<string>> {
   const updated = new Set<string>();
+  const listedNames = new Set<string>();
   const roots = [...new Set(stems.map((stem) => stem.split(".")[0] as string))];
   for (const root of roots) {
     const listed = await http.get(
       atelierPath(version, namespace, `docnames/${category}?filter=${encodeURIComponent(`${root}.`)}`),
     );
     const entries = (listed.result as { content?: Array<Record<string, unknown>> } | undefined)?.content;
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      listedNames.add(String(entry["name"]).toLowerCase());
+      if (entry["upd"] === true) updated.add(String(entry["name"]).toLowerCase());
+    }
+  }
+
+  const extension = category === "CLS" ? "cls" : "mac";
+  const unlisted = stems.map((stem) => `${stem}.${extension}`).filter((name) => !listedNames.has(name.toLowerCase()));
+  for (let start = 0; start < unlisted.length; start += COMPILE_CHECK_BATCH) {
+    const indexed = await http.post(atelierPath(version, namespace, "action/index"), unlisted.slice(start, start + COMPILE_CHECK_BATCH));
+    const entries = (indexed.result as { content?: Array<Record<string, unknown>> } | undefined)?.content;
     for (const entry of Array.isArray(entries) ? entries : []) {
       if (entry["upd"] === true) updated.add(String(entry["name"]).toLowerCase());
     }
@@ -591,7 +634,9 @@ async function upToDateDocuments(
  * Only `.mac` documents are judged. The flag of an include file (`.inc`) is true whether or not anything compiled it, and the
  * flag of an `.int` is true after a failed compile too (same probe), so neither can be decided from it.
  *
- * One `docnames/RTN?filter=` GET per distinct first name segment. Returns the unconfirmed documents in the order of `names`.
+ * One `docnames/RTN?filter=` GET per distinct first name segment, then one `POST action/index` per {@link COMPILE_CHECK_BATCH}
+ * of the routines that list did not contain (DW-788: it is empty for an account without SQL privileges). Returns the
+ * unconfirmed documents in the order of `names`.
  *
  * @throws {Error} When a name does not end in `.mac`, and whatever the requests throw: a check that cannot run is never a pass.
  */
@@ -731,20 +776,45 @@ async function compileEmbedded(
 }
 
 /**
+ * Run one `Setup` procedure that returns a `%Status` and judge its row (DW-790). The procedure's own failure is not an HTTP
+ * or SQL failure: Atelier answers HTTP 200 with the status in the row, so a refused call (a missing privilege, a failed
+ * step) used to read as a success. The query wraps the call in `%ODBCOUT(...)`, which renders the status as `"1"` for
+ * success and as IRIS's own failure text otherwise (probe P-X, 2026-11-26: `_SYSTEM` `"1"`; an account without
+ * `%Admin_Manage` `"خطأ #5002: ObjectScript error: <PROTECT>Configure+9^ExecuteMCPv2.Setup.1 ..."`, here shortened; the
+ * message table is localized, Rule #13). Success is the value `"1"` (or the number 1).
+ *
+ * @throws {Error} Carrying the row text on one line (at most 300 characters), or "returned no status" when the response has
+ *   no row or no value. A request that fails throws its own error, unchanged.
+ */
+async function runStatusProcedure(
+  http: IrisHttpClient,
+  config: IrisConnectionConfig,
+  version: number,
+  procedure: "Configure" | "ConfigureMapping",
+  column: "ConfigureResult" | "MappingResult",
+): Promise<void> {
+  const path = atelierPath(version, config.namespace, "action/query");
+  const body = {
+    query: `SELECT %ODBCOUT(ExecuteMCPv2.Setup_${procedure}(?)) AS ${column}`,
+    parameters: [config.namespace],
+  };
+  const response = await http.post(path, body);
+  const content = (response.result as { content?: Array<Record<string, unknown>> } | undefined)?.content;
+  const value = Array.isArray(content) && content.length > 0 ? (content[0] as Record<string, unknown>)[column] : undefined;
+  if (value === undefined || value === null || String(value) === "") throw new Error("returned no status");
+  if (String(value) !== "1") throw new Error(oneLine(String(value), 300));
+}
+
+/**
  * Register the web application by calling `ExecuteMCPv2.Setup_Configure()`
- * via the Atelier SQL endpoint.
+ * via the Atelier SQL endpoint. Throws when IRIS answers a failure status in the row (DW-790).
  */
 export async function configureWebApp(
   http: IrisHttpClient,
   config: IrisConnectionConfig,
   version: number,
 ): Promise<void> {
-  const path = atelierPath(version, config.namespace, "action/query");
-  const body = {
-    query: "SELECT ExecuteMCPv2.Setup_Configure(?) AS ConfigureResult",
-    parameters: [config.namespace],
-  };
-  await http.post(path, body);
+  await runStatusProcedure(http, config, version, "Configure", "ConfigureResult");
 }
 
 /**
@@ -788,19 +858,15 @@ export async function ensureUnitTestRoot(
 /**
  * Map the ExecuteMCPv2 package to %All namespace so compiled routines
  * (including I/O redirect mnemonic labels) are available in every namespace.
- * This enables cross-namespace `iris_execute_command` with I/O capture.
+ * This enables cross-namespace `iris_execute_command` with I/O capture. Throws when IRIS answers a failure status in
+ * the row (DW-790).
  */
 export async function configurePackageMapping(
   http: IrisHttpClient,
   config: IrisConnectionConfig,
   version: number,
 ): Promise<void> {
-  const path = atelierPath(version, config.namespace, "action/query");
-  const body = {
-    query: "SELECT ExecuteMCPv2.Setup_ConfigureMapping(?) AS MappingResult",
-    parameters: [config.namespace],
-  };
-  await http.post(path, body);
+  await runStatusProcedure(http, config, version, "ConfigureMapping", "MappingResult");
 }
 
 /**
@@ -958,9 +1024,9 @@ export function buildIrisSideRefusal(config: IrisConnectionConfig, result: Boots
     (found === "unconfigured"
       ? "No restart is needed: this server checks the web application again on every call. "
       : "Then restart this server: the refusal is decided when the profile connects. ") +
-    "After every upgrade of the servers (each release stamps its version into the IRIS-side classes), an instance that only " +
-    "read-only servers, or servers with the automatic install off, connect to needs this once: upgrading the IRIS side is a " +
-    "deliberate admin step.";
+    "After a release that changes the IRIS-side classes (the release's CHANGELOG says so in its IRIS side section: " +
+    "BOOTSTRAP_VERSION moves), an instance that only read-only servers, or servers with the automatic install off, connect to " +
+    "needs this once: upgrading the IRIS side is a deliberate admin step.";
   return {
     text,
     fields: {
@@ -991,15 +1057,15 @@ function warnCustomRestRefused(config: IrisConnectionConfig, result: BootstrapRe
 
 /**
  * The one startup warning of a profile whose install is off and whose probe read `unconfigured` (DW-772): the classes
- * are current, but the web application could not be confirmed, which an account that cannot read `%SYS` also reads.
- * The tools go on; nothing was changed. No credential is named.
+ * are current, but the web application lookup failed or the web application is not registered (DW-791: since Story 45.6
+ * an `unconfigured` reading means one of the two). The tools go on; nothing was changed. No credential is named.
  */
 function warnWebAppUnconfirmed(config: IrisConnectionConfig, source: AutoInstallSource): void {
   const namespace = config.namespace;
   logger.warn(
     `Bootstrap: the ExecuteMCPv2 classes in '${namespace}' on ${config.host}:${config.port} are current, but this server ` +
       `could not confirm that the /api/executemcp/v2 web application is registered (profile "${profileNameOf(config)}"). ` +
-      "The account may not be able to read %SYS, or the web application is not registered. " +
+      "The web application lookup failed, or the web application is not registered. " +
       `The automatic install is off for this profile (${autoInstallLabel(source)}), so nothing was changed and the custom-REST tools go on. ` +
       `If they answer 404, an operator runs Do ##class(ExecuteMCPv2.Setup).Configure("${namespace}") as a user with %Admin_Manage, ` +
       `or starts one server against ${config.host}:${config.port} ${autoInstallWayOut(source)}.`,
@@ -1007,10 +1073,15 @@ function warnWebAppUnconfirmed(config: IrisConnectionConfig, source: AutoInstall
 }
 
 /** The one startup line of a profile whose install is off and whose deployment is left as today (nothing to refuse). */
-function logAutoInstallOff(config: IrisConnectionConfig, source: AutoInstallSource, found: string): void {
+function logAutoInstallOff(config: IrisConnectionConfig, source: AutoInstallSource, found: string, sameClassesAs?: string): void {
+  // DW-770: a `current` reading over a deployed marker other than this build's names both markers.
+  const finding =
+    sameClassesAs === undefined
+      ? found
+      : `${found} (the deployed marker ${JSON.stringify(sameClassesAs)} has the same IRIS-side classes as this server's ${BOOTSTRAP_VERSION})`;
   logger.info(
     `Bootstrap: the automatic install is off for profile "${profileNameOf(config)}" (${autoInstallLabel(source)}); ` +
-      `found ${found}, nothing to install.`,
+      `found ${finding}, nothing to install.`,
   );
 }
 
@@ -1234,10 +1305,14 @@ async function leftToIpm(
  *    plus one `[INFO]` line. On `missing` and `stale` (after the ownership read of step 9) nothing
  *    is uploaded, compiled or configured; the result carries `customRestRefused: true`, one `[WARN]` is logged,
  *    and the caller arms the client's refusal ({@link buildIrisSideRefusal}). On `unconfigured` (same ownership
- *    read) nothing is written either, but the tools go on (DW-772: a least-privilege account cannot read `%SYS`, so the
- *    reading cannot tell "not registered" apart): the result carries `webAppUnconfirmed: true`, one `[WARN]` is
- *    logged, and the caller arms a refusal that the client raises only on the HTML 404 of an absent web application.
- *    `autoInstallOff` names the channel; all three fields are absent with the install on.
+ *    read) nothing is written either, but the tools go on (DW-772, DW-791: since Story 45.6 the reading means the
+ *    web application lookup failed or the web application is absent, and the lookup can fail for a reason other than
+ *    absence): the result carries `webAppUnconfirmed: true`, one `[WARN]` is logged, and the caller arms a refusal that
+ *    the client raises only on the HTML 404 of an absent web application.
+ *    `autoInstallOff` names the channel; all three fields are absent with the install on. With the install off, a
+ *    deployed marker whose hash equals this build's reads `current` (or `unconfigured`) whatever its semver and
+ *    sequence (DW-770), `deployedVersion` names it, and the one `[INFO]` line names both markers; a different hash is
+ *    refused as before.
  *
  * If the configure step fails (e.g. insufficient privileges), the result
  * includes manual instructions but does not throw. Because the probe checks
@@ -1295,13 +1370,17 @@ export async function bootstrap(
   if (probe.status === "stale") {
     result.deployedVersion = probe.deployedVersion;
   }
+  // DW-770: the install is off and a marker other than this build's stamps the same classes.
+  if ((probe.status === "current" || probe.status === "unconfigured") && probe.deployedVersion !== undefined) {
+    result.deployedVersion = probe.deployedVersion;
+  }
 
   // If already current (deployed version matches embedded version), skip the deploy. The marker and the web application
   // prove neither that an earlier start's compile finished nor that every class compiled, so the same check that follows
   // a compile runs here too (two reads, no compile): a partial failure is reported again until it is fixed.
   if (probe.status === "current") {
     // `current` already sends reads only, so the install being off changes nothing here but one line.
-    if (off !== undefined) logAutoInstallOff(config, off, probe.status);
+    if (off !== undefined) logAutoInstallOff(config, off, probe.status, probe.deployedVersion);
     result.deployed = true;
     const names = [...BOOTSTRAP_CLASSES.keys()];
     let notCompiled: string[];
@@ -1329,7 +1408,11 @@ export async function bootstrap(
   // Every path below writes. An IPM installation owns its classes, so it is never written over; an
   // ownership that cannot be read is not a licence to write either.
   const probedMarker =
-    probe.status === "stale" ? probe.deployedVersion : probe.status === "unconfigured" ? BOOTSTRAP_VERSION : undefined;
+    probe.status === "stale"
+      ? probe.deployedVersion
+      : probe.status === "unconfigured"
+        ? (probe.deployedVersion ?? BOOTSTRAP_VERSION)
+        : undefined;
 
   // Install off (Story 45.2): the ownership read runs where the write paths run it, and nothing is written whatever it
   // finds. An IPM installation, or an ownership that cannot be read, is left as today (one warning, the tools go on).
@@ -1340,9 +1423,11 @@ export async function bootstrap(
       logAutoInstallOff(config, off, result.probeStatus);
       return result;
     }
-    // An `unconfigured` reading cannot tell "not registered" from "this account cannot read %SYS" (DW-772): the marker
-    // matched, so no older class can run, and the tools go on. A call refuses only if the web application then answers
-    // the 404 of an absent application (the client's `refuseCustomRestWhenAbsent`).
+    // An `unconfigured` reading means the web application lookup failed or the web application is absent (DW-772, DW-791:
+    // since Story 45.6 `IsConfigured` answers for an account that cannot read %SYS, so that account no longer reads this).
+    // The lookup can still fail for another reason, so the tools go on: the marker matched, so no older class can run. A
+    // call refuses only if the web application then answers the 404 of an absent application (the client's
+    // `refuseCustomRestWhenAbsent`).
     if (probe.status === "unconfigured") {
       result.webAppUnconfirmed = true;
       warnWebAppUnconfirmed(config, off);

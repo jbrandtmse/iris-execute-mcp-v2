@@ -313,6 +313,47 @@ describe("iris_sql_analyze — advise action (Story 28.3 wiring)", () => {
     expect(result.structuredContent).toBeUndefined();
   });
 
+  // DW-793: the statement text below is a row of INFORMATION_SCHEMA.STATEMENTS as captured 2026-11-26 on IRIS Community
+  // 2026.2 Build 221U (SELECT TOP 12 Statement ... ORDER BY Timestamp DESC): dynamic SQL is stored wrapped in a DECLARE,
+  // and EXPLAIN of the wrapped form answers "EXPLAIN does not support the following SQL statement type: DECLARE".
+  it("workload mode: a stored 'DECLARE <cursor> CURSOR FOR <select>' statement is advised as its SELECT (DW-793)", async () => {
+    const select = "SELECT SSN , NAME FROM P793 . PERSON WHERE NAME > ? ORDER BY SSN";
+    routeWorkloadCalls({
+      statements: ["DECLARE QRS CURSOR FOR " + select],
+      failForStatement: (q) => q.startsWith("DECLARE"),
+    });
+
+    const result = await sqlAnalyzeTool.handler({ action: "advise", workload: true }, ctx);
+
+    expect(result.isError).toBeUndefined();
+    expect((result.structuredContent as StructuredAdvise).analyzed).toEqual({ statements: 1, skipped: 0 });
+    const adviseCall = mockHttp.post.mock.calls.find((c) => String(c[0]) === ADVISE_DATA_PATH);
+    expect((adviseCall?.[1] as { query: string }).query).toBe(select);
+  });
+
+  // DW-793: the text is the live reply of the advise-data route for an account without SQL privilege on the
+  // table (captured 2026-11-26, IRIS Community 2026.2 Build 221U, account with %Development:U and no SQL grants:
+  // POST /api/executemcp/v2/dev/sql/advise-data -> status.errors[0].error below).
+  it("workload mode: an all-statements failure caused by SQL privilege says so and quotes IRIS's text (DW-793)", async () => {
+    const irisText = "ERROR #5001: EXPLAIN failed: User p793lp is not privileged for the operation";
+    mockHttp.post.mockImplementation(async (path: unknown) => {
+      const p = String(path);
+      if (p === ATELIER_QUERY_PATH) {
+        return envelope({ content: [{ Statement: "SELECT 1" }, { Statement: "SELECT 2" }] });
+      }
+      throw new IrisApiError(400, [{ error: irisText }], ADVISE_DATA_PATH, irisText);
+    });
+
+    const result = await sqlAnalyzeTool.handler({ action: "advise", workload: true }, ctx);
+
+    expect(result.isError).toBe(true);
+    const text = result.content[0]?.text ?? "";
+    expect(text).toContain("First failure: " + irisText);
+    expect(text).toContain("EXPLAIN for 2 of them");
+    expect(text).toContain("no SQL privilege");
+    expect(text).toContain("by design");
+  });
+
   it("workload mode: a PARTIAL failure (some analyzed, some errored) is unaffected -- still the existing benign aggregate, not isError", async () => {
     const stmtOk = "SELECT ID FROM ExecuteMCPv2_Tests.AdvisorFixture WHERE UnindexedCol = ?";
     const stmtFails = "SET SOMETHING = 1";

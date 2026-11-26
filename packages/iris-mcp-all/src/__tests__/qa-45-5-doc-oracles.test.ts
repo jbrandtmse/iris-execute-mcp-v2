@@ -312,8 +312,11 @@ describe("Story 45.5 QA: DW-773, a least-privilege account with the automatic in
   it("the README states exactly the two outcomes, only shipped behavior, and the one-time administrator install with the upgrade caveat", () => {
     const paragraph = squash(section.slice(section.indexOf("**A least-privilege account and the automatic install.**"), section.indexOf("\n---")));
     // Story 45.6 (DW-773): this outcome now belongs to a web application that is not registered; an installed side reads `current`.
-    expect(paragraph).toContain("The web application is not registered, install on: every connect recompiles the classes, and the web application step fails with a warning that says `registration requires %Admin_Manage privileges`. The tools run.");
-    expect(paragraph).toContain("After an upgrade of the servers, repeat the install once: see [Installs nothing on IRIS](#read-only-mode--point-it-at-production-with-one-environment-variable).");
+    // Story 45.7 (DW-790): the bootstrap reads Configure's status, so the failure is logged with IRIS's text before the manual instructions.
+    expect(paragraph).toContain("The web application is not registered, install on: every connect recompiles the classes, and the web application step fails.");
+    expect(paragraph).toContain("followed by the manual instructions, which say `registration requires %Admin_Manage privileges`. The result reports `configured: false`, and the web application stays absent. The tools run.");
+    // Story 45.7 (DW-770): only a release that changes the IRIS-side classes asks for the one-time install again.
+    expect(paragraph).toContain("After a release that changes the IRIS-side classes (its CHANGELOG says so in its IRIS side section), repeat the install once: see [Installs nothing on IRIS](#read-only-mode--point-it-at-production-with-one-environment-variable).");
     // Only the shipped behavior: no promise of a fix and no "will".
     expect(paragraph).not.toMatch(/\bwill (?:be|soon|later)\b|\bplanned\b|\bin a future\b|\bfixed in\b|\bDW-77\d\b/i);
     // The probe the sentences rest on is recorded (Rule #36).

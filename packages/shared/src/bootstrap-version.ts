@@ -98,3 +98,18 @@ export function classifyDeployedMarker(deployed: string, embedded: string): Depl
   if (bySequence !== 0) return bySequence < 0 ? "older" : "newer";
   return deployedMarker.hash === embeddedMarker.hash ? "current" : "foreign";
 }
+
+/**
+ * Whether the deployed marker names the same IRIS-side classes as the embedded one: the 12-character content hash of a
+ * stamped or legacy deployed marker equals the hash of the stamped embedded marker, whatever the semver and the sequence
+ * (DW-770). The hash is the content of the bootstrapped classes; the semver and the sequence only say which release
+ * stamped them. The `dev` placeholder, an unparseable deployed value and an embedded marker that is not stamped never
+ * match. This is a predicate beside {@link classifyDeployedMarker}; it orders nothing.
+ */
+export function sameBootstrapClasses(deployed: string, embedded: string): boolean {
+  const embeddedMarker = parseBootstrapMarker(embedded);
+  if (embeddedMarker.kind !== "stamped") return false;
+  const deployedMarker = parseBootstrapMarker(deployed);
+  if (deployedMarker.kind === "unparseable") return false;
+  return deployedMarker.hash === embeddedMarker.hash;
+}

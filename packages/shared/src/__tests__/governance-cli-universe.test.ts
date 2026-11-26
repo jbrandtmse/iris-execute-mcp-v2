@@ -534,11 +534,11 @@ describe("universe — usage errors and text mode", () => {
 // ── Story 45.4: the block data-policy seed (decision #169, D5) ──────────
 
 describe("universe — the block data-policy seed", { timeout: 60_000 }, () => {
-  it("IRIS_DATA_POLICY=block: all 12 covered keys are false with source dataPolicy, over the real built universe", async () => {
+  it("IRIS_DATA_POLICY=block: all 15 covered keys are false with source dataPolicy, over the real built universe", async () => {
     const { code, json } = await runUniverseJson([], { IRIS_DATA_POLICY: "block" });
     expect(code).toBe(0);
     expect((json as UniverseJson & { dataPolicy?: string }).dataPolicy).toBe("block");
-    expect(DATA_POLICY_BLOCK_KEYS).toHaveLength(12);
+    expect(DATA_POLICY_BLOCK_KEYS).toHaveLength(15);
     for (const key of DATA_POLICY_BLOCK_KEYS) {
       expect(json.keys, `universe holds ${key}`).toContain(key);
       expect(json.policy[key], key).toBe(false);

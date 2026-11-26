@@ -20,7 +20,7 @@
  */
 
 /** The date the classification is exhaustive as of. */
-export const DATA_POLICY_SCOPE_DATE = "2026-11-25";
+export const DATA_POLICY_SCOPE_DATE = "2026-11-26";
 
 export type DataPolicyScope = "governed" | "residual" | "notApplicable";
 
@@ -97,7 +97,14 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
 
   ["iris_sql_execute", residual("Runs caller-supplied SQL, which can select message-body columns. Restrict it with its governance key or IRIS_SQL_READ_ONLY.", "off")],
   ["iris_sql_query", residual("Runs caller-supplied SELECTs, which can select message-body columns. Restrict it with its governance key.", "off")],
-  ["iris_sql_analyze", residual("Returns plans and statistics for caller-supplied SQL, which can echo literals. Restrict it with its governance key.")],
+  [
+    "iris_sql_analyze",
+    residual(
+      "Returns plans and statistics for caller-supplied SQL, which can echo literals; stats returns the statement text of other sessions' statements, running their bound parameters, and advise in workload mode quotes retained literals (plan probe P-784, Story 45.7). Block turns those three actions off; explain and indexUsage stay on. Restrict it with its governance key.",
+      "off",
+      ["stats", "running", "advise"],
+    ),
+  ],
   ["iris_global_get", residual("Reads any global node, message bodies included. Restrict it with its governance key.", "off")],
   [
     "iris_global_list",

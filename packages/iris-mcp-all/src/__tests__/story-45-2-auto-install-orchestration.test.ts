@@ -100,6 +100,11 @@ function workIn(window: readonly FakeRequest[]): string[] {
     .map((request) => `${request.method} ${request.url}`);
 }
 
+/** Another content hash than `hash`: the same 12 lowercase hex characters, never equal to it. */
+function otherHash(hash: string): string {
+  return hash === "0123456789ab" ? "ba9876543210" : "0123456789ab";
+}
+
 function warnLines(stderr: string): string[] {
   return stderr.split(/\r?\n/).filter((line) => line.startsWith("[WARN] Bootstrap:"));
 }
@@ -164,8 +169,10 @@ describe("Story 45.2: the install off, on a missing and on a stale IRIS side", (
             const fake = await startFake();
             let seededMarker: string | undefined;
             if (side === "stale") {
+              // An OLDER marker of OTHER classes (another hash): with the install off a marker that carries this build's hash
+              // reads `current` since Story 45.7 (DW-770), so the stale fixture must differ in hash.
               const parsed = stampedEmbedded(embedded);
-              seededMarker = `${parsed.semver.join(".")}+${parsed.sequence - 1n}.${parsed.hash}`;
+              seededMarker = `${parsed.semver.join(".")}+${parsed.sequence - 1n}.${otherHash(parsed.hash)}`;
               await seedInstance(targetOf(fake), embedded, { marker: seededMarker, perturb: true });
             }
             const docsBefore = new Map([...fake.state.docs].map(([name, doc]) => [name, doc.lines.join("\n")]));
@@ -307,7 +314,9 @@ describe("Story 45.2: the other branches with the install off", () => {
           const warnings = warnLines(run.stderr);
           expect(warnings, "exactly one warning").toHaveLength(1);
           expect(warnings[0]).toContain("could not confirm that the /api/executemcp/v2 web application is registered");
-          expect(warnings[0]).toContain("The account may not be able to read %SYS, or the web application is not registered.");
+          // DW-791: the 45.6 behavior (the lookup failed, or the web application is absent), not the pre-45.6 account wording.
+          expect(warnings[0]).toContain("The web application lookup failed, or the web application is not registered.");
+          expect(warnings[0]).not.toContain("may not be able to read %SYS");
           expect(run.stderr).not.toContain("IRIS_SIDE_NOT_INSTALLED");
           assertNoPassword(run);
         },
@@ -328,6 +337,25 @@ describe("Story 45.2: the other branches with the install off", () => {
     expect(summarizeRequests(window).queries.some((query) => query.includes("%Dictionary.ClassDefinition")), "the compile check ran").toBe(true);
     expect(run.stderr).toContain('Bootstrap: the automatic install is off for profile "default" (IRIS_GOVERNANCE_PRESET=read-only); found current, nothing to install.');
     expect(warnLines(run.stderr)).toEqual([]);
+  }, TEST_TIMEOUT_MS);
+
+  it("DW-770, same classes at a lower semver (a restamp): current, not refused, zero writes, one INFO line naming both markers", async () => {
+    const fake = await startFake();
+    const parsed = stampedEmbedded(embedded);
+    const deployed = `${parsed.semver[0]}.${Number(parsed.semver[1]) - 1}.0+${parsed.sequence - 1n}.${parsed.hash}`;
+    await seedInstance(targetOf(fake), embedded, { marker: deployed, perturb: false });
+
+    const { run, window } = await runOff(fake, "startup", preset);
+
+    expect(writesIn(window)).toEqual([]);
+    expect(customRestIn(window).length, "the call went out").toBeGreaterThan(0);
+    expect(run.results[0]?.structuredContent?.["code"]).not.toBe("IRIS_SIDE_NOT_INSTALLED");
+    expect(run.stderr).toContain(
+      'Bootstrap: the automatic install is off for profile "default" (IRIS_GOVERNANCE_PRESET=read-only); ' +
+        `found current (the deployed marker "${deployed}" has the same IRIS-side classes as this server's ${embedded.marker}), nothing to install.`,
+    );
+    expect(warnLines(run.stderr)).toEqual([]);
+    // mutation: the same-hash rule dropped from `probeCustomRest` (built shared dist) -> the call is refused with IRIS_SIDE_NOT_INSTALLED.
   }, TEST_TIMEOUT_MS);
 
   it("unknown (the version read fails over an existing Setup class): no write, exactly one warning, and a custom-REST call is NOT refused", async () => {
@@ -365,7 +393,7 @@ describe("Story 45.2: an older marker whose ownership read fails, with the insta
         async () => {
           const fake = await startFake();
           const parsed = stampedEmbedded(embedded);
-          const seededMarker = `${parsed.semver.join(".")}+${parsed.sequence - 1n}.${parsed.hash}`;
+          const seededMarker = `${parsed.semver.join(".")}+${parsed.sequence - 1n}.${otherHash(parsed.hash)}`;
           await seedInstance(targetOf(fake), embedded, { marker: seededMarker, perturb: true });
           fake.failGuardRead = true;
           const docsBefore = new Map([...fake.state.docs].map(([name, doc]) => [name, doc.lines.join("\n")]));

@@ -85,8 +85,8 @@ function tableRows(section: string): Map<string, string> {
 }
 
 describe("the PHI data policy scope (Story 39.2, AC-6)", () => {
-  it("names 2026-11-25 as the date the classification is exhaustive as of (Story 45.4 moved it from 2026-10-17)", () => {
-    expect(DATA_POLICY_SCOPE_DATE).toBe("2026-11-25");
+  it("names 2026-11-26 as the date the classification is exhaustive as of (Story 45.4 moved it from 2026-10-17 to 2026-11-25, Story 45.7 to 2026-11-26)", () => {
+    expect(DATA_POLICY_SCOPE_DATE).toBe("2026-11-26");
   });
 
   it("gives every tool name of the suite exactly one row, and no row names a tool that does not exist", async () => {
@@ -163,9 +163,9 @@ describe("what block turns off (Story 45.4, AC 45.4.1; decision #169; Rules #44 
     }
   });
 
-  it("the off rows, with their actions, are exactly DATA_POLICY_BLOCK_KEYS: the same 12 keys", async () => {
+  it("the off rows, with their actions, are exactly DATA_POLICY_BLOCK_KEYS: the same 15 keys", async () => {
     const declared = await declaredBlockKeys();
-    expect(declared).toHaveLength(12);
+    expect(declared).toHaveLength(15);
     expect(offKeys().sort()).toEqual([...declared].sort());
   });
 

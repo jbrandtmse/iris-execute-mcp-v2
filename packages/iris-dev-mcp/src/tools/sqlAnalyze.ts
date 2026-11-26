@@ -154,6 +154,10 @@ const ADVISE_DATA_PATH = `${BASE_URL}/dev/sql/advise-data`;
 const DEFAULT_ADVISE_TOPN = 5;
 const MAX_ADVISE_TOPN = 20;
 
+/** `INFORMATION_SCHEMA.STATEMENTS` stores dynamic SQL as `DECLARE <cursor> CURSOR FOR <select>` (IRIS 2026.2),
+ *  and `EXPLAIN` rejects a `DECLARE`; the workload mode advises the wrapped SELECT. */
+const DECLARE_CURSOR_PREFIX = /^DECLARE\s+\S+\s+CURSOR\s+FOR\s+/i;
+
 /**
  * Ensure a value is a record suitable for MCP `structuredContent` (never a
  * bare array). Local copy — mirrors `iris-data-mcp/docdb.ts`'s `toStructured`;
@@ -338,6 +342,8 @@ async function handleAdvise(
     // `errorCount` additionally lets the all-failed case below be told apart
     // from the all-blank case (neither of which is a "no problems found").
     let errorCount = 0;
+    let firstErrorMessage = "";
+    let privilegeRefusedCount = 0;
     for (const row of rows) {
       const stmt = String((row as Record<string, unknown>).Statement ?? "").trim();
       if (stmt === "") {
@@ -345,7 +351,7 @@ async function handleAdvise(
         continue;
       }
       try {
-        const { findings, notes } = await adviseStatement(ctx, ns, stmt);
+        const { findings, notes } = await adviseStatement(ctx, ns, stmt.replace(DECLARE_CURSOR_PREFIX, ""));
         for (const f of findings) allFindings.push(f);
         for (const n of notes) noteSet.add(n);
         analyzedCount++;
@@ -360,6 +366,8 @@ async function handleAdvise(
         if (error instanceof IrisApiError) {
           skippedCount++;
           errorCount++;
+          if (firstErrorMessage === "") firstErrorMessage = error.message;
+          if (/not privileged/i.test(error.message)) privilegeRefusedCount++;
           continue;
         }
         throw error;
@@ -384,8 +392,18 @@ async function handleAdvise(
             text:
               `The advisor could not analyze any of the ${errorCount} recent statement(s) — ` +
               `every 'advise-data' call failed. Checked ${rows.length} recent statement(s) ` +
-              `(top ${topNValue}). Try 'query' mode with a specific SQL statement to see the ` +
-              "underlying error.",
+              `(top ${topNValue}). ` +
+              (firstErrorMessage === ""
+                ? ""
+                : `First failure: ${firstErrorMessage.replace(/\s+/g, " ").trim().slice(0, 300)}. `) +
+              (privilegeRefusedCount > 0
+                ? `IRIS refused the EXPLAIN for ${privilegeRefusedCount} of them because this account ` +
+                  "has no SQL privilege on the tables they read (an IRIS SQL privilege check, by " +
+                  "design)" +
+                  (privilegeRefusedCount < errorCount ? "; the others failed for the reasons IRIS gave" : "") +
+                  ". Grant the SQL privilege, or use " +
+                  "'query' mode on a table this account may read."
+                : "Try 'query' mode with a specific SQL statement to see the underlying error."),
           },
         ],
         isError: true,

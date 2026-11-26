@@ -147,8 +147,8 @@ describe("Story 40.1: tool_support.md", () => {
     expect(squash(toolSupport)).toContain("85 of the 110 tools (77% of the suite) stop working");
   });
 
-  it("classifies iris_test_coverage in the PHI scope table as residual, with the table dated 2026-11-25 (moved from 2026-10-17 by Story 45.4, which added the Under block column)", () => {
-    expect(toolSupport).toContain("## PHI data policy scope (as of 2026-11-25)");
+  it("classifies iris_test_coverage in the PHI scope table as residual, with the table dated 2026-11-26 (moved to 2026-11-25 by Story 45.4, which added the Under block column, and to 2026-11-26 by Story 45.7)", () => {
+    expect(toolSupport).toContain("## PHI data policy scope (as of 2026-11-26)");
     expect(lineStarting(toolSupport, "| `iris_test_coverage` | residual")).toBe(
       "| `iris_test_coverage` | residual | off | Returns the text of unit-test results, which can quote data. |",
     );

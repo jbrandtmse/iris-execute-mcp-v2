@@ -264,7 +264,8 @@ describe("Story 45.5: the read-only preset, SQL privileges and the five setup pr
 describe("Story 45.5: the data policy, the audit log and a least-privilege account (DW-784, DW-773)", () => {
   it("the `block` list equals DATA_POLICY_BLOCK_KEYS of the built shared dist, in order", async () => {
     const { DATA_POLICY_BLOCK_KEYS } = await loadSharedDist<{ DATA_POLICY_BLOCK_KEYS: readonly string[] }>("data-policy.js");
-    expect(DATA_POLICY_BLOCK_KEYS).toHaveLength(12);
+    // 12 keys of Story 45.4, and the three iris_sql_analyze keys of Story 45.7 (DW-784).
+    expect(DATA_POLICY_BLOCK_KEYS).toHaveLength(15);
     expect(blockListInReadme(section)).toEqual([...DATA_POLICY_BLOCK_KEYS]);
     expect(sec).toContain("An explicit governance key re-enables one, and the startup warning names it.");
   });
@@ -280,12 +281,14 @@ describe("Story 45.5: the data policy, the audit log and a least-privilege accou
     expect(sec).toContain("`redact`, the default, covers the message tools only.");
   });
 
-  it("DW-784: `iris_sql_analyze` stats and running are under probe, and the scope table keeps its verdict `on`", () => {
-    expect(sec).toContain("The `stats` and `running` actions of `iris_sql_analyze` may show the statement text of other sessions. That is under probe, and the tool stays on under `block`.");
-    expect(DATA_POLICY_SCOPE["iris_sql_analyze"]).toMatchObject({ scope: "residual", block: "on" });
+  it("DW-784 (resolved by Story 45.7): `iris_sql_analyze` stats, running and advise are turned off by `block`; explain and indexUsage stay on", () => {
+    expect(sec).not.toContain("That is under probe");
+    expect(sec).toContain("The `stats`, `running` and `advise` actions of `iris_sql_analyze` return other sessions' statement text or bound literals");
+    expect(sec).toContain("From `1.3.0`, `block` turns those three actions off, and `explain` and `indexUsage`, which run for the SQL the caller supplies, stay on.");
+    expect(DATA_POLICY_SCOPE["iris_sql_analyze"]).toMatchObject({ scope: "residual", block: "off", blockActions: ["stats", "running", "advise"] });
     const row = lineStarting(readRepo("tool_support.md"), "| `iris_sql_analyze` |");
-    expect(row).toContain("| residual | on |");
-    expect(row).toContain("`stats` and `running` may show other sessions' statement text; under probe (DW-784).");
+    expect(row).toContain("| residual | off (stats, running, advise) |");
+    expect(row).not.toContain("under probe");
   });
 
   it("the audit log records MCP tool calls only: AuditLogger is not exported from the shared barrel, and server-base.ts is its one writer", () => {
@@ -317,13 +320,15 @@ describe("Story 45.5: the data policy, the audit log and a least-privilege accou
     expect(squash(MANUAL_INSTRUCTIONS)).toContain(needsAdmin);
     expect(sec).toContain("**A least-privilege account and the automatic install.**");
     expect(sec).toContain(`which says it \`${unconfirmed}\`. The tools run.`);
-    expect(sec).toContain(`a warning that says \`${needsAdmin}\`. The tools run.`);
+    // Story 45.7 (DW-790): the web application step logs IRIS's own failure text, then the manual instructions that say `needsAdmin`.
+    expect(sec).toContain(`followed by the manual instructions, which say \`${needsAdmin}\`. The result reports \`configured: false\``);
     // Story 45.6 (DW-773): an account that cannot read %SYS reads `current` against an installed side, so each outcome names its starting state.
-    expect(sec).toContain("The IRIS side is installed and current, install off (`IRIS_AUTO_INSTALL=false`, or the read-only preset): the server reads `current`, writes nothing and logs no warning about the web application.");
+    expect(sec).toContain("The IRIS side is installed and current, install off (`IRIS_AUTO_INSTALL=false`, or the read-only preset): the server reads `current`, writes nothing and logs no warning about the web application or the compile check (from `1.3.0`");
     expect(sec).toContain("The web application is not registered, install off: the server logs one warning on every start");
     expect(sec).toContain("The web application is not registered, install on: every connect recompiles the classes");
-    expect(sec).toContain("`Bootstrap completed with errors: Compile failed: 35 of 35 classes did not compile` on every connect, although every class is compiled.");
-    expect(sec).toContain("This release does not fix the warning.");
+    // Story 45.7 (DW-788): the compile warning is gone from 1.3.0, and the section says what 1.2.x logged.
+    expect(sec).toContain("Before `1.3.0` it logged `Bootstrap completed with errors: Compile failed: 35 of 35 classes did not compile` on every connect, although every class was compiled");
+    expect(sec).not.toContain("This release does not fix the warning.");
     expect(sec).toContain("So install the IRIS side once as an administrator (start one server with the install on, or use IPM), and then connect the limited account with `IRIS_AUTO_INSTALL=false` or the read-only preset.");
     expect(sec).toContain("[Removing the IRIS Side](#removing-the-iris-side)");
     expect(sec).toContain("[Set environment variables](#2-set-environment-variables)");
@@ -429,7 +434,8 @@ describe("Story 45.5: SECURITY.md narrows its scope and adds no email address (A
     expect(markdownHeadingSlugs(README).has(SECTION_SLUG)).toBe(true);
     expect(policy).not.toMatch(/[\w.+-]+@[\w-]+\.[\w.-]+/);
     expect(policy).not.toMatch(/\bcompliant\b|\bcertif/i);
-    expect(policy).toContain("No email address is published for security reports");
+    // Story 45.7 replaced the "No email address is published" sentence (Design Notes A4); the pin is now the one line that replaced it.
+    expect(policy).toContain("Please use private reporting rather than email or a public issue or pull request.");
     expect(policy).toContain("**Fix forward.**");
   });
 });

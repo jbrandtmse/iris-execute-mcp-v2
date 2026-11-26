@@ -192,6 +192,12 @@ export function tightenDataPolicy(
  * rows of that table, each with its reason. `iris_docdb_document:delete` is a write, but it returns the
  * document it deletes, so it reads a stored document. The other write tools that run code (compile, load,
  * production start, cube build, task run) are not in it: the `read-only` preset covers them.
+ *
+ * Story 45.7 (DW-784) adds three `iris_sql_analyze` actions after plan probe P-784 (2026-11-26, IRIS Community 2026.2 Build
+ * 221U): `stats` returns the statement text of the SQL statement index (embedded and `((literal))` statements keep their
+ * literals verbatim, whichever account runs it), `running` returns the bound parameters of other sessions' running
+ * statements, and `advise` in workload mode quotes the retained literals in its findings. `explain` and `indexUsage` stay
+ * residual rows (they read the plan or index metadata of a query the caller supplies, not other sessions' data).
  */
 export const DATA_POLICY_BLOCK_KEYS: readonly string[] = Object.freeze([
   "iris_sql_query",
@@ -206,10 +212,13 @@ export const DATA_POLICY_BLOCK_KEYS: readonly string[] = Object.freeze([
   "iris_docdb_document:get",
   "iris_docdb_document:delete",
   "iris_docdb_find",
+  "iris_sql_analyze:stats",
+  "iris_sql_analyze:running",
+  "iris_sql_analyze:advise",
 ]);
 
 /** The date {@link DATA_POLICY_BLOCK_KEYS} is exhaustive as of. */
-export const DATA_POLICY_BLOCK_KEYS_AS_OF = "2026-11-25";
+export const DATA_POLICY_BLOCK_KEYS_AS_OF = "2026-11-26";
 
 /** {@link DATA_POLICY_BLOCK_KEYS} as a set. */
 const BLOCK_KEY_SET: ReadonlySet<string> = new Set(DATA_POLICY_BLOCK_KEYS);

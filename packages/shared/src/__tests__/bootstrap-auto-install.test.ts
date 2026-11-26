@@ -5,8 +5,13 @@
  * variable, the read-only preset, the profile's own field), over a small stateful fake of the Atelier
  * routes the bootstrap uses. OFF sends reads only (the recorded request list is exact), logs what the spec
  * fixes, and leaves the custom REST service refused only on `missing` and `stale`. On `unconfigured` it warns once
- * and lets the tools go on (DW-772, decision #165): an account that cannot read `%SYS` reads `unconfigured` too.
+ * and lets the tools go on (DW-772, decision #165, DW-791): since Story 45.6 that reading means the web application
+ * lookup failed or the web application is absent, and the lookup can fail for a reason other than absence.
  * ON-versus-unset is pinned byte for byte per branch (Rule #19).
+ *
+ * Story 45.7 (DW-770): with the install off, a deployed marker that carries THIS build's hash reads `current` (or
+ * `unconfigured`) whatever its semver and sequence. The `newer` fixture below therefore carries ANOTHER hash, so it still
+ * stands for a deployment that is newer and different; the same-hash markers have their own describe.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -22,12 +27,38 @@ const SEMVER = BOOTSTRAP_VERSION.split("+")[0] as string;
 const OLD_MARKER = "abcdef123456";
 const PASSWORD = "s3cret-Pw-Q7zX";
 
-/** The embedded marker with its sequence moved up: a newer deployment. */
+/** The hash of this build's marker. */
+const EMBEDDED_HASH = (() => {
+  const parsed = parseBootstrapMarker(BOOTSTRAP_VERSION);
+  if (parsed.kind !== "stamped") throw new Error("the embedded marker is not stamped");
+  return parsed.hash;
+})();
+
+/** Another content hash than this build's (12 lowercase hex characters). */
+const OTHER_HASH = EMBEDDED_HASH === "0123456789ab" ? "ba9876543210" : "0123456789ab";
+
+/** The embedded marker with its sequence moved up and ANOTHER hash: a newer deployment of other classes. */
 function newerMarker(): string {
   const parsed = parseBootstrapMarker(BOOTSTRAP_VERSION);
   if (parsed.kind !== "stamped") throw new Error("the embedded marker is not stamped");
   const [major, minor, patch] = parsed.semver;
-  return `${major}.${minor}.${patch}+${Number(parsed.sequence) + 1000}.${parsed.hash}`;
+  return `${major}.${minor}.${patch}+${Number(parsed.sequence) + 1000}.${OTHER_HASH}`;
+}
+
+/** The embedded marker with a LOWER semver and the same hash: what a semver-only restamp leaves on an instance (DW-770). */
+function olderSameHashMarker(): string {
+  const parsed = parseBootstrapMarker(BOOTSTRAP_VERSION);
+  if (parsed.kind !== "stamped") throw new Error("the embedded marker is not stamped");
+  const [major, minor] = parsed.semver;
+  return `${major}.${Number(minor) - 1}.0+${Number(parsed.sequence) - 1}.${parsed.hash}`;
+}
+
+/** The embedded marker with a HIGHER semver and sequence and the same hash. */
+function newerSameHashMarker(): string {
+  const parsed = parseBootstrapMarker(BOOTSTRAP_VERSION);
+  if (parsed.kind !== "stamped") throw new Error("the embedded marker is not stamped");
+  const [major, minor, patch] = parsed.semver;
+  return `${major}.${minor}.${Number(patch) + 7}+${Number(parsed.sequence) + 1000}.${parsed.hash}`;
 }
 
 /** A state of the instance the fake answers from. */
@@ -102,7 +133,8 @@ function installFake(state: InstanceState): ReturnType<typeof vi.fn> {
         return envelope({ content: names.map((name) => ({ ID: name.slice(0, -4), Compiled: 1, CompileError: 0 })) });
       }
       if (query.includes("Setup_Configure(")) live.configured = true;
-      return envelope({ content: [{ Result: "1", UnitTestRoot: "/mgr/" }] });
+      // The Configure queries read their own column (DW-790); "1" is the success value of `%ODBCOUT(<status>)`.
+      return envelope({ content: [{ Result: "1", ConfigureResult: "1", MappingResult: "1", UnitTestRoot: "/mgr/" }] });
     }
     return status(404);
   });
@@ -239,12 +271,15 @@ describe.each(SOURCES)("the install off from $source", ({ source, label: sourceL
     expect(warnings[0]).toBe(
       "[WARN] Bootstrap: the ExecuteMCPv2 classes in 'USER' on localhost:52773 are current, but this server could not confirm that " +
         'the /api/executemcp/v2 web application is registered (profile "default"). ' +
-        "The account may not be able to read %SYS, or the web application is not registered. " +
+        "The web application lookup failed, or the web application is not registered. " +
         `The automatic install is off for this profile (${sourceLabel}), so nothing was changed and the custom-REST tools go on. ` +
         'If they answer 404, an operator runs Do ##class(ExecuteMCPv2.Setup).Configure("USER") as a user with %Admin_Manage, ' +
         `or starts one server against localhost:52773 ${wayOut}.`,
     );
     expect(warnings[0], "no refusal wording").not.toContain("IRIS_SIDE_NOT_INSTALLED");
+    // DW-791: the 45.6 behavior, not the pre-45.6 "an account that cannot read %SYS reads this" wording.
+    expect(warnings[0]).not.toContain("may not be able to read %SYS");
+    // mutation: the old sentence restored in `warnWebAppUnconfirmed` -> the exact text above and this line are red.
     expect(lines("[INFO] Bootstrap: the automatic install is off"), "the INFO line is for the other branches").toEqual([]);
   });
 
@@ -338,6 +373,94 @@ describe.each(SOURCES)("the install off from $source", ({ source, label: sourceL
         expect(JSON.stringify(refusal), branch).not.toContain(PASSWORD);
       }
     }
+  });
+});
+
+describe("DW-770: with the install off, a deployed marker with this build's hash is current", () => {
+  const same = (marker: string, extra: Partial<InstanceState> = {}): InstanceState => ({ ...BRANCHES.current, marker, ...extra });
+  const infoOf = (source: AutoInstallSource, deployed: string) =>
+    `[INFO] Bootstrap: the automatic install is off for profile "default" (${SOURCES.find((s) => s.source === source)?.label}); ` +
+    `found current (the deployed marker ${JSON.stringify(deployed)} has the same IRIS-side classes as this server's ${BOOTSTRAP_VERSION}), nothing to install.`;
+
+  it.each(SOURCES)("an older semver and sequence, the same hash: current, reads only, no refusal, the INFO line names both markers ($source)", async ({ source }) => {
+    const deployed = olderSameHashMarker();
+    const { result, fetchMock } = await run(same(deployed), configFor(source));
+
+    expect(requests(fetchMock)).toEqual(OFF_REQUESTS.current);
+    expect(writes(fetchMock)).toEqual([]);
+    expect(result).toStrictEqual({
+      probeFound: true,
+      probeStatus: "current",
+      deployedVersion: deployed,
+      autoInstallOff: source,
+      deployed: true,
+      compiled: true,
+      configured: true,
+      mapped: true,
+      unitTestRootEnsured: true,
+      errors: [],
+    });
+    expect(result).not.toHaveProperty("customRestRefused");
+    expect(lines("[WARN]")).toEqual([]);
+    expect(lines("[INFO] Bootstrap: the automatic install is off")).toEqual([infoOf(source, deployed)]);
+    // mutation: the same-hash rule dropped from `probeCustomRest` -> this row reads `stale` and the request list differs.
+  });
+
+  it.each([
+    ["a higher semver and sequence", newerSameHashMarker()],
+    ["the bare legacy hash", EMBEDDED_HASH],
+  ])("%s, the same hash: current (no newer warning, no stale)", async (_name, deployed) => {
+    const { result, fetchMock } = await run(same(deployed), configFor("IRIS_GOVERNANCE_PRESET"));
+
+    expect(requests(fetchMock)).toEqual(OFF_REQUESTS.current);
+    expect(result.probeStatus).toBe("current");
+    expect(result.deployedVersion).toBe(deployed);
+    expect(writes(fetchMock)).toEqual([]);
+    expect(lines("[WARN]")).toEqual([]);
+  });
+
+  it("the web application absent (IsConfigured 0): unconfirmed, one warning, the tools go on, the deployed marker is reported", async () => {
+    const deployed = olderSameHashMarker();
+    const { result, fetchMock } = await run(same(deployed, { configured: false }), configFor("IRIS_GOVERNANCE_PRESET"));
+
+    expect(requests(fetchMock)).toEqual(OFF_REQUESTS.unconfigured);
+    expect(writes(fetchMock)).toEqual([]);
+    expect(result).toMatchObject({ probeStatus: "unconfigured", webAppUnconfirmed: true, deployedVersion: deployed });
+    expect(result).not.toHaveProperty("customRestRefused");
+    expect(lines("[WARN]")).toHaveLength(1);
+  });
+
+  it("another hash at a lower semver stays stale: refused, nothing written", async () => {
+    const parsed = parseBootstrapMarker(BOOTSTRAP_VERSION);
+    if (parsed.kind !== "stamped") throw new Error("not stamped");
+    const deployed = `${parsed.semver[0]}.${Number(parsed.semver[1]) - 1}.0+${Number(parsed.sequence) - 1}.${OTHER_HASH}`;
+    const { result, fetchMock } = await run({ ...BRANCHES.stale, marker: deployed }, configFor("IRIS_GOVERNANCE_PRESET"));
+
+    expect(requests(fetchMock)).toEqual(OFF_REQUESTS.stale);
+    expect(writes(fetchMock)).toEqual([]);
+    expect(result).toMatchObject({ probeStatus: "stale", deployedVersion: deployed, customRestRefused: true });
+    expect(buildIrisSideRefusal(configFor("IRIS_GOVERNANCE_PRESET"), result).fields).toMatchObject({ found: "stale", deployedVersion: deployed });
+  });
+
+  it("another hash at the same semver and sequence stays foreign; `dev` stays foreign", async () => {
+    for (const marker of [`${BOOTSTRAP_VERSION.slice(0, -12)}${OTHER_HASH}`, "dev"]) {
+      vi.mocked(console.error).mockClear();
+      const { result } = await run({ ...BRANCHES.foreign, marker }, configFor("IRIS_GOVERNANCE_PRESET"));
+      expect(result.probeStatus, marker).toBe("foreign");
+    }
+  });
+
+  it("the install ON over the same hash at a lower semver redeploys (stale), with today's request list", async () => {
+    const deployed = olderSameHashMarker();
+    const onRun = await run({ ...BRANCHES.stale, marker: deployed }, configFor("on"));
+    const unsetRun = await run({ ...BRANCHES.stale, marker: deployed }, configFor());
+
+    expect(onRun.result.probeStatus).toBe("stale");
+    expect(onRun.result.deployed).toBe(true);
+    expect(requests(onRun.fetchMock)).toEqual(requests(unsetRun.fetchMock));
+    expect(writes(onRun.fetchMock).length).toBeGreaterThan(BOOTSTRAP_CLASSES.size);
+    expect(onRun.result).not.toHaveProperty("autoInstallOff");
+    // mutation: applying the rule with the install on -> this reads `current` and writes nothing.
   });
 });
 
@@ -475,9 +598,9 @@ describe("buildIrisSideRefusal", () => {
         "To use this tool, an operator installs or upgrades the IRIS side once: start one server against localhost:52773 without the read-only preset, " +
         `or run zpm "install ${IPM_MODULE_NAME} ${SEMVER}" in 'USER' as a user with %Admin_Manage. ` +
         "Then restart this server: the refusal is decided when the profile connects. " +
-        "After every upgrade of the servers (each release stamps its version into the IRIS-side classes), an instance that only " +
-        "read-only servers, or servers with the automatic install off, connect to needs this once: upgrading the IRIS side is a " +
-        "deliberate admin step.",
+        "After a release that changes the IRIS-side classes (the release's CHANGELOG says so in its IRIS side section: " +
+        "BOOTSTRAP_VERSION moves), an instance that only read-only servers, or servers with the automatic install off, connect to " +
+        "needs this once: upgrading the IRIS side is a deliberate admin step.",
     );
   });
 
@@ -486,11 +609,14 @@ describe("buildIrisSideRefusal", () => {
     expect(fields).toMatchObject({ found: "stale", deployedVersion: OLD_MARKER, profile: "default" });
     expect(text).toContain(`are from an older build (${OLD_MARKER}; this server needs ${BOOTSTRAP_VERSION})`);
     expect(text).toContain("with IRIS_AUTO_INSTALL unset or true");
-    // C-2: a stale reader learns that a server upgrade needs one IRIS-side upgrade by an operator.
+    // C-2 and DW-770: a stale reader learns that a release that changes the IRIS-side classes needs one IRIS-side upgrade by an
+    // operator, and how to tell (not every release stamps new classes).
     expect(text).toContain(
-      "After every upgrade of the servers (each release stamps its version into the IRIS-side classes), an instance that only " +
-        "read-only servers, or servers with the automatic install off, connect to needs this once",
+      "After a release that changes the IRIS-side classes (the release's CHANGELOG says so in its IRIS side section: " +
+        "BOOTSTRAP_VERSION moves), an instance that only read-only servers, or servers with the automatic install off, connect to " +
+        "needs this once",
     );
+    expect(text).not.toContain("After every upgrade of the servers");
     expect(text).toContain("an operator installs or upgrades the IRIS side once");
     expect(text).toContain("Then restart this server: the refusal is decided when the profile connects.");
   });

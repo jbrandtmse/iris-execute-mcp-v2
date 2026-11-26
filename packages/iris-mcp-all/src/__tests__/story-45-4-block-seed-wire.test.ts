@@ -106,6 +106,11 @@ const DEV_COVERED: Covered[] = [
     tool: "iris_test_coverage",
     args: { target: "Story454.Tests", level: "package", classes: ["Story454.Probe"] },
   },
+  // Story 45.7 (DW-784; `S-45.7-block-sql-analyze`): the three actions of `iris_sql_analyze` that return other sessions' statement text or
+  // bound literals (plan probe P-784). `explain` and `indexUsage` are not covered: they run for the SQL the caller supplies.
+  { key: "iris_sql_analyze:stats", tool: "iris_sql_analyze", args: { action: "stats" } },
+  { key: "iris_sql_analyze:running", tool: "iris_sql_analyze", args: { action: "running" } },
+  { key: "iris_sql_analyze:advise", tool: "iris_sql_analyze", args: { action: "advise", workload: true } },
 ];
 const INTEROP_COVERED: Covered[] = [
   { key: "iris_transform_test", tool: "iris_transform_test", args: { className: "Story454.Dtl", sourceClass: "Story454.Source" } },
@@ -214,7 +219,7 @@ const blockText = (key: string, server = "default"): string =>
   `action '${key}' is disabled by governance policy for server '${server}' (data policy 'block')`;
 
 describe("Story 45.4: the default install (redact) keeps every tool and names the open ones once (AC 45.4.4)", () => {
-  it("dev: one warning naming the 7 enabled covered keys, not the disabled iris_test_coverage; every call reaches IRIS", async (ctx) => {
+  it("dev: one warning naming the 10 enabled covered keys, not the disabled iris_test_coverage; every call reaches IRIS", async (ctx) => {
     if (skipIfReason(skipReason, ctx)) return;
     await serve("dev", {}, async (served) => {
       expect(warningLines(served)).toEqual([warningOf(`profile "default" (redact): ${DEV_WARNED.join(", ")}`)]);
@@ -315,7 +320,7 @@ describe("Story 45.4: block denies every covered key before IRIS (AC 45.4.2, AC 
 });
 
 describe("Story 45.4: an explicit governance key re-enables a covered key, and it stays visible (decision #170 item 1)", () => {
-  it("IRIS_GOVERNANCE true: that key runs (configSource env), the other 7 are denied, the warning names it as re-enabled", async (ctx) => {
+  it("IRIS_GOVERNANCE true: that key runs (configSource env), the other 10 are denied, the warning names it as re-enabled", async (ctx) => {
     if (skipIfReason(skipReason, ctx)) return;
     const env = { IRIS_DATA_POLICY: "block", IRIS_GOVERNANCE: JSON.stringify({ global: { iris_sql_query: true } }) };
     await serve("dev", env, async (served) => {
@@ -513,7 +518,8 @@ describe("Story 45.4: allow, and a hidden tool, write no warning for what is not
       expect(warningLines(served)).toEqual([warningOf(`profile "default" (redact): ${rest.join(", ")}`)]);
     });
     await serve("dev", { IRIS_TOOLS_PRESET: "core" }, async (served) => {
-      const rest = DEV_WARNED.filter((key) => key !== "iris_global_list");
+      // The core preset hides iris_global_list and iris_sql_analyze (Story 45.7 adds its three keys to the covered set; core does not list the tool).
+      const rest = DEV_WARNED.filter((key) => key !== "iris_global_list" && !key.startsWith("iris_sql_analyze:"));
       expect(warningLines(served)).toEqual([warningOf(`profile "default" (redact): ${rest.join(", ")}`)]);
     });
     await serve("interop", { IRIS_TOOLS_DISABLE: "iris_transform_test" }, async (served) => {
@@ -524,7 +530,13 @@ describe("Story 45.4: allow, and a hidden tool, write no warning for what is not
   it("the line follows the preset and the parent keys: read-only leaves only the covered reads, a parent false drops its child", async (ctx) => {
     if (skipIfReason(skipReason, ctx)) return;
     await serve("dev", { IRIS_GOVERNANCE_PRESET: "read-only" }, async (served) => {
-      expect(warningLines(served)).toEqual([warningOf('profile "default" (redact): iris_sql_query, iris_global_get, iris_global_list')]);
+      // The three iris_sql_analyze actions are reads (enabled by default, so kept by read-only): Story 45.7, DW-784.
+      expect(warningLines(served)).toEqual([
+        warningOf(
+          'profile "default" (redact): iris_sql_query, iris_global_get, iris_global_list, ' +
+            "iris_sql_analyze:stats, iris_sql_analyze:running, iris_sql_analyze:advise",
+        ),
+      ]);
     });
     await serve("dev", { IRIS_GOVERNANCE: JSON.stringify({ global: { iris_sql_execute: false } }) }, async (served) => {
       const rest = DEV_WARNED.filter((key) => key !== "iris_sql_query" && key !== "iris_sql_execute");
@@ -581,7 +593,7 @@ describe("QA 45.4: the wire cases cover the whole declaration, and a request rec
     expect(ALL_COVERED.map((entry) => entry.key).sort()).toEqual([...(await declaredBlockKeys())].sort());
   });
 
-  it("positive control: under allow each of the 12 covered keys reaches the listener, so a zero count under block means something", async (ctx) => {
+  it("positive control: under allow each of the 15 covered keys reaches the listener, so a zero count under block means something", async (ctx) => {
     if (skipIfReason(skipReason, ctx)) return;
     const env = { IRIS_DATA_POLICY: "allow", IRIS_GOVERNANCE: JSON.stringify({ global: { iris_test_coverage: true } }) };
     for (const [server, entries] of [["dev", DEV_COVERED], ["interop", INTEROP_COVERED], ["data", DATA_COVERED]] as const) {

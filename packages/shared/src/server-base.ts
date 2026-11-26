@@ -3042,6 +3042,9 @@ export class McpServerBase {
     //    are skipped for this request only; they run on that later first
     //    touch instead.
     let defaultEstablished = true;
+    // The default profile's own host:port (DW-767): `IRIS_PROFILES` can define `default`, and the client was built from it.
+    const defaultHost = this.profiles.get(DEFAULT_PROFILE_NAME)?.host ?? this.config.host;
+    const defaultPort = this.profiles.get(DEFAULT_PROFILE_NAME)?.port ?? this.config.port;
     try {
       await checkHealth(defaultClient);
     } catch (error: unknown) {
@@ -3062,7 +3065,7 @@ export class McpServerBase {
       // ONLY diagnostic, because the process no longer exits.
       logger.error(
         `Continuing startup without the "${DEFAULT_PROFILE_NAME}" profile ` +
-          `(${this.config.host}:${this.config.port}): tools targeting it will ` +
+          `(${defaultHost}:${defaultPort}): tools targeting it will ` +
           `return a connection error until it is reachable, then recover automatically ` +
           `(no restart needed). If the cause is configuration rather than an outage ` +
           `(e.g. an HTTP 401/403/404 in the line above — wrong credentials, or the ` +
@@ -3097,20 +3100,21 @@ export class McpServerBase {
       // 4.5. Bootstrap custom REST service if needed (default profile).
       if (this.options.needsCustomRest) {
         try {
-          // The connection fields are `this.config`'s, as before; only the resolved automatic install is added
-          // (Story 45.2). The registry's `default` profile can differ from `this.config` when IRIS_PROFILES
-          // defines `default` (DW-767): that mismatch is observed, not changed here.
+          // The bootstrap takes the registry's `default` profile (DW-767), the same profile `defaultClient` was
+          // built from: its namespace is the one the bootstrap reads and writes, its host:port is the one every
+          // bootstrap message names, and it carries the resolved automatic install (Story 45.2). It equals
+          // `this.config` in every connection field unless IRIS_PROFILES defines `default`, which then wins. As
+          // before, the config carries `autoInstall` only when the install is off (an install that is on is the
+          // absence of the field).
           const defaultProfile = this.profiles.get(DEFAULT_PROFILE_NAME);
-          const bootstrapConfig: IrisConnectionConfig =
-            defaultProfile?.autoInstall === false
-              ? {
-                  ...this.config,
-                  autoInstall: false,
-                  ...(defaultProfile.autoInstallSource !== undefined
-                    ? { autoInstallSource: defaultProfile.autoInstallSource }
-                    : {}),
-                }
-              : this.config;
+          let bootstrapConfig: IrisConnectionConfig = this.config;
+          if (defaultProfile !== undefined) {
+            const { autoInstall, autoInstallSource, ...connection } = defaultProfile;
+            bootstrapConfig =
+              autoInstall === false
+                ? { ...connection, autoInstall: false, ...(autoInstallSource !== undefined ? { autoInstallSource } : {}) }
+                : connection;
+          }
           const result = await bootstrap(
             defaultClient,
             bootstrapConfig,

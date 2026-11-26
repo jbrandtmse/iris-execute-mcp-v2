@@ -173,6 +173,28 @@ describe("the resolved setting reaches bootstrap", () => {
     expect(configArg()).not.toHaveProperty("autoInstallSource");
   });
 
+  it("IRIS_PROFILES defines default (DW-767): the startup bootstrap gets the entry's host, port and namespace, not IRIS_*", async () => {
+    process.env.IRIS_PROFILES = JSON.stringify({ default: { host: "entry.example.com", port: 4321, namespace: "PROBEX" } });
+    stageStartup(env.fetchMock);
+    await new McpServerBase(opts([])).start("stdio");
+    expect(configArg()).toMatchObject({ host: "entry.example.com", port: 4321, namespace: "PROBEX" });
+    expect(configArg()).not.toHaveProperty("autoInstall");
+    // mutation: `bootstrapConfig` back to `this.config` -> host reads default.example.com and namespace DEFAULTNS.
+  });
+
+  it("IRIS_PROFILES defines default with the install off: the entry's connection fields carry the off setting", async () => {
+    process.env.IRIS_PROFILES = JSON.stringify({ default: { host: "entry.example.com", port: 4321, namespace: "PROBEX", autoInstall: false } });
+    stageStartup(env.fetchMock);
+    await new McpServerBase(opts([])).start("stdio");
+    expect(configArg()).toMatchObject({
+      host: "entry.example.com",
+      port: 4321,
+      namespace: "PROBEX",
+      autoInstall: false,
+      autoInstallSource: "IRIS_PROFILES",
+    });
+  });
+
   it("IRIS_AUTO_INSTALL=true (no preset): identical to unset", async () => {
     process.env.IRIS_AUTO_INSTALL = "TRUE";
     stageStartup(env.fetchMock);
