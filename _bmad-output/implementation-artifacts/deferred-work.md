@@ -4037,6 +4037,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
 - 2026-11-22T16:58:29Z status=decision-pending owner=burndown by=x0 note=Epic 44 X.0 gate: an owner decision; epics.md Epic 44 lists it Out of scope and the Planner relays that it stays decision-pending (wave-8 decision #131); asked again at the next decision sheet
 - 2026-11-23T21:25:52Z status=decision-pending owner=burndown by=merge_gate note=owner answer 2026-11-23 (decision #153): stays an owner item; the vsix is attached to the GitHub Release by hand with a sha256 check (Planner)
+- 2026-11-26T20:48:22Z status=decision-pending owner=burndown by=merge_gate note=Epic 45 decision sheet (2026-11-26): restated only; the owner's earlier ruling stands (Planner 2026-11-26: nothing new to ask)
 
 ### DW-720: The release does not attach the vsix to the tag's GitHub Release: the maintainer does it by hand (gh release create, notes from the CHANGELOG section, sha256 checked against manifest.json)
 - source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -4045,6 +4046,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
 - 2026-11-22T16:58:29Z status=decision-pending owner=burndown by=x0 note=Epic 44 X.0 gate: an owner decision; epics.md Epic 44 lists it Out of scope and the Planner relays that it stays decision-pending (wave-8 decision #131); asked again at the next decision sheet
 - 2026-11-23T21:25:52Z status=decision-pending owner=burndown by=merge_gate note=owner answer 2026-11-23 (decision #153): stays an owner item; the vsix is attached to the GitHub Release by hand with a sha256 check (Planner)
+- 2026-11-26T20:48:22Z status=decision-pending owner=burndown by=merge_gate note=Epic 45 decision sheet (2026-11-26): restated only; the owner's earlier ruling stands (Planner 2026-11-26: nothing new to ask)
 
 ### DW-721: VS Code calls the files the vscode adapter writes (.vscode/mcp.json and the profile mcp.json) deprecated Local-harness files, removed in February 2027; new Copilot configurations belong in ~/.copilot/mcp-config.json (or COPILOT_HOME) and a workspace-root .mcp.json, both keyed mcpServers
 - source: spec-42-9-install-docs-and-client-re-certification.md (deferred frontmatter; decision #118) | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -4059,6 +4061,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
 - 2026-11-22T16:58:29Z status=decision-pending owner=burndown by=x0 note=Epic 44 X.0 gate: an owner decision; epics.md Epic 44 lists it Out of scope and the Planner relays that it stays decision-pending (wave-8 decision #131); asked again at the next decision sheet
 - 2026-11-23T21:25:52Z status=decision-pending owner=burndown by=merge_gate note=owner answer 2026-11-23 (decision #153): stays an owner item; the vsix is attached to the GitHub Release by hand with a sha256 check (Planner)
+- 2026-11-26T20:48:22Z status=decision-pending owner=burndown by=merge_gate note=Epic 45 decision sheet (2026-11-26): restated only; the owner's earlier ruling stands (Planner 2026-11-26: nothing new to ask)
 
 ### DW-723: iris_docdb_property action=index on a property that already exists always fails with ERROR #5805 (DocDB indexes every property it creates; the tool re-creates it)
 - source: spec-44-1-docdb-create-registers-the-database.md | severity: med | fix-risk: med | footprint: in-epic
