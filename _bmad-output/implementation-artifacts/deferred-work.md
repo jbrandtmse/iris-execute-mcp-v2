@@ -4464,3 +4464,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-26T08:04:18Z status=routed owner=burndown by=cr note=Probe first: confirm on both editions; decide whether the bootstrap should skip or tolerate the Interop handler in a non-interop namespace, and what the docs say
 - 2026-11-26T08:05:09Z status=routed owner=burndown by=lead note=Planner 2026-11-26: probe first on both editions; if it reproduces, the fix keeps a non-interop namespace installing cleanly (skip REST.Interop there with a clear report, or make it compile), never a half-compiled package
 - 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
+
+### DW-788: The bootstrap compile check reads Atelier docnames with a filter, which IRIS returns empty to an account without SQL privileges, so a least-privilege account always gets Compile failed: 35 of 35
+- source: spec-45-6-epic-45-burn-down-iris-side.md | severity: med | fix-risk: low | footprint: in-footprint
+- evidence: 45.6 plan probe P5, IRIS for Health and Community 2026.2: as %Development:U + DB RW, GET docnames/CLS?filter=ExecuteMCPv2 answers 200 with 0 entries; unfiltered docnames lists all 35; doc read upd:true; dictionary Compiled=1; adding %DB_IRISLIB:R/%DB_IRISSYS:R does not help
+- 2026-11-26T11:31:04Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=harvest note=Routed to 45.7 (TypeScript: packages/shared/src/bootstrap.ts upToDateDocuments/verifyCompiled): read the unfiltered list or the per-document read; it is the install-on half of DW-773's least-privilege noise, and 45.7 documents the final behavior

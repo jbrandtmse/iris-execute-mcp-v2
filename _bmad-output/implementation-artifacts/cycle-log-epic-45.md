@@ -105,3 +105,5 @@
 2026-11-26T11:02:36Z	Epic 45	ledger_burndown_chartered	stories=45-6(IRIS_side:DW-765,773,774,778,780,786,787),45-7(TS_docs:DW-767,770,784+SECURITY.md_wording) decision_pending_on_sheet=DW-719,720,722(owner,restated_only) decision=175 order=45.6_then_45.7
 2026-11-26T11:02:48Z	Story 45.5	committed	sha=c597cf4c ci=pending run=45806637731
 2026-11-26T11:02:48Z	Story 45.6	stage_spawned	stage=plan spawn_at=2026-11-26T11:02:48Z model=claude-opus-5-5 agent_name=45-6-burndown-iris-plan-1 cycle_iteration=1 ledger_inbox=DW-765,773,774,778,780,786,787 prev_ci=pending(45806637731) quota_weekly=54%
+2026-11-26T11:31:16Z	Story 45.6	story_created	spec=_bmad-output/implementation-artifacts/spec-45-6-epic-45-burn-down-iris-side.md status=blocked(D1) model=claude-opus-5-5 probes=throwaway_x2(irishealth+community_2026.2,IPM_0.10.5) teardown=clean
+2026-11-26T11:31:16Z	Story 45.6	hold	reason=owner_#174_stop_condition(IPM_install_runs_Configure_at_TLEVEL=1) proposal=R10($TLEVEL>0_and_%request) to=Planner decision=176 ledger_new=DW-788(45-7)
