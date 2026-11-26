@@ -56,6 +56,9 @@ const sec = squash(section);
 const lineStarting = (text: string, prefix: string): string => squash(text.split("\n").find((line) => line.startsWith(prefix)) ?? "");
 
 const LINK = `README.md#${SECTION_SLUG}`;
+/** The guard list of each server README's link line: the section's six guards, in its order. */
+const GUARD_LIST =
+  "the safety settings (governance, the presets, the confirmation dialogs, the audit log, the data policy, the SQL safety settings and the document write guards) guard the agent that uses this server, not the IRIS account";
 
 /** The recorded probes of Story 45.5 (Rule #36): the spec's Design Notes hold the commands' results the section's sentences rest on. */
 const probeRecord = (): string =>
@@ -121,6 +124,7 @@ describe("Story 45.5: the README section exists, in the right place, and is plai
       IRIS_CREDENTIAL_NAME: "connection",
       IRIS_NAMESPACE: "connection",
       IRIS_HTTPS: "connection",
+      IRIS_TIMEOUT: "connection (the HTTP request timeout)",
       IRIS_ACCEPT_LANGUAGE: "connection",
       MCP_TRANSPORT: "transport",
       IRIS_PROFILES: "connection (named instances)",
@@ -211,7 +215,12 @@ describe("Story 45.5: the read-only preset, SQL privileges and the five setup pr
 
   it("point 1 and 2: SQL, Atelier included, can call all five; a limited account is refused; EnsureUnitTestRoot sets only an empty ^UnitTestRoot to the manager directory", () => {
     expect(sec).toContain("SQL can call all five, Atelier's `action/query` included, and Atelier skips the `EXECUTE` check. The account's privileges are the boundary.");
-    expect(sec).toContain("An account without `%Admin_Manage` cannot make `Configure` or `ConfigureMapping` work: through `iris_sql_query` it is refused when the statement is prepared, and through Atelier both fail with `<PROTECT>`.");
+    // Each refusal names its own cause (decision #165): the missing EXECUTE privilege at prepare through the suite, and `<PROTECT>` at run
+    // time without %Admin_Manage through Atelier, which skips the EXECUTE check.
+    expect(sec).toContain("A limited account cannot make `Configure` or `ConfigureMapping` change anything.");
+    expect(sec).toContain("Through `iris_sql_query`, an account without the `EXECUTE` privilege on them is refused when the statement is prepared, with `SQLCODE -99`, and nothing runs.");
+    expect(sec).toContain("Through Atelier, which skips that check, both run and fail with `<PROTECT>` for an account without `%Admin_Manage`, and nothing changes.");
+    expect(sec).not.toMatch(/without `%Admin_Manage`[^.]*refused when the statement is prepared/);
     expect(sec).toContain("`IsConfigured` and `GetBootstrapVersion` only read, and `EnsureUnitTestRoot` only sets an empty `^UnitTestRoot`, to the IRIS manager directory, and notes that in the install record.");
     const setup = embed.get("ExecuteMCPv2.Setup.cls") ?? "";
     const body = setup.slice(setup.indexOf("ClassMethod EnsureUnitTestRoot("), setup.indexOf("ClassMethod GetBootstrapVersion("));
@@ -223,7 +232,9 @@ describe("Story 45.5: the read-only preset, SQL privileges and the five setup pr
   });
 
   it("point 3 (amendment A2, Probe B): the ConfigureMapping residual is stated as probed, and the code can create what it puts back", () => {
-    expect(sec).toContain("An account that holds `%Admin_Manage`, such as an administrator, can call `Configure` and `ConfigureMapping` through a `SELECT` in `iris_sql_query`, the read tool a read-only server keeps.");
+    expect(sec).toContain("An administrator account, such as one with `%All`, can call `Configure` and `ConfigureMapping` through a `SELECT` in `iris_sql_query`, the read tool a read-only server keeps.");
+    // Probe B made every call as `_SYSTEM` (`%All`), so that is the account the residual names.
+    expect(probeRecord()).toContain("Every call below is made as `_SYSTEM`");
     expect(sec).toContain("`iris_sql_query` rolls the statement back. That undoes the change `Configure` makes to the web application, but not the effect of `ConfigureMapping`:");
     expect(sec).toContain("when the `%ALL` namespace or the `ExecuteMCPv2` mapping is missing, the call puts them back in `iris.cpf` and in the running configuration, while `Config.Namespaces` and `Config.MapPackages` report them absent.");
     expect(sec).toContain("Called without a rollback, through Atelier's `action/query`, `Configure` can point the web application at another namespace.");
@@ -336,7 +347,12 @@ describe("Story 45.5: the section is linked where each reader looks, and every l
       expect(at, `${pkg}: inside the Configuration section`).toBeGreaterThan(text.indexOf("\n## Configuration"));
       expect(at, `${pkg}: before MCP Client Configuration`).toBeLessThan(text.indexOf("\n## MCP Client Configuration"));
       expect(squash(text.slice(at, at + 700))).toContain(`(../../${LINK})`);
+      // The same six guards as the section's list (governance and the presets, the dialogs, the audit log, the data policy, the SQL
+      // safety settings and the document write guards), so no reader of one server's README sees a shorter list.
+      expect(squash(text.slice(at, at + 700)), pkg).toContain(GUARD_LIST);
     }
+    expect(sec, "the section lists the SQL safety settings").toContain("- the SQL safety settings (");
+    expect(sec, "the section lists the document write guards").toContain("- the document write guards.");
   });
 
   it("every link to the section, in every reader document, points at a real heading", () => {
@@ -384,6 +400,9 @@ describe("Story 45.5: SECURITY.md narrows its scope and adds no email address (A
   it("says getting past a control through the servers' tools is in scope and using the account directly is not", () => {
     expect(policy).toContain("The authorization model is IRIS's own: the servers act as the IRIS user they connect with, and what that user may do is decided by IRIS.");
     expect(policy).toContain("guard the agent that uses the servers, not the IRIS account");
+    expect(policy, "the scope names the same six guards as the README section").toContain(
+      "(governance and the presets, the confirmation dialogs, the audit log, the data policy, the SQL safety settings and the document write guards)",
+    );
     expect(policy).toContain("Anyone who holds the account can call IRIS directly, and none of those settings applies to that call.");
     expect(policy).toContain("Also in scope: a way to get past one of those controls through the servers' own tools, for example a tool call that runs an action governance turned off, or that returns data the data policy should withhold.");
     expect(policy).toContain("Out of scope:");
@@ -513,7 +532,7 @@ describe("Story 45.5: the startup warning points to the section, and the pointer
 
   it("no document, test or changeset names the old pointer any more (the text is assembled so this file does not hold it)", () => {
     const old = ["See \"PHI data policy\"", " in the README"].join("");
-    const roots = ["README.md", "CHANGELOG.md", "tool_support.md", ".changeset"];
+    const roots = ["README.md", "CHANGELOG.md", "tool_support.md", "SECURITY.md", ".changeset"];
     const files: string[] = [];
     for (const root of roots) {
       const full = path.join(REPO_ROOT, root);
@@ -525,12 +544,15 @@ describe("Story 45.5: the startup warning points to the section, and the pointer
       for (const entry of readdirSync(directory, { withFileTypes: true })) {
         const full = path.join(directory, entry.name);
         if (entry.isDirectory()) {
-          if (entry.name === "node_modules" || entry.name === "dist") continue;
+          if (entry.name === "node_modules" || entry.name === "dist" || entry.name === "out") continue;
           walk(full);
-        } else if (/\.(ts|md)$/.test(entry.name)) files.push(full);
+        } else if (/\.(ts|md|mjs)$/.test(entry.name)) files.push(full);
       }
     };
-    walk(path.join(REPO_ROOT, "packages"));
+    // Every tree a reader or a release reads: the packages, the client-config pages, the launcher and the scripts.
+    for (const tree of ["packages", "docs", "extensions", "scripts"]) walk(path.join(REPO_ROOT, tree));
+    expect(files.some((file) => file.endsWith(path.join("docs", "client-config", "claude-code.md"))), "the walk reaches docs/").toBe(true);
+    expect(files.some((file) => file.endsWith(path.join("iris-mcp-launcher", "README.md"))), "the walk reaches extensions/").toBe(true);
     expect(files.filter((file) => readFileSync(file, "utf8").includes(old)).map((file) => path.relative(REPO_ROOT, file))).toEqual([]);
     expect(squash(readRepo("CHANGELOG.md"))).toContain("The line points to the README's \"What the safety settings protect\" section and names the ways out");
   });
@@ -552,6 +574,10 @@ describe("Story 45.5: the CHANGELOG section and the changeset", () => {
     expect(entry).toContain("`S-45.4-block-raw-tools`");
     expect(entry).toContain('`See "What the safety settings protect" in the README.`');
     expect(entry).toContain("The `SECURITY.md` scope is narrower and says so (C-3).");
+    // The release notes name each refusal's own cause, as the README section does (decision #165).
+    expect(entry).toContain("Through `iris_sql_query`, an account without the `EXECUTE` privilege on them is refused when the statement is prepared (`SQLCODE -99`)");
+    expect(entry).toContain("An administrator account, such as one with `%All`, can call `Configure` and `ConfigureMapping` through `iris_sql_query`");
+    expect(entry).not.toContain("An account that holds `%Admin_Manage`, called through `iris_sql_query`");
     expect(entry).toContain("No email address is added.");
     expect(entry).toContain("### Release handoff (1.3.0)");
     expect(entry).toContain("The release notes must state the narrowed `SECURITY.md` scope");

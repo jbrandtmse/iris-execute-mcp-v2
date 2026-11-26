@@ -28,8 +28,8 @@ In scope:
 The authorization model is IRIS's own: the servers act as the IRIS user they connect with, and what that user may do is decided by
 IRIS.
 
-The servers' safety settings (governance and the presets, the confirmation dialogs, the audit log and the data policy) guard the agent
-that uses the servers, not the IRIS account. Anyone who holds the account can call IRIS directly, and none of those settings applies to
+The servers' safety settings (governance and the presets, the confirmation dialogs, the audit log, the data policy, the SQL safety
+settings and the document write guards) guard the agent that uses the servers, not the IRIS account. Anyone who holds the account can call IRIS directly, and none of those settings applies to
 that call. [What the safety settings protect](README.md#what-the-safety-settings-protect) says what each one covers and which account
 to connect with.
 

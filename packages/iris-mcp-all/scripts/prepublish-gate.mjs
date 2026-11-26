@@ -128,7 +128,8 @@ const gateTestFiles = [
   "src/__tests__/story-45-4-back-compat.test.ts",
   // Story 45.5: the Epic 45 capstone (issue #1, points 1 to 4) on the BUILT dev, interop and data dists. Its hermetic legs use a local 503
   // listener and a stateful fake Atelier (no IRIS) and refuse to skip under IRIS_REQUIRE_LIVE when a built dist is stale or missing. Its armed
-  // least-privilege leg writes only the disposable user QaEpic45CapLp, the role QaEpic45CapRole and the tables ExecuteMCPv2_Temp.QaEpic45CapGranted
+  // least-privilege leg first starts the built dev server as the harness account with the automatic install on (which installs or upgrades
+  // the IRIS side: the ExecuteMCPv2 classes, the web application, the %ALL mapping and ^UnitTestRoot), then writes only the disposable user QaEpic45CapLp, the role QaEpic45CapRole and the tables ExecuteMCPv2_Temp.QaEpic45CapGranted
   // and ...QaEpic45CapDenied (with the classes IRIS generates for them), runs only against a throwaway that scripts/throwaway-iris.mjs started,
   // and removes all of them, asserting that nothing named QaEpic45Cap is left.
   "src/__tests__/epic45-capstone-gate.test.ts",

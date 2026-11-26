@@ -71,7 +71,7 @@ An Interoperability message body can hold protected health information. A per-pr
 
 The data policy reduces exposure of message-body data; it is not a compliance certification.
 
-> **What the safety settings protect:** governance, the presets, the confirmation dialogs, the audit log and the data policy guard the agent that uses this server, not the IRIS account, whose privileges are the boundary. See [What the safety settings protect](../../README.md#what-the-safety-settings-protect).
+> **What the safety settings protect:** the safety settings (governance, the presets, the confirmation dialogs, the audit log, the data policy, the SQL safety settings and the document write guards) guard the agent that uses this server, not the IRIS account, whose privileges are the boundary. See [What the safety settings protect](../../README.md#what-the-safety-settings-protect).
 
 ### Server Manager connections (`IRIS_SERVER_MANAGER`)
 

@@ -1,8 +1,7 @@
 /**
  * Story 45.5 QA (Rules #19, #36, #54, #56, #59) - the sentences of the README section "What the safety settings protect" that
- * `story-45-5-doc-claims.test.ts` and `epic45-capstone-gate.test.ts` leave without an oracle, each with the mutation that turns it red
- * (recorded in the story's QA record). The existing tests pin the section's sentences against the built dists and the embed; this file
- * closes these gaps:
+ * `story-45-5-doc-claims.test.ts` and `epic45-capstone-gate.test.ts` leave without an oracle. The existing tests pin the section's
+ * sentences against the built dists and the embed; this file closes these gaps:
  *
  *  1. DW-766 / Probe A: the sentence that the server's own check of the IRIS side needs `R` on the routines database; the symptoms (500
  *     and 403) and the read-only account against the ROWS of the recorded probe table (LP1, LP4, LP10, LP11), not only against the
@@ -11,7 +10,7 @@
  *  2. DW-771: point 3 against the spec's amendment A2 (the README residual bullet names every backticked identifier A2 names), against
  *     Probe B's recorded results, and against `Configure`'s namespace parameter in the embed; points 1 and 2 against the recorded
  *     decision-#165 fact. The README must NOT say that `EXECUTE` protects the setup procedures: every sentence that names `EXECUTE`
- *     is one of the two allowed ones.
+ *     is one of the three allowed ones, and the refusal at prepare is followed by the sentence that says Atelier skips the check.
  *  3. AD-7 / Rule #56: tool visibility (`IRIS_TOOLS_*`) is not in the guard list and is never called a safety control; `IRIS_AUTO_INSTALL`
  *     is not in the guard list; and the variable-table classification is checked against the variables the PRODUCT CODE reads, not only
  *     against the README table (a variable the README table omits cannot be classified by a test that walks the table).
@@ -58,6 +57,14 @@ const sentencesOf = (text: string): string[] => text.split(/(?<=[.!?])\s+(?=[A-Z
 
 /** The line of the spec whose trimmed text starts with `prefix` ("" when there is none). */
 const specLine = (prefix: string): string => squash(spec.split("\n").find((line) => line.trim().startsWith(prefix)) ?? "");
+
+// Every group below reads the built shared dist, so a stale or missing one fails the file before any group runs.
+beforeAll(() => {
+  const stale = staleDistReason(REPO_ROOT, "shared");
+  if (stale !== undefined) {
+    throw new Error(`The Story 45.5 QA doc oracles read the built shared dist and need no IRIS, so a stale or missing dist fails them instead of skipping them: ${stale}`);
+  }
+});
 
 // -- 1. DW-766, Probe A ----------------------------------------------------------------------------
 
@@ -158,11 +165,13 @@ describe("Story 45.5 QA: DW-771 points 1 to 4 against A2, Probe B and decision #
     expect(facts).toContain("Through Atelier `action/query`, the same account calls them with no `EXECUTE` check, and `Configure` and `ConfigureMapping` fail with `<PROTECT>` (decision #165).");
     expect(facts).toContain("A least-privilege account is refused on all five procedures through the suite (decision #165).");
 
-    // Every sentence of the section that names EXECUTE is one of the two allowed ones (a SELECT of a SqlProc needs it through the suite;
-    // Atelier skips the check). Any other claim, such as "an EXECUTE grant protects the procedures", is not allowed.
+    // Every sentence of the section that names EXECUTE is one of the three allowed ones: a SELECT of a SqlProc needs it through the suite;
+    // Atelier skips the check; through `iris_sql_query` an account without it is refused at prepare (the cause decision #165 recorded).
+    // Any other claim, such as "an EXECUTE grant protects the procedures", is not allowed.
     const allowed = [
       "Through the suite, that call needs `EXECUTE` on the method.",
       "SQL can call all five, Atelier's `action/query` included, and Atelier skips the `EXECUTE` check.",
+      "Through `iris_sql_query`, an account without the `EXECUTE` privilege on them is refused when the statement is prepared, with `SQLCODE -99`, and nothing runs.",
     ];
     const naming = sentencesOf(sec).filter((sentence) => /\bEXECUTE\b/.test(sentence));
     expect(naming.length, "the section names EXECUTE at all").toBeGreaterThan(0);
@@ -176,8 +185,12 @@ describe("Story 45.5 QA: DW-771 points 1 to 4 against A2, Probe B and decision #
     const procedures = paragraphStarting(section, "**The five setup procedures.**");
     expect(procedures).not.toMatch(/\bEXECUTE\b/);
     const bullets = squash(section.slice(section.indexOf("**The five setup procedures.**"), section.indexOf("**What the data policy covers.**")));
-    expect(bullets.match(/\bEXECUTE\b/g)?.length, "the five-procedures block names EXECUTE once, in the Atelier-skips sentence").toBe(1);
-    expect(bullets).not.toMatch(/EXECUTE[^.]*\b(?:protect|guard|stop|prevent|secure|refus)/i);
+    expect(bullets.match(/\bEXECUTE\b/g)?.length, "the five-procedures block names EXECUTE twice: the Atelier-skips and the refused-at-prepare sentences").toBe(2);
+    expect(bullets).not.toMatch(/EXECUTE[^.]*\b(?:protect|guard|stop|prevent|secure)/i);
+    // The refusal at prepare is never left standing alone as a protection: the next sentence says Atelier skips that check.
+    const prepare = bullets.indexOf("is refused when the statement is prepared, with `SQLCODE -99`");
+    expect(prepare, "the prepare-time refusal sentence").toBeGreaterThan(-1);
+    expect(bullets.slice(prepare)).toMatch(/^[^.]*\.\s*Through Atelier, which skips that check,/);
   });
 });
 
@@ -198,10 +211,8 @@ describe("Story 45.5 QA: tool visibility is not a safety control, and the variab
   });
 
   it("every variable the product code reads is a row of the README table or a named known gap (the table is the thing Rule #56 classifies)", () => {
-    // Known gap, found by this test on 2026-11-26 and reported to the lead: `IRIS_TIMEOUT` (the connection timeout in milliseconds,
-    // `packages/shared/src/config.ts`) is read by the servers and is not a row of the README variable table; only the
-    // `IRIS_SQL_TIMEOUT` row mentions it. It is a connection setting, not a safety setting, so no classification is wrong.
-    const KNOWN_GAP: Record<string, string> = { IRIS_TIMEOUT: "connection timeout (ms); read in config.ts; not a README table row" };
+    // A variable the code reads that is deliberately not a README row goes here, with its reason. None is today.
+    const KNOWN_GAP: Record<string, string> = {};
     const read = new Set<string>();
     const walk = (directory: string): void => {
       for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -228,6 +239,18 @@ describe("Story 45.5 QA: tool visibility is not a safety control, and the variab
       expect(read.has(name), `${name} is still read by the code`).toBe(true);
       expect(table.has(name), `${name} is still missing from the table (remove it from the known gaps once it is a row)`).toBe(false);
     }
+  });
+
+  it("the IRIS_TIMEOUT row states the default, the unit and the startup failure that config.ts implements", () => {
+    const row = README.split("\n").find((line) => line.startsWith("| `IRIS_TIMEOUT` |")) ?? "";
+    expect(row, "the row exists").not.toBe("");
+    expect(row).toContain("| `60000` |");
+    expect(row).toContain("**milliseconds**");
+    expect(row).toContain("A value that is not a positive number fails startup naming the variable.");
+    const config = readRepo("packages/shared/src/config.ts");
+    expect(config).toContain("const timeout = rawTimeout !== undefined ? Number(rawTimeout) : 60_000;");
+    expect(config).toContain("IRIS_TIMEOUT must be a positive number of milliseconds.");
+    expect(readRepo("packages/shared/src/profiles.ts")).toContain("// timeout (inherited from default unless explicitly overridden)");
   });
 });
 
@@ -311,7 +334,9 @@ describe("Story 45.5 QA: every in-page link of the section resolves, and the tex
 
   it("the sections the pointers name carry the words the pointers use", () => {
     // `see *SQL write safety* under [Read-only mode]` and `see [Installs nothing on IRIS](...)`.
-    const readOnly = README.slice(README.indexOf("## Read-only mode"), README.indexOf("\n## ", README.indexOf("## Read-only mode") + 5));
+    const readOnlyAt = README.indexOf("\n### Read-only mode");
+    expect(readOnlyAt, "the Read-only mode subsection exists").toBeGreaterThan(-1);
+    const readOnly = README.slice(readOnlyAt, README.indexOf("\n### ", readOnlyAt + 5));
     expect(readOnly, "the Read-only mode section holds the SQL write safety text").toMatch(/SQL write safety/i);
     expect(readOnly, "and the bullet the install pointer names").toContain("Installs nothing on IRIS");
   });

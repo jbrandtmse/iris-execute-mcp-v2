@@ -16,7 +16,7 @@
  *    The twin makes the two oracles above able to vary: the shape check is what stops the first three, and a run that gets past it
  *    would show a connect.
  *
- * MUTATIONS (recorded in the QA record of the story): in `epic45-capstone-gate.test.ts`, (a) make the armed `beforeAll` not return when
+ * MUTATIONS: in `epic45-capstone-gate.test.ts`, (a) make the armed `beforeAll` not return when
  * unarmed, and (b) delete the `throwawayEnvProblems` check. (a) turns the unarmed run red (the leg runs unarmed and throws); (b) turns the
  * three shape cases red (a connect to the closed port is logged and the failure no longer names the harness). Path: the capstone's real
  * `beforeAll`, executed by a real vitest process.

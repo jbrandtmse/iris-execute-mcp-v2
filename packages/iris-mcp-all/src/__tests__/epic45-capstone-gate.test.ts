@@ -24,15 +24,22 @@
  *      shared. Path: `McpServerBase.start` -> `bootstrap` in the built dev process.
  *  P4  issue point 4: the SQL route prepares with SQL privilege checking on. Oracle: the document the built server uploads, `ExecuteMCPv2.REST.Sql`
  *      (exactly one `%Prepare(`, and its second argument is 1), and the `iris_sql_query` body the server sends to `/dev/sql/execute`
- *      (only the route's own control keys, no privilege field). Mutation: `%Prepare(.pQuery)` in `Sql.cls`, `pnpm run gen:bootstrap`, rebuild
- *      shared (the files are restored byte for byte afterwards). Path: the built server's Atelier PUT.
+ *      (only the route's own control keys, no privilege field). Mutation: `%Prepare(.pQuery, 0)` (checking off) in `Sql.cls`,
+ *      `pnpm run gen:bootstrap`, rebuild shared (the files are restored byte for byte afterwards). Path: the built server's Atelier PUT.
+ *      This leg is a text pin: `%Prepare(.pQuery)` also turns it red but changes no behavior, because `checkPriv` defaults to 1
+ *      (`%SQL.Statement.%Prepare`); the behavior twin is P5 below.
  *  LP-hermetic (the least-privilege account, install off): read-only, a current side, `IsConfigured` answering `{Configured: false}`.
  *      Oracle: no write, one could-not-confirm `[WARN]`, and the custom-REST call is sent and answered. Mutation (P6): make the install-off
  *      `unconfigured` branch refuse up front (45.2's state before decision #165) in `bootstrap.ts` and rebuild shared. Path: the built dev gateway.
  *  LP-armed (`IRIS_REQUIRE_LIVE`, a throwaway-shaped target): a disposable account with `%Development:U` and `R` on the namespace's database
  *      resource(s), the read-only preset. Oracle: `_SYSTEM`'s own Atelier rows and document reads, never the code under test. Mutation (P5, the
- *      lead's smoke on a local throwaway): P4's `Sql.cls` mutation deployed; the ungranted-SELECT leg goes red. Path: the real
- *      `/dev/sql/execute` through the built server. CI runs this leg in `suite prepublish-all` (it is in `gateTestFiles`).
+ *      lead's smoke on a local throwaway): P4's `Sql.cls` mutation, `%Prepare(.pQuery, 0)`, deployed; the ungranted-SELECT and
+ *      `Setup_ConfigureMapping` legs go red (`SQLCODE -99` is gone). Path: the real `/dev/sql/execute` through the built server. CI runs
+ *      this leg in `suite prepublish-all` (it is in `gateTestFiles`).
+ *      Two of its checks are preconditions, not oracles: the `%ALL` mapping is already in place (the `_SYSTEM` start maps it), so
+ *      `ConfigureMapping` would leave it as it is even if it ran, and the account holds only `R`, so IRIS would refuse a class write even
+ *      with the install on. The `SQLCODE -99` answers and the start's one could-not-confirm warning are the oracles; the install-off
+ *      behavior itself is proven hermetically by P3 and LP-hermetic.
  *
  * Needs no IRIS except the armed leg. Cross-package checks live in `@iris-mcp/all` (rule #45).
  */
@@ -246,7 +253,6 @@ describe("Epic 45 capstone P1 (issue point 1): block turns off the declared raw-
       `${server}: under block each declared key answers GOVERNANCE_DISABLED with dataPolicyApplied, the listener sees no request, and no data-policy warning is written`,
       async () => {
         await serve(prepared.sdkEsmDir, server, { IRIS_DATA_POLICY: "block" }, async (served) => {
-          expect(warningLines(served), "block names nothing: no tool is open").toEqual([]);
           for (const entry of COVERED[server]) {
             const { result, requests } = await callCounted(served, entry);
             expect(result.isError, entry.key).toBe(true);
@@ -259,6 +265,8 @@ describe("Epic 45 capstone P1 (issue point 1): block turns off the declared raw-
             expect(report.policy[entry.key], entry.key).toBe(false);
             expect(report.configSource[entry.key], entry.key).toBe("dataPolicy");
           }
+          // Read after every call and the report, so the startup stderr has long arrived: an empty list here is a real absence.
+          expect(warningLines(served), "block names nothing: no tool is open").toEqual([]);
         });
       },
       TEST_TIMEOUT_MS,
@@ -700,9 +708,10 @@ describe("Epic 45 capstone LP-armed (issue points 3 and 4): a least-privilege ac
     if (skipIfReason(armedSkip, ctx)) return;
     expect(setupBefore, "the Setup document was read before the start").toBeDefined();
     expect(setupAfter, "the Setup document was read after the start").toBeDefined();
-    expect(setupAfter?.ts, "the Setup document's timestamp is unchanged").toBe(setupBefore?.ts);
-    expect(setupAfter?.content, "the Setup document's content is unchanged").toEqual(setupBefore?.content);
-    expect(await allMapping(), "the %ALL mapping is unchanged").toBe(mappingBefore);
+    // Preconditions (the account holds only R, so IRIS refuses its class writes either way); the warnings below are the oracle.
+    expect(setupAfter?.ts, "precondition: the Setup document's timestamp is unchanged").toBe(setupBefore?.ts);
+    expect(setupAfter?.content, "precondition: the Setup document's content is unchanged").toEqual(setupBefore?.content);
+    expect(await allMapping(), "precondition: the %ALL mapping is unchanged").toBe(mappingBefore);
     const warnings = bootstrapWarnings(readOnlyStderr);
     expect(warnings, "exactly one bootstrap warning").toHaveLength(1);
     expect(warnings[0]).toContain(COULD_NOT_CONFIRM);
@@ -734,12 +743,13 @@ describe("Epic 45 capstone LP-armed (issue points 3 and 4): a least-privilege ac
       query: `SELECT ExecuteMCPv2.Setup_ConfigureMapping('${sysTarget.namespace}') AS Mapped`,
     });
     expect(result.isError).toBe(true);
-    expect(firstText(result)).toContain("SQLCODE: -99");
-    expect(await allMapping(), "the %ALL mapping is unchanged").toBe(mappingBefore);
-    expect(mappingBefore, "the oracle can see the mapping").toContain("ExecuteMCPv2");
+    expect(firstText(result), "the oracle: the call is refused at prepare").toContain("SQLCODE: -99");
+    // Precondition, not an oracle: the mapping is in place before the call, so ConfigureMapping would leave it unchanged even if it ran.
+    expect(await allMapping(), "precondition: the %ALL mapping is unchanged").toBe(mappingBefore);
+    expect(mappingBefore, "precondition: the mapping is in place").toContain("ExecuteMCPv2");
   });
 
-  it("under block, iris_sql_query is denied with dataPolicyApplied before anything reaches IRIS", async (ctx) => {
+  it("under block, iris_sql_query is denied by governance with dataPolicyApplied (P1 counts the requests hermetically)", async (ctx) => {
     if (skipIfReason(armedSkip, ctx)) return;
     const result = await (blockSession as WireSession).call("iris_sql_query", { query: `SELECT ID, Name, Qty FROM ${GRANTED}` });
     expect(result.isError).toBe(true);

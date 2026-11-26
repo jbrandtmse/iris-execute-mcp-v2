@@ -38,6 +38,16 @@ deferred:
     location: >-
       src/ExecuteMCPv2/REST/Interop.cls; README.md "Prerequisites"
     severity: low
+  - summary: >-
+      Occurrence on DW-786 (code review 2026-11-26): the README residual bullet ends "This release documents this and does not change it",
+      and the CHANGELOG 45.5 bullet ends "This release documents it and changes no code". If the transaction guard of decision #174 ships
+      in the Epic 45 burn-down, both reach 1.3.0 false. The burn-down change that lands the guard updates both sentences, not only point 3.
+    evidence: |-
+      Decision #174 builds the guard in the burn-down story, and DW-786's condition (4) names only the 45.5 residual text. The CHANGELOG
+      sentence is a second copy of the same claim. Accurate today (A2 documents today's behavior).
+    location: >-
+      README.md "What the safety settings protect" (the residual bullet); CHANGELOG.md Story 45.5 "The five setup procedures" bullet
+    severity: low
 ---
 
 <intent-contract>
@@ -176,6 +186,34 @@ deferred:
 - Given the default suite, when `epic45-capstone-gate.test.ts` runs, then P1 to P4 and the hermetic least-privilege leg pass on the built dists. Each goes red under its mutation, on the path named in its header (AC 45.5.5, Rules #21, #59).
 - Given the seeded CI throwaway, when the `ci` workflow runs on the pushed wave tip, then `suite prepublish-dev` (45.1's privilege gate), `suite uninstall-round-trip` (45.3) and `suite prepublish-all` (the capstone's armed least-privilege leg) are green. The lead records the run URL under `## Verification` (AC 45.5.5).
 - Given the change, when `gen:governance-baseline:check`, `gen:tools-list-snapshot:check` and `gen:ipm:check` run and the golden fixtures are diffed, then nothing moved. `BOOTSTRAP_VERSION` is `1.2.0+10.109d0129528f`, and the only product-code diff is the pointer string (AC 45.5.6 as amended by A1).
+
+### Review Findings
+
+Code review 2026-11-26 (`bmad-code-review`, full mode, frozen diff `git diff 4316c5ab..11f20ade`). All four layers delivered (Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor). Every patch below is applied in the working tree, and its mutation is under `## Verification`, "Review record".
+
+- [x] [Review][Patch] (medium) The five-procedures bullet blamed a missing `%Admin_Manage` for the refusal at prepare, and the residual named "an account that holds `%Admin_Manage`" although Probe B ran as `_SYSTEM`. Each refusal now names its cause (decision #165): no `EXECUTE` privilege → `SQLCODE -99` at prepare through `iris_sql_query`; no `%Admin_Manage` → `<PROTECT>` at run time through Atelier, which skips the check. The residual names an administrator account such as one with `%All`. The CHANGELOG 45.5 bullet, the doc-claims pins and the QA `EXECUTE` guard (now three allowed sentences, the prepare refusal always followed by "Atelier skips that check", no protect/guard claim) follow [README.md:933-934, CHANGELOG.md:13]
+- [x] [Review][Patch] (low) `IRIS_TIMEOUT` had no row in the README variable table. Added as a connection setting (default `60000` ms, `IRIS_SQL_TIMEOUT` replaces it for the SQL tools, per-profile `timeout`, a bad value fails startup), classified in the doc-claims Rule #56 list, the QA known-gap entry removed, and a QA oracle against `config.ts`/`profiles.ts` [README.md:129]
+- [x] [Review][Patch] (medium) `SECURITY.md` and the five server READMEs listed four or five guards, not the section's six, so a bypass of the SQL safety settings or the document write guards read as unclear in scope. Both lists now name all six, pinned [SECURITY.md:31, packages/iris-*-mcp/README.md link line]
+- [x] [Review][Patch] (medium) The capstone header named `%Prepare(.pQuery)` for P4 and P5, which changes no behavior (`checkPriv` defaults to 1). The header now names `%Prepare(.pQuery, 0)`, calls P4 a text pin and P5 its behavior twin [epic45-capstone-gate.test.ts header]
+- [x] [Review][Patch] (low) LP-armed: "the `%ALL` mapping is unchanged" after `Setup_ConfigureMapping` cannot fail (the mapping is in place, so the call would be a no-op). Relabelled as a precondition; `SQLCODE -99` is the oracle [epic45-capstone-gate.test.ts LP-armed]
+- [x] [Review][Patch] (low) LP-armed start: the Setup document's equality cannot vary with the preset (the account holds only `R`). Relabelled as a precondition; the one could-not-confirm warning is the oracle, and P3/LP-hermetic prove install-off hermetically [epic45-capstone-gate.test.ts LP-armed]
+- [x] [Review][Patch] (low) The armed `block` leg's title claimed "before anything reaches IRIS" with no request count; retitled to what it checks [epic45-capstone-gate.test.ts LP-armed]
+- [x] [Review][Patch] (low) P1 `block`: the "no data-policy warning" read came before the stderr chunk was guaranteed; moved after every call and the report [epic45-capstone-gate.test.ts P1]
+- [x] [Review][Patch] (low) The old-pointer scan skipped `docs/`, `extensions/`, `SECURITY.md` and `scripts/`; it walks them now, with a check that it reaches them [story-45-5-doc-claims.test.ts]
+- [x] [Review][Patch] (low) The QA "Read-only mode" slice matched inside `### Read-only mode` and ran to the next `## ` (about 280 lines); it is the `###` subsection now [qa-45-5-doc-oracles.test.ts]
+- [x] [Review][Patch] (medium) Three QA groups read the built shared dist with no staleness check, contrary to the file header; a file-level `beforeAll` now fails the file on a stale or missing dist [qa-45-5-doc-oracles.test.ts]
+- [x] [Review][Patch] (low) Both QA files claimed their mutations were "recorded in the story's QA record", which does not exist; the claims are removed (the arming-contract file names its mutations inline; the per-AC pinning tests carry the `mutation:` lines) [qa-45-5-doc-oracles.test.ts, qa-45-5-capstone-arming-contract.test.ts]
+- [x] [Review][Patch] (low) The `gateTestFiles` comment omitted that the armed leg first starts the dev server as the harness account with the install on [packages/iris-mcp-all/scripts/prepublish-gate.mjs]
+- [x] [Review][Defer] (low) "This release documents this and does not change it" (README) and "This release documents it and changes no code" (CHANGELOG 45.5) become false in 1.3.0 if the DW-786 transaction guard (decision #174) ships in the same release [README.md:934, CHANGELOG.md:13] — deferred: frontmatter `deferred:`; an occurrence on DW-786, whose burn-down change must update both sentences
+
+**Rejected.**
+- `false` — the spec's `status: done` before review: that field is `bmad-build-auto`'s contract and a review never touches it (Rule #57); the tracker holds `review`.
+- `false` — `IRIS_REQUIRE_LIVE=true` "fails with a misleading error": the throw says `IRIS_REQUIRE_LIVE is "true", not "1"`, and every harness path exports `1`.
+- `false` — the armed CI run URL is unrecorded: the spec assigns it to the lead after the push (Verification, "Armed run").
+- `low` — the `R`-only account with the install on is undocumented: the section's two recommended setups (install off or read-only) are covered; documenting the third needs a new probe.
+- `low` — `SECURITY.md` should say tool visibility is not a control: the README section says so, and QA pins `SECURITY.md` free of visibility on purpose.
+- `low` — the capstone's own arming-contract test restates the helper: a stated consistency check; `qa-45-5-capstone-arming-contract.test.ts` runs the real contract in a child process.
+- QA's open note (the mixed warning variant pinned only at unit level and by QA's dist test): closed with evidence. `story-45-4-block-seed-wire.test.ts` pins the full mixed line with `toEqual` on the built dev server over stdio (L490, L933; it is in `gateTestFiles`), and all three variants end in the one `return` at `data-policy.ts` L325.
 
 ## Spec Change Log
 
@@ -455,6 +493,21 @@ Every test added or changed passes on a fresh environment, in either order.
 - The armed leg FAILS (does not skip) when armed against a target that is not throwaway-shaped, so a local `prepublish` of `@iris-mcp/all` against the shared instance now fails on it instead of skipping, as the 45.1 gate would. CI runs it through `throwaway-iris.mjs exec`, which sets the shape.
 - The `Config.Namespaces` and `Security.Users` SQL projections are not usable as simple oracles through the `%SYS` Atelier route (the first returns one row per CPF section; `%SYS` must be written `%25SYS` in the helper's URL), so the armed leg reads the namespace's databases from the suite's own config route and the principals from `Security.Users`/`Security.Roles`.
 - `packages/iris-dev-mcp/README.md`: the 45.1 blockquote said "the full trust model lands in Story 45.5"; that clause now reads "is in the suite README" (the pinned 45.1 substrings are untouched).
+
+### Review record (code review, 2026-11-26)
+
+Each mutation is a temporary edit; the files were restored with `cp -p` from scratchpad copies and checked with `cmp`, and `git status --short | shasum` and `git diff --stat` were equal before and after. Hermetic runs in the closed-port environment, `IRIS_REQUIRE_LIVE` unset.
+- mutation: the `IRIS_TIMEOUT` row deleted from the README table -> red: doc-claims `Rule #56: every variable of the README's variable table is named ...`, QA `every variable the product code reads is a row of the README table ...` and QA `the IRIS_TIMEOUT row states the default ...` (3 tests). Path: README text against `config.ts` and the classification.
+- mutation: the five-procedures bullet back to "An account without `%Admin_Manage` ... refused when the statement is prepared ..." -> red: doc-claims `point 1 and 2: ...` and QA `points 1 and 2 against the recorded decision-#165 facts ...` (2 tests). Path: README text.
+- mutation: the residual back to "An account that holds `%Admin_Manage`, such as an administrator, ..." -> red: doc-claims `point 3 (amendment A2, Probe B) ...` (1 test). Path: README text against Probe B's recorded `_SYSTEM` calls.
+- mutation: the CHANGELOG 45.5 procedures bullet back to "An account that holds `%Admin_Manage`, called through `iris_sql_query` ..." -> red: doc-claims `is the section above Story 45.4's ...` (1 test). Path: CHANGELOG text.
+- mutation: `SECURITY.md`'s guard list back to "the audit log and the data policy" -> red: doc-claims `says getting past a control through the servers' tools is in scope ...` (1 test). Path: `SECURITY.md` text.
+- mutation: the `ops` README link line back to the five-guard list -> red: doc-claims `the five server READMEs carry the link line ...` (1 test). Path: server README text.
+- mutation: `See "PHI data policy" in the README.` appended to `docs/client-config/cursor.md` -> red: doc-claims `no document, test or changeset names the old pointer any more ...` (1 test; the scan did not read `docs/` before). Path: the client-config page.
+- mutation: "SQL write safety" moved out of the README `### Read-only mode` subsection into `### Agent code editing` -> red: QA `the sections the pointers name carry the words the pointers use` (1 test; the old slice ran to line 813 and stayed green). Path: README text.
+- mutation: `touch packages/shared/src/data-policy.ts` (the shared dist goes stale; the mtime restored with `touch -r`) -> red: the QA file fails in its file-level `beforeAll` (`a stale or missing dist fails them`), where groups 2 and 6 passed before. Path: the QA file's dist read.
+- Not mutated (comment, title or order only): the capstone header's P4/P5 text, the LP-armed precondition labels and title, the P1 `[]` read moved after the calls, the `gateTestFiles` comment and the QA header claims. P1's recorded mutation still covers the P1 leg.
+- Release path (lead directive 3): `release.yml` `prepare` runs `node scripts/release.mjs prepare`, which runs every `prepublish-<short>` suite once through `scripts/throwaway-iris.mjs exec` on a seeded throwaway (`release.mjs` L839-865); `scripts/ci-live-suite.mjs` itself refuses any environment that is not throwaway-shaped (`assertThrowawayEnv`); `publish` uploads with `npm publish --ignore-scripts`, so no `prepublishOnly` runs there, and a real publish is refused off a tag push. No release path arms the capstone against a non-throwaway target. The only other route is a hand-run `prepublishOnly` of `@iris-mcp/all` (`prepublish-gate.mjs` sets `IRIS_REQUIRE_LIVE=1`): against the shared instance the armed leg throws before any request (QA's arming contract proves no connect), where 45.1's gate skips. Both refuse to write principals to a non-throwaway; the capstone's fail-closed form is what this spec requires ("refuses to skip when armed"), so nothing changes.
 
 ## Auto Run Result
 
