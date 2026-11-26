@@ -70,3 +70,5 @@
 2026-11-26T04:36:51Z	Story 45.3	smoke_complete	lead=live_gate_independent_run(pnpm_live:uninstall-round-trip,final_tree) result=18/18 incl=least-privilege(no_%Admin_Manage),SQL_path,ownership_x2,IPM-owned,failing_steps_x2,back-compat teardown=clean regen_idempotent=yes
 2026-11-26T04:36:51Z	Story 45.3	fresh_check	files=all6 in_order=pass shuffle_seed7=pass tests=114p/18s shared_full=95f/2830p full_all=248f/6600p/755s live-guards=76/0 gen_ipm_check=ok
 2026-11-26T04:36:51Z	Story 45.3	story_cycle	commits=6cf4fd4a(build),fcb5d4dc(qa),08a3dca7(cr) review=CLEAN smoke=18/18 ledger=DW-774(burndown),DW-775/776(resolved),DW-777(by-design),DW-778(burndown,terminal),DW-779(wontfix-theoretical),DW-780(burndown) decisions=162,163,166,168
+2026-11-26T04:37:24Z	Story 45.3	committed	sha=0ae0884b ci=pending run=45756335327
+2026-11-26T04:37:24Z	Story 45.4	stage_spawned	stage=plan spawn_at=2026-11-26T04:37:24Z model=claude-opus-5-5 agent_name=45-4-block-plan-1 cycle_iteration=1 ledger_inbox=none prev_ci=pending(45756335327)
