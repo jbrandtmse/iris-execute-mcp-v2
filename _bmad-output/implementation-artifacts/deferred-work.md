@@ -4380,19 +4380,33 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 45.3 build review; order is web app, mapping, classes, %ALL, ^UnitTestRoot, records; a failure in the %ALL or ^UnitTestRoot step leaves the classes deleted and the records kept
 - 2026-11-26T02:13:32Z status=routed owner=45-3-careful-uninstall-of-the-iris-side by=harvest note=Lead directive to this story's CR: delete the classes after %ALL and ^UnitTestRoot (they do not depend on the classes), just before the records, so a failed later step leaves Setup in place and a re-run resumes (Planner condition 2, decision #163)
 - 2026-11-26T02:16:28Z status=routed owner=45-3-careful-uninstall-of-the-iris-side by=lead note=Planner approved (decision #168): order web app, mapping, %ALL, ^UnitTestRoot, classes, records; pins: forced later-step failure leaves Setup and a re-run resumes naming only what it removed; DecideAll mutation re-run after the reorder (same four legs red)
+- 2026-11-26T04:06:50Z status=resolved-by:45-3-careful-uninstall-of-the-iris-side owner=45-3-careful-uninstall-of-the-iris-side by=lead note=CR (45.3): order web app, mapping, %ALL, ^UnitTestRoot, classes, records; classes held on ANY earlier failure; live gate leg: read-only ^UnitTestRoot database fails the step, Setup stays, re-run resumes; DecideAll mutation re-run after the reorder: the same four legs red
 
 ### DW-776: The two-namespace line says each namespace loses its classes also when one namespace's copy is left (dev or IPM-owned)
 - source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: low | footprint: in-footprint
 - evidence: 45.3 build review
 - 2026-11-26T02:13:32Z status=routed owner=45-3-careful-uninstall-of-the-iris-side by=harvest note=Lead directive to this story's CR: word the line from the per-namespace outcome
+- 2026-11-26T04:06:50Z status=resolved-by:45-3-careful-uninstall-of-the-iris-side owner=45-3-careful-uninstall-of-the-iris-side by=lead note=CR (45.3): NamespacesLine worded from each namespace's outcome; mutation (old wording) turns both ownership legs red
 
 ### DW-777: pnpm live:uninstall-round-trip is a POSIX sh one-liner with no signal trap and no Windows form
 - source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: low | footprint: in-footprint
 - evidence: 45.3 build review; package.json live:uninstall-round-trip
 - 2026-11-26T02:13:32Z status=by-design owner=45-3-careful-uninstall-of-the-iris-side by=harvest note=Developer convenience script; CI runs the suite through ci-live-suite.mjs on Linux with its own always-down step; the sibling live:* scripts have the same shape
+- 2026-11-26T04:06:50Z status=by-design owner=45-3-careful-uninstall-of-the-iris-side by=lead note=Correction from CR: live:bootstrap-guard uses throwaway-iris.mjs run (which traps signals and always removes), not the sh one-liner shape; the convenience script stays as is, CI runs the suite through ci-live-suite.mjs with an always-down step
 
 ### DW-778: SetupTest and SetupUninstallTest decision pins run only by hand on a throwaway; no automatic suite runs them
 - source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: 45.3 build review; the classes are seeded into the CI throwaway but nothing executes them; the 15-leg live gate covers the same decisions end to end
 - 2026-11-26T02:13:32Z status=routed owner=burndown by=harvest note=Burn-down candidate: run the seeded ObjectScript unit classes in the CI throwaway suite with total checked (Rule #35)
 - 2026-11-26T02:16:28Z status=routed owner=burndown by=lead note=Planner 2026-11-25 (decision #168): terminal answer required in the burn-down, never re-deferred: a CI job runs SetupTest and SetupUninstallTest on the throwaway with totals checked (Rule #35), or closed by decision with the reason
+
+### DW-779: Delete-after-Exists error branches of the uninstall's web-app and mapping steps are not reached by any test
+- source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: 45.3 QA and CR: both least-privilege accounts fail earlier at Exists (#822); no account found that can read but not delete them; each branch mirrors a covered sibling
+- 2026-11-26T04:06:50Z status=wontfix-theoretical owner=45-3-careful-uninstall-of-the-iris-side by=cr note=Reopen if a probe finds an account that can read but not delete the web app or mapping, or a field report shows the failure
+
+### DW-780: Uninstall report after a 1.2.0 install upgraded by IPM: %ALL left without its manual command, and nothing said about a ^UnitTestRoot that 1.2.0 set
+- source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: 45.3 CR: such an install has a found record (IPM ConfigureMapping), so the no-record rule does not fire; nothing is removed wrongly, only report text is missing
+- 2026-11-26T04:06:50Z status=routed owner=burndown by=cr note=Burn-down candidate: amend the I/O Matrix so a found %ALL still carries the manual delete command, and apply the no-record ^UnitTestRoot rule per namespace; Setup.cls change
+- 2026-11-26T04:09:37Z status=routed owner=burndown by=lead note=Planner 2026-11-25: the burn-down fixes the text (the 1.2.0-upgrade path most current users take), not close by decision, unless that costs more than a few lines
