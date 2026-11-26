@@ -6567,3 +6567,50 @@ Each point is proven red by reverting its story's guard. The IRIS-side halves (4
 - **AC 45.5.6** — Back-compat (Rule #19): docs, the capstone, and one product string: the startup warning's last sentence becomes `See "What the safety settings protect" in the README.` (decision #170; the line is new in `1.3.0`, under `S-45.4-block-raw-tools`). No other product code changes in this story. *(Amended 2026-11-26 at the Story 45.5 spec gate, wave-10 decision #173.)* `CHANGELOG.md` and a changeset; the release handoff names `1.3.0` and what it must carry (every `@iris-mcp/*` package through the fixed group, with the new IRIS-side embed in `@iris-mcp/shared`), and that the IPM tree is stamped at the version step.
 - **Optional evidence:** the capstone replays the reporter's probe cases if he has shared them by then.
 - Issue #1 points 1, 2 and 4 (the README should say the data policy's scope, that read-only does not stop a SELECT from calling SqlProc methods, and that the safety settings live in the Node process). Owner decision (5), 2026-11-24.
+
+### Story 45.6: Epic 45 Burn-down, IRIS Side
+
+This is the first of two `/epic-cycle` burn-down stories, chartered on 2026-11-26 at Epic 45's burn-down gate during the unattended run. The split along the `Setup.cls` seam was accepted by the Planner (wave-10 decision #175). This story takes the 7 story-closable ledger entries that change the IRIS-side classes, their tests or the IPM generator, so `BOOTSTRAP_VERSION` moves once. It runs before 45.7.
+- **Terminal outcomes only.** Each entry ends resolved, closed with evidence, or closed by decision. Re-deferral is not allowed (Rule #37).
+- **Probe before fixing.** Every item whose fix rests on an unverified claim is probed first on a throwaway (Rules #16, #42). Never probe on the shared instance.
+- **Proof of a fix.** A resolved fix is proven live or mutation-verified (Rule #48).
+- **Not work here.** Three entries are owner items and only restated on the epic-close sheet: DW-719, DW-720 and DW-722.
+- **Docs move with behavior.** Where behavior moves, the Story 45.5 README section is updated in the same change.
+- **Scope limits.** No new tool and no new governance key. The pinned `SqlProc` set of `Setup` stays exactly the five.
+
+- **AC 45.6.1** — Each entry below ends terminal, with its disposition mirrored into the ledger. The disposition tally is counted mechanically (Rule #51).
+- **AC 45.6.2** — Back-compat (Rule #19): every behavior not named by an entry is pinned unchanged. `BOOTSTRAP_VERSION` from→to is recorded (Rule #24). The automatic install and the `uninstall-round-trip` suite stay green.
+- **AC 45.6.3** — Least-privilege axis (decision #166): the lead smoke includes a least-privilege leg.
+- **DW-786 (owner decision #174).** `Configure` and `ConfigureMapping` refuse when called inside a transaction (`$TLEVEL>0`).
+  - **Probe first:** the bootstrap's Atelier `action/query` runs at `$TLEVEL=0`, for both a fresh install and an upgrade, and `iris_sql_query`'s read-only path runs at `$TLEVEL>0`. If either does not hold, stop and tell the Planner.
+  - **The refusal** is a clear error status: the call ran inside a transaction (as a read-only SQL query does), nothing changed, and the fix is to run it from an IRIS terminal or let the automatic install do it.
+  - **Live leg:** a read-only server, an admin account, `%ALL` and the mapping removed. `SELECT ExecuteMCPv2.Setup_ConfigureMapping(...)` through `iris_sql_query` is refused, and `Config.Namespaces`/`Config.MapPackages.Exists` still answer 0. The same holds for `Configure`. The mutation (remove the guard) turns the leg red.
+  - **Docs:** update the README residual bullet and the CHANGELOG 45.5 bullet ("This release documents…"). The direct-Atelier admin case stays "the account's privileges are the boundary". (ledger; owner)
+- **DW-773.** `Setup.IsConfigured()` cannot tell "not registered" from "cannot read `%SYS`", so a least-privilege account always reads `unconfigured`. With the install off it gets the could-not-confirm warning on every start. With the install on, every connect recompiles and fails `Configure`. (Planner #167: terminal in this epic.)
+  - **Probe first:** whether `IsConfigured`, or a new helper that is not a `SqlProc`, can tell `<PROTECT>` apart while the five contracts stay as they are. If only a contract change works, bring it to the Planner first.
+  - **Docs:** the README least-privilege text is updated in the same change. (ledger; routed from Story 45.2 review)
+- **DW-780.** The uninstall report after a 1.2.0 install that IPM upgraded: `%ALL` is left without its manual command, and nothing is said about a `^UnitTestRoot` that 1.2.0 set. Fix the text: a `found` `%ALL` carries the manual command, and the no-record `^UnitTestRoot` rule applies per namespace (Planner: fix, don't close, unless it costs more than a few lines). (ledger; routed from Story 45.3 review)
+- **DW-787.** The bootstrap fails to compile `ExecuteMCPv2.REST.Interop` in a namespace that is not interoperability-enabled. Probe first on both editions. If it reproduces, the fix keeps such a namespace installing cleanly: either skip `REST.Interop` there with a clear report, or make it compile. It never leaves a half-compiled package. (ledger; routed from Story 45.5 plan)
+- **DW-765.** The `/config/database` route reports `resource` as empty for every database, because `Config.Databases` has no `Resource` property. Probe where the resource lives (for example `SYS.Database`), then fix the handler, or close with evidence. (ledger; routed from Story 45.1)
+- **DW-774.** IPM `Unconfigure`-phase invoke in `module.xml`, so that a bare `zpm uninstall` also removes the configuration. This is a generator change only, because the stamped IPM tree still moves only at the version step (Rule #18). Probe IPM's phase order on a throwaway, or close by decision with the reason. (ledger; routed from Story 45.3)
+- **DW-778.** `SetupTest` and `SetupUninstallTest` run only by hand. Either a CI job runs them on the throwaway with totals checked (Rule #35), or the entry is closed by decision with the reason (Planner #168: terminal). (ledger; routed from Story 45.3)
+
+### Story 45.7: Epic 45 Burn-down, TypeScript and Docs
+
+The second burn-down story, chartered with 45.6 (wave-10 decision #175). It takes the 3 story-closable ledger entries that change the TypeScript servers and the docs. It runs after 45.6, because DW-773's outcome shapes what it documents. The rules are the same as 45.6: terminal dispositions only, probe first, live or mutation proof, and the 45.5 section updated where behavior moves.
+
+- **AC 45.7.1** — Each entry below ends terminal, with its disposition mirrored into the ledger. The tally is counted mechanically (Rule #51).
+- **AC 45.7.2** — Back-compat (Rule #19): every behavior not named by an entry is pinned unchanged. The least-privilege axis (decision #166) holds in the lead smoke.
+- **DW-770 (Planner ruling #161).** An install-off profile, read-only included, treats the deployed side as current when its marker's hash equals this server's `BOOTSTRAP_VERSION` hash, whatever the semver and sequence say. Install-on behavior is unchanged.
+  - **Rule #59 proof:** change one byte in one bootstrapped class, regenerate, and the hash moves and the profile refuses. Restore it, and the profile reads current.
+  - **Live proof:** with the same hash and an older semver, the profile runs with no refusal and no write. With a different hash, it refuses.
+  - **Docs:** the README, the refusal text, the CHANGELOG and the changeset return to "after a release that changes the IRIS-side classes". The CHANGELOG says how to tell: the `BOOTSTRAP_VERSION` line in each release's "IRIS side" section. (ledger; routed from Story 45.2 review)
+- **DW-767.** The startup bootstrap uses the `IRIS_*` config, while the default client uses the registry profile, which an `IRIS_PROFILES` default entry can override. Probe first with an `IRIS_PROFILES` default entry that points at a second throwaway: which instance does the startup bootstrap install to, and which do the default tools call? Fix it or close it with evidence. (ledger; routed from Story 45.2 plan)
+- **DW-784 (Planner pre-ruling).** `iris_sql_analyze` stats/running may show other sessions' statement literals under `block`. Probe first.
+  - **If literals appear:** the affected actions join `DATA_POLICY_BLOCK_KEYS`, with a zero-request wire leg, and the `redact`/`allow` sweep is unchanged.
+  - **If the text is parameterized:** close with that evidence.
+  - **Either way:** the 45.5 residual table gets the outcome. (ledger; routed from Story 45.4 review)
+- **`SECURITY.md` wording (the Planner, 2026-11-26, at the Story 45.5 acceptance).**
+  - **"Supported versions" overclaims.** Replace "within a major … an upgrade needs no change on your side" with: "Within a major, the packages, the REST routes and the tool surface only grow. A minor release can change a behavior for safety; its CHANGELOG lists each change and what to do. A security fix is published as a new release of the latest 1.x." This is because 1.2.0 and 1.3.0 both carry sanctioned behavior changes.
+  - **Tone.** Replace "No email address is published for security reports, so please do not look for one" with "Please use private reporting rather than email or a public issue or pull request."
+  - **Pins.** Update the doc-claims pins.

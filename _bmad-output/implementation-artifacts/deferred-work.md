@@ -4323,6 +4323,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: cr spec-45-1-sql-statements-honor-sql-privileges.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Config.cls:209 reads tProps(Resource) from Config.Databases.Get, but Config.Databases has no Resource property (irissys/Config/Databases.cls); IRIS keeps it in SYS.Database.ResourceName. Live read 2026-11-25 (shared instance, iris_database_list): resource is empty for all 15 databases, IRISSYS included. The create/modify resource input (Config.cls:244) is unverified too.
 - 2026-11-25T16:31:50Z status=routed owner=burndown by=cr note=IRIS-side fix (read SYS.Database ResourceName in %SYS, probe the create/modify path) plus embed regen; found while reviewing the 45.1 live gate
+- 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
 
 ### DW-766: The SQL tools' minimum account (%Development:U plus the namespace's database resource) is proven only where the namespace's globals, routines and the ExecuteMCPv2 classes share one database
 - source: cr spec-45-1-sql-statements-honor-sql-privileges.md | severity: med | fix-risk: low | footprint: in-epic
@@ -4336,6 +4337,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Unverified (maybe-false): Story 45.2 plan read server-base.ts start() passing this.config to bootstrap while the default ToolContext client is built from the registry profile; not reproduced
 - 2026-11-25T17:32:19Z status=routed owner=burndown by=harvest note=observed at the 45.2 plan, out of scope (AD-15 unused-feature pin); probe whether an IRIS_PROFILES default entry with a different host makes startup bootstrap one instance and tools call another
 - 2026-11-25T17:57:23Z status=routed owner=burndown by=lead note=Planner 2026-11-25: probe first (Rule #16): an IRIS_PROFILES default entry pointing at a second throwaway different from IRIS_*; observe which instance startup bootstrap installs to and which the default tools call
+- 2026-11-26T11:02:31Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=lead note=chartered into Story 45.7 at the Epic 45 burn-down gate (decision #175)
 
 ### DW-768: Sibling docs do not name IRIS_AUTO_INSTALL, per-profile autoInstall or IRIS_SIDE_NOT_INSTALLED
 - source: spec-45-2-auto-install-setting-off-under-read-only.md | severity: low | fix-risk: low | footprint: in-footprint
@@ -4353,6 +4355,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Code review (Blind Hunter, verified by lead against commit 4fcb0706): the marker is <semver>+<sequence>.<hash>; the release version step restamps the semver (1.1.0+5.6cbac260e73f -> 1.2.0+5.6cbac260e73f, same hash); markers order by semver first, so after any release the deployed side reads stale and an install-off profile refuses until an operator upgrades once. Docs and refusal now say after every upgrade
 - 2026-11-25T20:59:17Z status=decision-pending owner=burndown by=cr note=Owner question via the Planner: accept (docs already true) or amend AD-14 so an install-off profile treats a semver-only difference (same sequence and hash, byte-identical classes) as current. Lead recommends the amendment: it matches the C-2 wording (class-changing release) and avoids an admin step per patch release
 - 2026-11-25T21:01:24Z status=routed owner=burndown by=lead note=Planner ruling 2026-11-25 (decision #161): option (b), not an owner question. Build before epic close (45.3 or the burn-down): (1) an install-off profile (incl. read-only) treats the deployed side as current when its marker HASH equals this server's BOOTSTRAP_VERSION hash, whatever semver and sequence say (raise it before building if the sequence must also match); (2) install-on behavior unchanged unless that costs more, then say so; (3) Rule #59: one byte changed in one bootstrapped class moves the hash and the profile refuses, restored reads current; (4) live throwaway: same hash older semver runs with no refusal and no write, different hash refuses; (5) docs back to after a release that changes the IRIS-side classes in README, refusal, CHANGELOG, changeset, and the CHANGELOG says how to tell (the BOOTSTRAP_VERSION line in each release's IRIS side section)
+- 2026-11-26T11:02:31Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=lead note=chartered into Story 45.7 at the Epic 45 burn-down gate (decision #175)
 
 ### DW-771: Setup's five bootstrap SqlProcs are callable by any SQL client that holds EXECUTE; moving the bootstrap off SQL would close it
 - source: orchestrator-decisions-wave-10.md #164 (Planner, Story 45.3 gate) | severity: med | fix-risk: high | footprint: out-of-footprint
@@ -4372,11 +4375,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Live on a throwaway 2026.2: Atelier SELECT ExecuteMCPv2.Setup_IsConfigured() returns {Configured:false} for %Development:U + the DB resource, true for _SYSTEM; Setup.cls:173-184 catches PROTECT and returns 0. Install off: the could-not-confirm WARN on every start. Install on (pre-existing): every connect of that account recompiles the classes and fails Configure with the %Admin_Manage warning
 - 2026-11-25T22:56:02Z status=routed owner=burndown by=cr note=Burn-down candidate. A distinct cannot-read result would remove the WARN, the per-connect recompile for least-privilege accounts and the 404 heuristic, but IsConfigured's return values are pinned by AC 45.3.8 and it is one of DW-771's five procedures: probe first whether the TS probe can read the web app another way (e.g. a read-only route an account with %Development can call), else a new non-SqlProc path; .cls change moves BOOTSTRAP_VERSION
 - 2026-11-25T23:18:33Z status=routed owner=burndown by=lead note=Planner 2026-11-25 (decision #167), BINDING: terminal disposition inside Epic 45 (resolved, or closed by an owner decision), never re-deferred. Probe first (Rule #16) whether IsConfigured or a new non-SQL helper can tell PROTECT from not-registered (e.g. a third state the probe maps to an unconfirmed/unknown state that never triggers a recompile), keeping the pinned five SqlProcs' contracts; if the only fix changes a pinned procedure contract, bring it to the Planner first. Order: 45.5 documents today's least-privilege behavior at each auto-install setting; the burn-down story (runs after 45.5) updates that text in the same change if its fix lands
+- 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
 
 ### DW-774: IPM Unconfigure-phase invoke in module.xml so a bare zpm uninstall also removes the web app, mapping and %ALL
 - source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: 45.3 build review; today the order is the one-liner first, then zpm uninstall (probe P7); module.xml is in the stamped IPM tree, regenerated only at release
 - 2026-11-26T02:13:32Z status=routed owner=burndown by=harvest note=IPM tree change; burn-down candidate
+- 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
 
 ### DW-775: A run that fails after deleting the classes cannot be re-run without reinstalling (Setup itself is gone)
 - source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: low | footprint: in-footprint
@@ -4402,6 +4407,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 45.3 build review; the classes are seeded into the CI throwaway but nothing executes them; the 15-leg live gate covers the same decisions end to end
 - 2026-11-26T02:13:32Z status=routed owner=burndown by=harvest note=Burn-down candidate: run the seeded ObjectScript unit classes in the CI throwaway suite with total checked (Rule #35)
 - 2026-11-26T02:16:28Z status=routed owner=burndown by=lead note=Planner 2026-11-25 (decision #168): terminal answer required in the burn-down, never re-deferred: a CI job runs SetupTest and SetupUninstallTest on the throwaway with totals checked (Rule #35), or closed by decision with the reason
+- 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
 
 ### DW-779: Delete-after-Exists error branches of the uninstall's web-app and mapping steps are not reached by any test
 - source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: low | footprint: in-footprint
@@ -4413,6 +4419,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 45.3 CR: such an install has a found record (IPM ConfigureMapping), so the no-record rule does not fire; nothing is removed wrongly, only report text is missing
 - 2026-11-26T04:06:50Z status=routed owner=burndown by=cr note=Burn-down candidate: amend the I/O Matrix so a found %ALL still carries the manual delete command, and apply the no-record ^UnitTestRoot rule per namespace; Setup.cls change
 - 2026-11-26T04:09:37Z status=routed owner=burndown by=lead note=Planner 2026-11-25: the burn-down fixes the text (the 1.2.0-upgrade path most current users take), not close by decision, unless that costs more than a few lines
+- 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
 
 ### DW-781: Code-running write tools (compile/load, start a production, build a cube, run a task) stay on under block alone
 - source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -4435,6 +4442,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 45.4 CR (maybe-false): iris_sql_analyze is residual (plans only, never runs the caller's SQL), but its stats and running modes may list other sessions' statement text, which can carry literals (identifiers)
 - 2026-11-26T07:21:11Z status=routed owner=burndown by=cr note=Probe first on a throwaway (Rule #16): run a statement with a literal in one session, read iris_sql_analyze stats and running from another; if literals appear, cover the affected actions under block (a key or action in DATA_POLICY_BLOCK_KEYS) or close with evidence
 - 2026-11-26T07:46:10Z status=routed owner=burndown by=lead note=Planner ruling 2026-11-26 (pre-decided): if the probe shows iris_sql_analyze returns other sessions' statement text with literals, the affected actions join DATA_POLICY_BLOCK_KEYS under block (zero-request wire leg, redact/allow sweep unchanged); if parameterized (no literals), close with that evidence. Docs order: 45.5 (runs first) states it as under probe; the burn-down updates the residual table with the outcome in the same change
+- 2026-11-26T11:02:31Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=lead note=chartered into Story 45.7 at the Epic 45 burn-down gate (decision #175)
 
 ### DW-785: Decision #172 record said insert/update return IDs or status only
 - source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: low | fix-risk: low | footprint: in-footprint
@@ -4448,9 +4456,11 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-26T08:04:18Z status=decision-pending owner=burndown by=lead note=Back to the owner via the Planner (reopens #171's premise). Lead recommendation: a guard in Configure and ConfigureMapping that refuses when called inside a transaction ($TLEVEL>0), which is exactly iris_sql_query's readOnly path; the bootstrap calls them through Atelier outside a transaction, so it is unaffected (probe first). 45.5 documents today's behavior (A2); the burn-down updates the text if a fix ships
 - 2026-11-26T09:26:17Z status=routed owner=burndown by=merge_gate note=OWNER decision 2026-11-26 via the Planner (decision #174): option (b), amends #171 point 3 (points 1, 2, 4 stand). Build in the burn-down: Configure and ConfigureMapping refuse when called inside a transaction (TLEVEL>0). Conditions: (1) probe first on a throwaway that the bootstrap's Atelier action/query runs at TLEVEL=0 (fresh install and upgrade) and iris_sql_query's read-only path at TLEVEL>0, else stop and tell the Planner; (2) clear error status: ran inside a transaction (as a read-only SQL query does), changed nothing, run it from an IRIS terminal or let the automatic install do it; no change to %ALL, mapping, iris.cpf, web app; (3) live leg: read-only server, admin account, %ALL and mapping removed, SELECT Setup_ConfigureMapping through iris_sql_query refused and Exists still 0, same for Configure; mutation removing the guard turns it red; the automatic install and uninstall-round-trip stay green; (4) docs in the same change: 45.5 residual text (A2) updated to the guarded behavior, direct-Atelier admin case stays documented as account = boundary; (5) BOOTSTRAP_VERSION from->to recorded, pinned SqlProc set stays exactly the five
 - 2026-11-26T10:31:37Z status=routed owner=burndown by=cr note=45.5 CR: when the guard ships, update both 'This release documents...' sentences (README residual bullet and CHANGELOG 45.5 bullet) in the same change
+- 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
 
 ### DW-787: The bootstrap fails to compile ExecuteMCPv2.REST.Interop in a namespace that is not interoperability-enabled
 - source: spec-45-5-what-the-safety-settings-protect.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: 45.5 plan probe side finding on IRIS for Health 2026.2; not checked on the iris-community edition
 - 2026-11-26T08:04:18Z status=routed owner=burndown by=cr note=Probe first: confirm on both editions; decide whether the bootstrap should skip or tolerate the Interop handler in a non-interop namespace, and what the docs say
 - 2026-11-26T08:05:09Z status=routed owner=burndown by=lead note=Planner 2026-11-26: probe first on both editions; if it reproduces, the fix keeps a non-interop namespace installing cleanly (skip REST.Interop there with a clear report, or make it compile), never a half-compiled package
+- 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
