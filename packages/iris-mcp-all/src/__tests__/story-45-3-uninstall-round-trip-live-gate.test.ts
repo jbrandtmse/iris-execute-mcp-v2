@@ -20,8 +20,8 @@
  * foreign mapping added after the install, an `ExecuteMCPv2` mapping that existed before it, `^UnitTestRoot` preset, `^UnitTestRoot` changed, no record (an install by 1.2.0),
  * an install by 1.2.0 upgraded in place by IPM (the Configure phase runs in a transaction with no web request, so `%ALL` is recorded as found),
  * `^UnitTestRoot` in a namespace with no record of its own while another holds one (Story 45.6, DW-780), the web-route refusal of
- * the two configuration calls (DW-786, whose teardown re-activates the namespace table), the bootstrap into a namespace without
- * interoperability (DW-787), two
+ * the two configuration calls (DW-786, whose teardown re-activates the namespace table), the upgrade and self-heal bootstraps
+ * through the guard (DW-786), the bootstrap into a namespace without interoperability (DW-787), two
  * namespaces with a shadowed copy, a `dev`-marked copy in a second namespace (ownership), a dev Setup over a recorded install and a
  * marker-less copy over a recorded install (ownership), IPM-owned (the guard stub) with a second
  * run, a failing step (a namespace whose only database is dismounted), a failing `^UnitTestRoot` step (a database mounted read-only) that
@@ -821,9 +821,13 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
       expect(served.results, "both calls were answered").toHaveLength(2);
       expect(JSON.stringify(served.results[0]), "ConfigureMapping names the refusal").toContain("ConfigureMapping changed nothing: it was called inside a transaction during a web request");
       expect(JSON.stringify(served.results[1]), "Configure names the refusal").toContain("Configure changed nothing: it was called inside a transaction during a web request");
-      expect(differences(before, snapshot()), "%ALL, the mapping and the classes are as they were").toEqual([]);
+      // Beyond the refusal texts, the route rolls the statement back, which undoes a change to the web application and makes
+      // Config.Namespaces and Config.MapPackages report a recreated %ALL and mapping as absent. A ConfigureMapping that ran still
+      // shows in iris.cpf, and in the running configuration: HSCUSTOM then sees the ExecuteMCPv2 classes through %ALL, which the
+      // snapshot reads. The web application's namespace is a side check that a Configure which ran would also pass.
       expect(cpfLines(), "iris.cpf still holds no %ALL line").toBe(0);
-      expect(webAppNamespace(), "the web application still points at the install namespace").toBe(appNamespaceBefore);
+      expect(differences(before, snapshot()), "%ALL, the mapping and the classes (also as HSCUSTOM sees them) are as they were").toEqual([]);
+      expect(webAppNamespace(), "side check: the web application still points at the install namespace").toBe(appNamespaceBefore);
     } finally {
       // The leg's own teardown. A configuration write that ran inside the route's transaction is rolled back with it, and IRIS then
       // keeps a namespace table that no namespace created afterwards can be entered through, so the legs that create a namespace
@@ -832,9 +836,18 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     }
   });
 
-  leg("DW-787: the real bootstrap into a namespace that is not interoperability-enabled compiles every class, ExecuteMCPv2.REST.Interop included", async () => {
+  leg("DW-787: the real bootstrap into a namespace that is not interoperability-enabled compiles every class, ExecuteMCPv2.REST.Interop included, and configures the web application and the mapping", async () => {
     terminal("%SYS", SCRATCH_NAMESPACE_SCRIPT);
+    // Precondition: UNINSTALLNS cannot see the interoperability classes, so a compile-time Ens reference would fail there.
+    const interop = outputLines(terminal("UNINSTALLNS", ['Write "ENSITEM=",##class(%Dictionary.CompiledClass).%ExistsId("Ens.Config.Item"),!']));
+    expect(interop, "precondition: Ens.Config.Item is not a compiled class in UNINSTALLNS").toContain("ENSITEM=0");
     await install("UNINSTALLNS");
+    const configured = snapshot();
+    expect(configured["webapp"], "the bootstrap registered the web application").toBe("1");
+    expect(configured["%ALL"], "and %ALL").toBe("1");
+    expect(configured["map Config.MapPackages:List"], "and the ExecuteMCPv2 mapping").toMatch(/^1 ExecuteMCPv2;/);
+    const appNamespace = outputLines(terminal("%SYS", ['Set sc=##class(Security.Applications).Get("/api/executemcp/v2",.p) Write "WEBAPPNS=",$Get(p("NameSpace")),!']));
+    expect(appNamespace, "the web application points at UNINSTALLNS").toContain("WEBAPPNS=UNINSTALLNS");
     const names = [...embedded.classes.keys()].map((name) => name.replace(/\.cls$/, ""));
     expect(names, "the embed holds ExecuteMCPv2.REST.Interop").toContain("ExecuteMCPv2.REST.Interop");
     const printed = terminal("UNINSTALLNS", [
@@ -844,6 +857,34 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     const lines = outputLines(printed);
     expect(lines.filter((line) => line.startsWith("NOTCOMPILED ")), "every bootstrapped class is compiled in UNINSTALLNS").toEqual([]);
     expect(lines, "the check ran").toContain("CHECKED");
+  });
+
+  leg("DW-786: the guard lets the automatic install's upgrade and self-heal through: each registers the web application, and the upgrade also creates %ALL and the mapping", async () => {
+    // Upgrade: the classes deployed under an older marker, then the web application, the mapping and %ALL taken away (the seed
+    // configures them), so the upgrade has to run both configuration calls.
+    const olderMarker = embedded.marker.replace(/\+(\d+)\./, (_whole, sequence: string) => `+${Number(sequence) - 1}.`);
+    expect(olderMarker, "an older marker can be built from the shipped one").not.toBe(embedded.marker);
+    await seedInstance(target, embedded, { marker: olderMarker, perturb: false });
+    terminal("%SYS", [
+      `Set sc=##class(Security.Applications).Delete("${WEBAPP}")`,
+      'Set sc=##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")',
+      'Set sc=##class(Config.Namespaces).Delete("%ALL")',
+    ]);
+    const seeded = snapshot();
+    expect(seeded["webapp"], "precondition: no web application before the upgrade").toBe("0");
+    expect(seeded["%ALL"], "precondition: no %ALL before the upgrade").toBe("0");
+    await install();
+    const upgraded = snapshot();
+    expect(upgraded["webapp"], "the upgrade registered the web application").toBe("1");
+    expect(upgraded["%ALL"], "the upgrade created %ALL").toBe("1");
+    expect(upgraded["map Config.MapPackages:List"], "the upgrade created the mapping").toMatch(/^1 ExecuteMCPv2;/);
+    expect(upgraded["record USER"], "the upgrade deployed the shipped marker").toContain(`deployed=${embedded.marker};`);
+
+    // Self-heal: the web application removed under a current install; the next start registers it again.
+    terminal("%SYS", [`Set sc=##class(Security.Applications).Delete("${WEBAPP}")`]);
+    expect(snapshot()["webapp"], "precondition: the web application is gone").toBe("0");
+    await install();
+    expect(snapshot()["webapp"], "the self-heal registered the web application again").toBe("1");
   });
 
   leg("back-compat (AC 45.3.8): the five install methods return, through the SQL route the bootstrap uses, what they returned before the record existed, and a repeat call changes nothing", async () => {
@@ -930,20 +971,26 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(noSys.lines.some((line) => line.startsWith("Left: %ALL, ^UnitTestRoot, classes and the install records")), "the rest is left, with the reason").toBe(true);
     expect(differences(installed, snapshot()), "the instance is unchanged").toEqual([]);
 
-    // DW-773: the same account cannot read %SYS, yet IsConfigured answers from the CSP application lookup, both ways.
-    const lp1Configured = (): string => {
+    // DW-773: neither account can read the web application's definition, yet IsConfigured answers from the CSP application lookup,
+    // both ways. lp1 cannot switch to %SYS (the switch throws); lp2 can, but Security.Applications.Exists answers 0 with an
+    // access-denied status instead of throwing (the EXISTS line is the precondition that makes lp2 a distinct case).
+    const lpRead = (user: string, password: string): { exists: string; configured: string } => {
       const printed = terminal("USER", [
-        'Set ok=$System.Security.Login("uninstalllp1","Pa55word!lp1")',
+        `Set ok=$System.Security.Login("${user}","${password}")`,
         'Write "LOGIN-AS=",$Username,!',
+        'Try { Set $NAMESPACE="%SYS" Write "EXISTS=",##class(Security.Applications).Exists("/api/executemcp/v2"),! } Catch e { Write "EXISTS=throws",! } Set $NAMESPACE="USER"',
         'Write "ISCONF=",##class(ExecuteMCPv2.Setup).IsConfigured(),!',
       ]);
       const lines = outputLines(printed);
-      expect(lines.find((entry) => entry.startsWith("LOGIN-AS=")), "the terminal logged in as lp1").toBe("LOGIN-AS=uninstalllp1");
-      return (lines.find((entry) => entry.startsWith("ISCONF=")) ?? "").slice("ISCONF=".length);
+      const field = (name: string): string => (lines.find((entry) => entry.startsWith(`${name}=`)) ?? "").slice(name.length + 1);
+      expect(field("LOGIN-AS"), `the terminal logged in as ${user}`).toBe(user);
+      return { exists: field("EXISTS"), configured: field("ISCONF") };
     };
-    expect(lp1Configured(), "lp1 reads the registered web application as configured").toBe("1");
+    expect(lpRead("uninstalllp1", "Pa55word!lp1"), "lp1: the switch to %SYS throws, and the registered web application reads as configured").toEqual({ exists: "throws", configured: "1" });
+    expect(lpRead("uninstalllp2", "Pa55word!lp2"), "lp2: Exists answers 0 without throwing, and the registered web application reads as configured").toEqual({ exists: "0", configured: "1" });
     terminal("%SYS", ['Set sc=##class(Security.Applications).Delete("/api/executemcp/v2")']);
-    expect(lp1Configured(), "lp1 reads the absent web application as not configured").toBe("0");
+    expect(lpRead("uninstalllp1", "Pa55word!lp1").configured, "lp1 reads the absent web application as not configured").toBe("0");
+    expect(lpRead("uninstalllp2", "Pa55word!lp2").configured, "lp2 reads the absent web application as not configured").toBe("0");
     terminal("USER", ['Set sc=##class(ExecuteMCPv2.Setup).Configure("USER")']);
 
     // lp2 can read %SYS but is not allowed to change it.

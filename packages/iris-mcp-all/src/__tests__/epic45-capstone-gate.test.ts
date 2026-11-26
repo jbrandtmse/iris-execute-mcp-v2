@@ -28,7 +28,9 @@
  *      `pnpm run gen:bootstrap`, rebuild shared (the files are restored byte for byte afterwards). Path: the built server's Atelier PUT.
  *      This leg is a text pin: `%Prepare(.pQuery)` also turns it red but changes no behavior, because `checkPriv` defaults to 1
  *      (`%SQL.Statement.%Prepare`); the behavior twin is P5 below.
- *  LP-hermetic (the least-privilege account, install off): read-only, a current side, `IsConfigured` answering `{Configured: false}`.
+ *  LP-hermetic (install off, an `IsConfigured` that cannot see the web application): read-only, a current side, `IsConfigured`
+ *      answering `{Configured: false}`. From Story 45.6 a least-privilege account reads the web application through the CSP application
+ *      lookup, so this state stands for a lookup that fails, not for every such account.
  *      Oracle: no write, one could-not-confirm `[WARN]`, and the custom-REST call is sent and answered. Mutation (P6): make the install-off
  *      `unconfigured` branch refuse up front (45.2's state before decision #165) in `bootstrap.ts` and rebuild shared. Path: the built dev gateway.
  *  LP-armed (`IRIS_REQUIRE_LIVE`, a throwaway-shaped target): a disposable account with `%Development:U` and `R` on the namespace's database
@@ -38,8 +40,9 @@
  *      this leg in `suite prepublish-all` (it is in `gateTestFiles`).
  *      Two of its checks are preconditions, not oracles: the `%ALL` mapping is already in place (the `_SYSTEM` start maps it), so
  *      `ConfigureMapping` would leave it as it is even if it ran, and the account holds only `R`, so IRIS would refuse a class write even
- *      with the install on. The `SQLCODE -99` answers and the start's one could-not-confirm warning are the oracles; the install-off
- *      behavior itself is proven hermetically by P3 and LP-hermetic.
+ *      with the install on. The `SQLCODE -99` answers and the start's lack of a could-not-confirm warning (Story 45.6, DW-773: the
+ *      account reads the installed side as `current`) are the oracles; the install-off behavior itself is proven hermetically by P3
+ *      and LP-hermetic.
  *
  * Needs no IRIS except the armed leg. Cross-package checks live in `@iris-mcp/all` (rule #45).
  */
@@ -435,7 +438,7 @@ describe("Epic 45 capstone P3 (issue point 3): a read-only connection installs n
   );
 });
 
-describe("Epic 45 capstone LP-hermetic (issue point 3, DW-772): a least-privilege account with the install off", () => {
+describe("Epic 45 capstone LP-hermetic (issue point 3, DW-772): the install off and an IsConfigured that cannot see the web application", () => {
   let prepared: Hermetic;
   beforeAll(async () => {
     prepared = await hermetic();
@@ -704,17 +707,17 @@ describe("Epic 45 capstone LP-armed (issue points 3 and 4): a least-privilege ac
     expect(await leftovers(), `nothing named ${STEM} is left`).toEqual({ tables: 0, classes: 0, principals: 0 });
   }, 300_000);
 
-  it("start: the account's server changed no class and warned once that it could not confirm the web application", async (ctx) => {
+  it("start: the account's server changed no class and reads the installed side as current, with no could-not-confirm warning (Story 45.6, DW-773)", async (ctx) => {
     if (skipIfReason(armedSkip, ctx)) return;
     expect(setupBefore, "the Setup document was read before the start").toBeDefined();
     expect(setupAfter, "the Setup document was read after the start").toBeDefined();
-    // Preconditions (the account holds only R, so IRIS refuses its class writes either way); the warnings below are the oracle.
+    // Preconditions (the account holds only R, so IRIS refuses its class writes either way); the warning check below is the oracle.
     expect(setupAfter?.ts, "precondition: the Setup document's timestamp is unchanged").toBe(setupBefore?.ts);
     expect(setupAfter?.content, "precondition: the Setup document's content is unchanged").toEqual(setupBefore?.content);
     expect(await allMapping(), "precondition: the %ALL mapping is unchanged").toBe(mappingBefore);
-    const warnings = bootstrapWarnings(readOnlyStderr);
-    expect(warnings, "exactly one bootstrap warning").toHaveLength(1);
-    expect(warnings[0]).toContain(COULD_NOT_CONFIRM);
+    // IsConfigured answers from the CSP application lookup for an account that cannot read %SYS, so the probe reads `current`.
+    const couldNotConfirm = readOnlyStderr.split(/\r?\n/).filter((line) => line.includes(COULD_NOT_CONFIRM));
+    expect(couldNotConfirm, "no could-not-confirm warning: the account reads the registered web application").toEqual([]);
     expect(readOnlyStderr).not.toContain("IRIS_SIDE_NOT_INSTALLED");
   });
 

@@ -31,7 +31,7 @@
  * packages/shared/package.json. Compared against
  * `ExecuteMCPv2.Setup_GetBootstrapVersion()` at MCP server startup.
  */
-export const BOOTSTRAP_VERSION = "1.2.0+11.6ef86aefc48e";
+export const BOOTSTRAP_VERSION = "1.2.0+12.bd38d590c26e";
 
 export interface BootstrapClass {
   name: string;
@@ -1297,7 +1297,7 @@ Parameter GUARDTEXT = "changed nothing: it was called inside a transaction durin
 /// deployment, an equal semver and sequence with a different hash, the
 /// <code>"dev"</code> placeholder and any unparseable value are left in place
 /// with a warning.</p>
-Parameter BOOTSTRAPVERSION = "1.2.0+11.6ef86aefc48e";
+Parameter BOOTSTRAPVERSION = "1.2.0+12.bd38d590c26e";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -2032,18 +2032,26 @@ ClassMethod ConfigureMapping(pNamespace As %String = "") As %Status [ SqlProc ]
 }
 
 /// Check whether the <code>/api/executemcp/v2</code> web application exists.
-/// <p>Returns 1 if registered, 0 if not. An account that cannot read <code>%SYS</code>
-/// gets the answer from <method>WebAppRegistered</method> instead of 0.</p>
+/// <p>Returns 1 if registered, 0 if not. An account that cannot read the application's
+/// definition in <code>%SYS</code> gets the answer from <method>WebAppRegistered</method>
+/// instead of 0: one that cannot switch to <code>%SYS</code> (the switch throws), and one that
+/// can but may not read <code>Security.Applications</code> (<code>Exists</code> then returns 0
+/// with an access-denied status instead of throwing). The fallback runs in the caller's
+/// namespace.</p>
 ClassMethod IsConfigured() As %Boolean [ SqlProc ]
 {
     Set tResult = 0
+    Set tOrigNS = $NAMESPACE
     Try {
         New $NAMESPACE
         Set $NAMESPACE = "%SYS"
-        Set tResult = ##class(Security.Applications).Exists(..#WEBAPP)
+        Set tResult = +##class(Security.Applications).Exists(..#WEBAPP)
+        Set $NAMESPACE = tOrigNS
     } Catch ex {
-        Set tResult = ..WebAppRegistered()
+        Set $NAMESPACE = tOrigNS
+        Set tResult = 0
     }
+    If 'tResult Set tResult = ..WebAppRegistered()
     Quit tResult
 }
 
@@ -22007,7 +22015,7 @@ Class ExecuteMCPv2.InstallGuard Extends %RegisteredObject
 /// This package's bootstrap version marker, <code>&lt;semver&gt;+&lt;sequence&gt;.&lt;hash&gt;</code>.
 /// <p>The value on disk is <code>"dev"</code>, a placeholder. <code>scripts/gen-bootstrap.mjs</code>
 /// stamps the real marker into the copy it embeds and packages, and this file is not edited for it.</p>
-Parameter BOOTSTRAPVERSION = "1.2.0+11.6ef86aefc48e";
+Parameter BOOTSTRAPVERSION = "1.2.0+12.bd38d590c26e";
 
 /// The class whose compiled BOOTSTRAPVERSION parameter is the deployed marker.
 Parameter SETUPCLASS = "ExecuteMCPv2.Setup";

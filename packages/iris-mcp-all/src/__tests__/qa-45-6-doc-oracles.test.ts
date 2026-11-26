@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
 import { BOOTSTRAP_CLASSES } from "../../../shared/src/bootstrap-classes.js";
@@ -70,6 +70,12 @@ describe("Story 45.6 QA: the documents against the embedded Setup class", () => 
   it("IsConfigured: the fallback is the CSP application lookup the CHANGELOG names", () => {
     expect(setup).toContain('Set tResult = ($System.CSP.GetAppName(..#WEBAPP _ "/") = (..#WEBAPP _ "/"))');
     expect(setup).toContain("Set tResult = ..WebAppRegistered()");
+    // The fallback runs after the Try/Catch, in the caller's namespace, whenever Exists did not answer 1 (an account that can enter
+    // %SYS but may not read Security.Applications gets 0 without an exception), and the Catch restores the namespace first (DW-789).
+    const isConfigured = /^ClassMethod IsConfigured\(\)[\s\S]*?^}/m.exec(setup)?.[0] ?? "";
+    expect(isConfigured, "the embed carries IsConfigured").not.toBe("");
+    expect(isConfigured).toMatch(/\} Catch ex \{\n\s+Set \$NAMESPACE = tOrigNS\n/);
+    expect(isConfigured).toMatch(/\n\s+\}\n\s+If 'tResult Set tResult = \.\.WebAppRegistered\(\)\n\s+Quit tResult\n\}$/);
     expect(changelog).toContain("`$System.CSP.GetAppName`");
     expect(readme).toContain("falls back to the CSP application lookup");
   });
@@ -104,5 +110,19 @@ describe("Story 45.6 QA: the read-only claim and the compile warning against the
   it("the README no longer says that an account that cannot read %SYS reads unconfigured when the web application is registered", () => {
     expect(readme).not.toContain("reads `unconfigured` even when the web application exists");
     expect(readme).toContain("reads `current` when the web application is registered");
+  });
+
+  it("the unreleased notes agree: neither the CHANGELOG nor a pending changeset says such an account reads unconfigured when the web application exists", () => {
+    // The 1.3.0 notes hold Story 45.2's section and Story 45.6's; 45.6 made IsConfigured answer for a least-privilege account.
+    const stale = /cannot read `%SYS`[^.]*reads `unconfigured` even when the web application exists|cannot tell "the web application is not registered" apart from "I cannot see it"/;
+    expect(changelog, "CHANGELOG.md").not.toMatch(stale);
+    for (const file of ["story-45-2-auto-install-setting-off-under-read-only.md", "story-45-6-epic-45-burn-down-iris-side.md"]) {
+      const changeset = path.join(REPO_ROOT, ".changeset", file);
+      if (existsSync(changeset)) expect(squash(readFileSync(changeset, "utf8")), file).not.toMatch(stale);
+    }
+    expect(changelog).toContain("Story 45.6 makes `IsConfigured` answer for it through the CSP application lookup, so it reads `current`.");
+    // Both kinds of account the fallback serves are named where the behavior is described.
+    expect(changelog).toContain("one that can but may not read `Security.Applications`");
+    expect(readme).toContain("it cannot switch to `%SYS`, or it can but may not read `Security.Applications`");
   });
 });

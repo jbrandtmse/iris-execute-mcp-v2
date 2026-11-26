@@ -33,6 +33,31 @@ deferred:
     location: >-
       src/ExecuteMCPv2/Setup.cls (IsConfigured, Catch)
     severity: medium (unverified)
+  - summary: >-
+      Code review 2026-11-26: TypeScript texts still describe the least-privilege behavior from before DW-773: the
+      warnWebAppUnconfirmed warning says "The account may not be able to read %SYS", two bootstrap.ts comments say such an
+      account reads unconfigured, and so does the header of bootstrap-auto-install.test.ts.
+    evidence: |-
+      After 45.6, IsConfigured answers for an account that cannot read the web application's definition in %SYS (throwaway
+      probe: both account kinds read 1/0 with the web application present/absent), so an unconfigured reading means a failed
+      lookup or an absent web application. This spec forbids TypeScript changes to bootstrap.ts.
+    location: >-
+      packages/shared/src/bootstrap.ts (warnWebAppUnconfirmed ~L993-1006, comments ~L1238 and ~L1343);
+      packages/shared/src/__tests__/bootstrap-auto-install.test.ts (header)
+    severity: low (route to 45-7-epic-45-burn-down-typescript-and-docs, which owns bootstrap.ts for DW-788/DW-790)
+  - summary: >-
+      Code review 2026-11-26 (from QA's ActivateAll finding): a Config.Namespaces.Create("%ALL") rolled back inside a transaction
+      leaves IRIS with a namespace table that a namespace created afterwards cannot be entered through, until
+      Config.Namespaces.ActivateAll(). The 45.6 guard closes this for iris_sql_query; an IPM install whose Configure phase creates
+      %ALL and whose later phase fails (IPM rolls the install back) may hit the same state.
+    evidence: |-
+      QA 2026-11-26: the guard-removed route leg (ConfigureMapping run inside the route's rolled-back transaction) broke every
+      later leg that creates a namespace until the teardown ran ActivateAll. The IPM half is unverified (pre-existing, not this
+      story's change). Settle it with a probe IPM module whose Activate phase fails after a Configure phase that creates %ALL,
+      then create a namespace and enter it.
+    location: >-
+      src/ExecuteMCPv2/Setup.cls (ConfigureMapping, Config.Namespaces.Create("%ALL")); the IPM install path
+    severity: medium (unverified; pre-existing)
 ---
 
 <intent-contract>
@@ -117,6 +142,38 @@ deferred:
 - Given `iris_database_list`, when it reads `USER` and `IRISLIB`, then `resource` is `%DB_USER`/`%DB_IRISLIB` and `IRISLIB`'s `readOnly` is true; and a create/modify with `resource` lands in `SYS.Database.ResourceName`.
 - Given CI's `integration-dev` suite on the seeded throwaway, when it runs, then `SetupTest` and `SetupUninstallTest` complete with `total` equal to their `Test*` method counts and `failed` 0.
 - Given no record anywhere, when the uninstall runs, then its lines are byte-identical to today (the L494 leg); and the SqlProc set and signatures pins pass unchanged (AC 45.6.2).
+
+### Review Findings
+
+Code review 2026-11-26 (follow-up review, `review_mode=full`, frozen diff `ee525237..b3bbaf91`). All four layers delivered (Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor); `failed_layers` none. 36 rows (35 from the layers, 1 from the reviewer's own probe) → 15 entries: 1 high, 5 medium, 9 low; 10 rows rejected.
+
+- [x] [Review][Patch] **HIGH: the Epic 45 capstone's armed least-privilege start leg still asserted the could-not-confirm warning that DW-773 removes**, so the epic-done gate would be red on its next armed `prepublish-all` run [packages/iris-mcp-all/src/__tests__/epic45-capstone-gate.test.ts:707] — now asserts no could-not-confirm line; header and the LP-hermetic title restated (that state now stands for a failed lookup). Armed on a seeded HSCUSTOM throwaway: 21/21.
+- [x] [Review][Patch] **MED: `IsConfigured` still read 0 for an account that can enter `%SYS` but may not read `Security.Applications`** [src/ExecuteMCPv2/Setup.cls:IsConfigured] — reviewer probe: such an account (`%DB_IRISSYS:R`, the uninstall gate's `uninstalllp2` shape) gets `Exists`=0 with `ERROR #822: Access Denied`, no exception, so the fallback in the `Catch` never ran. The fallback now runs after the `Try`/`Catch` whenever `Exists` does not answer 1. Pinned by the least-privilege leg (both account kinds, present and absent) and a source pin in `qa-45-6-doc-oracles.test.ts`.
+- [x] [Review][Patch] MED: `TestGuardRefusesInTransactionDuringWebRequest` removed the instance-wide mapping and restored it inline into the current namespace's database [src/ExecuteMCPv2/Tests/SetupTest.cls] — `RemoveMapping` saves the database, `RestoreMapping` puts it back as it was (asserted) and `OnAfterOneTest` restores it on any abort.
+- [x] [Review][Patch] MED: that test's record assertion read the test namespace's record, which an unguarded call never writes (cannot fail) [src/ExecuteMCPv2/Tests/SetupTest.cls] — now compares `tOther`'s record before and inside the transaction (`RecordDump`).
+- [x] [Review][Patch] MED: the DW-787 live leg had no non-interoperability precondition and no assertion for AC 5's second half [story-45-3-uninstall-round-trip-live-gate.test.ts] — asserts `Ens.Config.Item` is not compiled in `UNINSTALLNS`, then the web application (pointing at `UNINSTALLNS`), `%ALL` and the mapping.
+- [x] [Review][Patch] MED: AC 3's upgrade and self-heal had no automated pin [story-45-3-uninstall-round-trip-live-gate.test.ts] — new leg: older-marker seed with the configuration removed → upgrade configures and maps; web application deleted → self-heal registers it.
+- [x] [Review][Patch] LOW (lead directive, DW-789): `IsConfigured`'s `Catch` ran the fallback without restoring the namespace [src/ExecuteMCPv2/Setup.cls] — the namespace is restored first in the `Catch` and after `Exists`. Probed unreachable as a failure: with the restores removed and the `%ALL` mapping deleted, both least-privilege accounts still read 1 (one `.1` routine, so `..WebAppRegistered()` is a local call; the CSP lookup is instance-wide). Pinned by the source pin only.
+- [x] [Review][Patch] LOW (lead directive): the CHANGELOG 45.2 section (two bullets) and the 45.2 changeset said such an account reads `unconfigured` even when the web application exists [CHANGELOG.md, .changeset/story-45-2-*.md] — reworded; consistency pin added in `qa-45-6-doc-oracles.test.ts`.
+- [x] [Review][Patch] LOW: two checks of the real-route DW-786 leg were described as oracles [story-45-3-uninstall-round-trip-live-gate.test.ts] — the snapshot check IS an oracle (under a guard that runs and then refuses, HSCUSTOM sees the 35 classes through the recreated `%ALL` mapping); the web-application check is a side check; the `iris.cpf` count now runs first and its own red is recorded.
+- [x] [Review][Patch] LOW: `mutation:` lines missing for AC 6's writes, AC 45.6.2 and AC 5's second half — run and recorded under `## Verification`.
+- [x] [Review][Patch] LOW: README L550 did not name the remaining compile-check warning [README.md] — added.
+- [x] [Review][Patch] LOW: an IPM install started from a web request (`zpm` through `iris_execute_command`) is refused, undocumented [README.md, CHANGELOG.md, changeset] — one sentence each.
+- [x] [Review][Patch] LOW: the DW-765 create test never removed a leftover database of its fixed name [admin.integration.test.ts] — deleted before the create.
+- [x] [Review][Defer] LOW: TypeScript texts still describe the old least-privilege behavior (`warnWebAppUnconfirmed`'s "may not be able to read %SYS", `bootstrap.ts` comments near L1238/L1343, the `bootstrap-auto-install.test.ts` header) [packages/shared/src/bootstrap.ts] — deferred: Story 45.7 owns `bootstrap.ts` (this spec forbids TypeScript changes there).
+- [x] [Review][Lead] LOW: the spine has no `S-45.6-*` sanctions and no AD-14/AD-25/AD-31 text for the guard, the lookup or the compile-time rule [ARCHITECTURE-SPINE.md] — the lead's Rule 20 write (Design Notes D6 has the proposed text).
+
+**Rejected.**
+- Edge: a found `%ALL` holding foreign mappings is not listed — low; the manual text already says "check what else is mapped there first".
+- Edge: an invalid `globalJournalState` reaches `CreateDatabase` unvalidated — false; probe: 7 → `ERROR #5794 … '%JournalState'`, 0 → default 2.
+- Edge: `ReadOnly` with other properties in one `%Save` is refused — false; probe: `ReadOnly=1`+`ResourceName` and `ReadOnly=0`+`ResourceName` on a read-only database each save in one `%Save`.
+- Edge / Blind / Gap: the static pin's regex misses `Include` lists, `DependsOn`, `CompileAfter`, `ForeignKey … References` — low; none of the 35 classes uses those keywords; `reopen_if` a bootstrapped class gains one.
+- Blind: the per-namespace `^UnitTestRoot` rule reports namespaces the suite never touched — by-design (Design Notes D4; reported, never removed).
+- Blind: `%ALL` and `^UnitTestRoot` treated differently after an IPM upgrade of 1.2.0 — by-design (D4 residual, in the README).
+- Blind: `iris_database_manage` docs do not say IRIS refuses changes to a read-only database — low; IRIS's own text is returned, and the combined call works (probe above).
+- Blind: spec bookkeeping (`status`, `baseline_revision`, files list, CHANGELOG lead-in) — rejected: a spec edit; `status: done` is the build contract, and `681b68e6` differs from `ee525237` by one cycle-log line.
+- Gap: `tHasRequest`, `tLevelIn` and the IPM-upgrade leg's `REQUEST=0` are preconditions presented as assertions — low, cosmetic.
+- Gap: `ApplyArbitrarySetting`'s caller path is untested after the type change — false; probe on the seeded HSCUSTOM throwaway: formal `pItem:%RegisteredObject`, insert, update in place and an `@Host` target on an `Ens.Config.Item` all apply (`COUNT=2 FILEPATH=/tmp/b/ HOST=1`).
 
 ## Spec Change Log
 
@@ -257,6 +314,21 @@ deferred:
 - mutation: `pItem As Ens.Config.Item` → `bootstrap-no-interop-types.test.ts` (1 of 38, the `Interop.cls` row), and, in the live gate, the leg "DW-787: the real bootstrap into a namespace that is not interoperability-enabled ...": 1 failed, 20 passed of 21 (regen `1.2.0+12.a085e88e011f`).
 - mutation: list back on `Config.Databases` props → `admin.integration.test.ts`: 2 failed of 32; and `ApplyRuntimeProps` without the `ReadOnly` line (deployed to a throwaway) → "create applied readOnly": 1 failed, 31 passed of 32.
 - mutation: `DecideRecords` flipped → the `SetupUninstallTest` row of `custom-rest.integration.test.ts` (11 vs 12).
+- Code review (each restored by `cp` and checked with `cmp`; `gen:bootstrap` a no-op at `1.2.0+12.bd38d590c26e` after):
+- mutation: `IsConfigured` back to the build's shape (fallback only in the `Catch`), with M2–M4 below in one build (`1.2.0+14.94d472382de1`), full gate on a USER throwaway → 5 failed, 18 passed of 23, each red leg its own mutation's: least privilege (`lp2 … expected configured '0' to be '1'`).
+- mutation (M2): `ConfigureMapping` does its work and then returns the refusal text → the real-route DW-786 leg; re-run alone with the `iris.cpf` check first: `iris.cpf still holds no %ALL line: expected 2 to be 0`.
+- mutation (M3): `pItem As Ens.Config.Item` → the DW-787 leg: `the bootstrap registered the web application: expected '0' to be '1'` (AC 5's second half).
+- mutation (M4): the no-record reason `$Select` flipped (`Setup.cls` L369) → the no-record leg (AC 45.6.2's byte-identical lines) and the `^UnitTestRoot`-without-own-record leg.
+- mutation (Mutation B on the new leg): guard without the `$TLEVEL` term (`1.2.0+13.869751f0df84`) → the upgrade and self-heal leg is red (the seed's own Atelier `Setup_Configure` is refused first: "did not register the web application").
+- mutation (M5): `If 'tResult Set tResult = 0` (`1.2.0+13.373a1b0c09fb`, seeded HSCUSTOM throwaway) → `epic45-capstone-gate.test.ts` LP-armed start leg: 1 failed of 21 (one could-not-confirm line).
+- mutation (M6, same build): `ConfigureMapping` guard removed → `SetupTest` row 9 of 10; `DebugRunTestCase` shows `inside the transaction a refused call left the install record of USER as it was` red, with the refusal and mapping assertions; `the mapping is put back` passed.
+- mutation (M7a, same build): `CreateDatabase` argument 5 dropped → `admin.integration.test.ts` "applies resource…": `create applied the resource: expected '%DB_%DEFAULT' to be '%DB_USER'`.
+- mutation (M7c): argument 6 dropped (`1.2.0+14.3ac5588d02be`) → `create applied the journal state: expected 3 to be 2`.
+- mutation (M7b): `ApplyRuntimeProps`' `ResourceName` line dropped (`1.2.0+15.f2b6947a0c52`) → `modify applied the resource: expected '%DB_USER' to be '%DB_IRISLIB'`.
+- mutation: `IsConfigured` back to the build's shape (`gen:bootstrap` only) → `qa-45-6-doc-oracles.test.ts` source pin red; the old 45.2 CHANGELOG sentence restored → the consistency pin red (2 failed of 7).
+- not falsifiable (DW-789): the namespace restores in `IsConfigured` removed, `%ALL` mapping deleted → both least-privilege accounts still read 1 on a throwaway; the restore is defensive, pinned by the source pin.
+
+**Code review pass (2026-11-26).** `BOOTSTRAP_VERSION` `1.2.0+11.6ef86aefc48e` → `1.2.0+12.bd38d590c26e` (one regen from the committed sequence; a second regen is a no-op), so the story moves it `1.2.0+10.109d0129528f` → `1.2.0+12.bd38d590c26e`. Live (all throwaways on 52792, each removed, `docker ps -a --filter label=iris-mcp.owner=throwaway` empty after): `pnpm live:uninstall-round-trip` 23/23; seeded HSCUSTOM: `epic45-capstone-gate.test.ts` armed 21/21, `integration-dev` 36/36 (SetupTest 10, SetupUninstallTest 12), `integration-admin` 33/33.
 
 **Review pass (2026-11-26).** Added after the four review layers: the real-route DW-786 leg, the least-privilege `IsConfigured` assertions and the non-interop bootstrap leg in `story-45-3-uninstall-round-trip-live-gate.test.ts` (now 21 tests); `SetupTest.TestGuardRefusesInTransactionDuringWebRequest` rewritten to read inside the transaction (`SetupTest` stays 10 tests, 10 of 10 on the Health throwaway, `integration-dev` 36 of 36); `admin.integration.test.ts` readOnly and journal legs (`integration-admin` 32 of 32); the static pin widened; the `story-45-2-doc-claims.test.ts` needle that quoted the old least-privilege sentence now quotes the 1.3.0 text. `pnpm live:uninstall-round-trip` 21 of 21. Full `@iris-mcp/all` suite (closed port, after the last source change that the default suite can see): 255 files, 6742 passed, 763 skipped, 0 failed. `@iris-mcp/shared` 98 files, 2941 passed. Lint, type-check, `check:live-guards` (79 armed files, 0 findings), `gen:governance-baseline:check`, `gen:ipm:check`, `gen:tools-list-snapshot:check` (115 entries) and `check-epics-sync.mjs` green after the last edit. The one file edited after the full suite's final start, the round-trip gate test, is live-gated (it skips in the closed-port run) and was run through its own armed runs above; its six-file doc-and-gate subset was re-run unarmed afterwards (103 passed, 21 skipped).
 

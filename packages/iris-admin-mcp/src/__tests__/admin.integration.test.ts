@@ -308,6 +308,8 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
       };
       const baseDirectory = await testDatabaseDirectory(ctx);
       const directory = baseDirectory.replace(/mcpadmintestdata/, "mcpadmintestfields");
+      // A database of this name that an earlier run left behind would fail the create for that run's reason.
+      await safeDelete(databaseManageTool, { action: "delete", name: FIELDS_DB_NAME }, ctx);
       try {
         const create = await databaseManageTool.handler(
           { action: "create", name: FIELDS_DB_NAME, directory, resource: "%DB_USER", globalJournalState: 2, readOnly: true },

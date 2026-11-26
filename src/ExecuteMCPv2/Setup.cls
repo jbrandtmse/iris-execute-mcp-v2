@@ -796,18 +796,26 @@ ClassMethod ConfigureMapping(pNamespace As %String = "") As %Status [ SqlProc ]
 }
 
 /// Check whether the <code>/api/executemcp/v2</code> web application exists.
-/// <p>Returns 1 if registered, 0 if not. An account that cannot read <code>%SYS</code>
-/// gets the answer from <method>WebAppRegistered</method> instead of 0.</p>
+/// <p>Returns 1 if registered, 0 if not. An account that cannot read the application's
+/// definition in <code>%SYS</code> gets the answer from <method>WebAppRegistered</method>
+/// instead of 0: one that cannot switch to <code>%SYS</code> (the switch throws), and one that
+/// can but may not read <code>Security.Applications</code> (<code>Exists</code> then returns 0
+/// with an access-denied status instead of throwing). The fallback runs in the caller's
+/// namespace.</p>
 ClassMethod IsConfigured() As %Boolean [ SqlProc ]
 {
     Set tResult = 0
+    Set tOrigNS = $NAMESPACE
     Try {
         New $NAMESPACE
         Set $NAMESPACE = "%SYS"
-        Set tResult = ##class(Security.Applications).Exists(..#WEBAPP)
+        Set tResult = +##class(Security.Applications).Exists(..#WEBAPP)
+        Set $NAMESPACE = tOrigNS
     } Catch ex {
-        Set tResult = ..WebAppRegistered()
+        Set $NAMESPACE = tOrigNS
+        Set tResult = 0
     }
+    If 'tResult Set tResult = ..WebAppRegistered()
     Quit tResult
 }
 

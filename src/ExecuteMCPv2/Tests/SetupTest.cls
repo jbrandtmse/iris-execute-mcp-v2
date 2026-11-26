@@ -15,6 +15,13 @@ Property SavedRecord As %String [ MultiDimensional ];
 /// 1 when the namespace had an install record before the test.
 Property HadRecord As %Boolean;
 
+/// 1 while <method>RemoveMapping</method> has removed an <code>ExecuteMCPv2</code> mapping that
+/// <method>RestoreMapping</method> has not put back yet.
+Property MappingRemoved As %Boolean [ InitialExpression = 0 ];
+
+/// The database the removed mapping pointed to.
+Property SavedMappingDB As %String;
+
 Method OnBeforeOneTest(testname As %String) As %Status
 {
     Kill i%SavedRecord
@@ -26,6 +33,8 @@ Method OnBeforeOneTest(testname As %String) As %Status
 
 Method OnAfterOneTest(testname As %String) As %Status
 {
+    ; A test that stopped between RemoveMapping and RestoreMapping still gets the mapping back
+    Do ..RestoreMapping()
     Kill ^ExecuteMCPv2.InstallRecord
     If ..HadRecord Merge ^ExecuteMCPv2.InstallRecord = i%SavedRecord
     Kill i%SavedRecord
@@ -144,15 +153,59 @@ Method MappingExists() As %Boolean
     Quit tExists
 }
 
-/// Remove the <code>ExecuteMCPv2</code> package mapping from <code>%ALL</code> (a no-op when absent).
+/// Remove the <code>ExecuteMCPv2</code> package mapping from <code>%ALL</code> (a no-op when absent),
+/// saving the database it pointed to for <method>RestoreMapping</method>.
 Method RemoveMapping()
 {
     Try {
         New $NAMESPACE
         Set $NAMESPACE = "%SYS"
-        Set tSC = ##class(Config.MapPackages).Delete("%ALL", "ExecuteMCPv2")
+        Kill tProps
+        If '..MappingRemoved && ##class(Config.MapPackages).Exists("%ALL", "ExecuteMCPv2") && $$$ISOK(##class(Config.MapPackages).Get("%ALL", "ExecuteMCPv2", .tProps)) {
+            Set ..SavedMappingDB = $Get(tProps("Database"))
+            If $$$ISOK(##class(Config.MapPackages).Delete("%ALL", "ExecuteMCPv2")) Set ..MappingRemoved = 1
+        }
     } Catch ex {
     }
+}
+
+/// Put back the mapping <method>RemoveMapping</method> removed, pointing to the database it pointed
+/// to (a no-op when nothing was removed or it is already back).
+Method RestoreMapping() As %Status
+{
+    Set tSC = $$$OK
+    If '..MappingRemoved Quit tSC
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+        If '##class(Config.MapPackages).Exists("%ALL", "ExecuteMCPv2") {
+            Kill tProps
+            Set tProps("Database") = ..SavedMappingDB
+            Set tSC = ##class(Config.MapPackages).Create("%ALL", "ExecuteMCPv2", .tProps)
+        }
+        If $$$ISOK(tSC) Set ..MappingRemoved = 0
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// The install record of namespace <var>pNamespace</var> as one string ("" when it has none).
+Method RecordDump(pNamespace As %String) As %String
+{
+    Set tDump = ""
+    Try {
+        Set tRef = $Name(^|pNamespace|ExecuteMCPv2.InstallRecord)
+        If $Data(@tRef) # 2 Set tDump = "=" _ @tRef _ ";"
+        For {
+            Set tRef = $Query(@tRef)
+            If tRef = "" Quit
+            Set tDump = tDump _ tRef _ "=" _ @tRef _ ";"
+        }
+    } Catch ex {
+        Set tDump = "ERROR " _ ex.DisplayString()
+    }
+    Quit tDump
 }
 
 /// DW-786: inside a transaction during a web request (a <code>%request</code> object, as
@@ -178,18 +231,20 @@ Method TestGuardRefusesInTransactionDuringWebRequest() As %Status
     Do $$$AssertEquals(tMapBefore, 0, "set up: the mapping is absent, so an unguarded ConfigureMapping would create it")
     Set tCaught = "", tCfg = "", tMap = "", tLevelBefore = $TLevel
     Set tNSIn = "<unread>", tMapIn = "<unread>", tRecIn = "<unread>"
+    ; An unguarded call writes the record of the namespace it targets, tOther
+    Set tRecBefore = ..RecordDump(tOther)
     TSTART
     Try {
         New %request
         Set %request = ##class(%CSP.Request).%New()
         Set tCfg = ##class(ExecuteMCPv2.Setup).Configure(tOther)
         Set tMap = ##class(ExecuteMCPv2.Setup).ConfigureMapping(tOther)
-        Set tNSIn = ..WebAppNamespace(), tMapIn = ..MappingExists(), tRecIn = $Data(^ExecuteMCPv2.InstallRecord)
+        Set tNSIn = ..WebAppNamespace(), tMapIn = ..MappingExists(), tRecIn = ..RecordDump(tOther)
     } Catch ex {
         Set tCaught = ex.DisplayString()
     }
     TROLLBACK 1
-    Do ##class(ExecuteMCPv2.Setup).ConfigureMapping()
+    Do $$$AssertStatusOK(..RestoreMapping(), "the mapping is put back, pointing to the database it pointed to")
     Do $$$AssertEquals(tCaught, "", "neither call raised")
     Do $$$AssertStatusNotOK(tCfg, "Configure is refused")
     Do $$$AssertTrue($System.Status.GetErrorText(tCfg) [ "Configure changed nothing: it was called inside a transaction during a web request", "Configure names the refusal")
@@ -197,7 +252,7 @@ Method TestGuardRefusesInTransactionDuringWebRequest() As %Status
     Do $$$AssertTrue($System.Status.GetErrorText(tMap) [ "ConfigureMapping changed nothing: it was called inside a transaction during a web request", "ConfigureMapping names the refusal")
     Do $$$AssertEquals(tNSIn, tNSBefore, "inside the transaction the web application's namespace is unchanged (before: " _ tNSBefore _ ", inside: " _ tNSIn _ ")")
     Do $$$AssertEquals(tMapIn, 0, "inside the transaction the package mapping was not created")
-    Do $$$AssertEquals(tRecIn, 0, "inside the transaction a refused call wrote no install record")
+    Do $$$AssertEquals(tRecIn, tRecBefore, "inside the transaction a refused call left the install record of " _ tOther _ " as it was")
     Do $$$AssertEquals($TLevel, tLevelBefore, "the test left no transaction open")
 
     Quit $$$OK

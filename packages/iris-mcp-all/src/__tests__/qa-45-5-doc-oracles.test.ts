@@ -288,7 +288,7 @@ describe("Story 45.5 QA: DW-773, a least-privilege account with the automatic in
       const fake = await startStatefulFakeAtelier({ namespace: NAMESPACE });
       fakes.push(fake);
       await seedInstance(targetOf(fake), embedded, { marker: embedded.marker, perturb: false });
-      // The account cannot read %SYS (IsConfigured answers false) and cannot register the web application (Configure is refused).
+      // The web application is not registered (IsConfigured answers false) and the account cannot register it (Configure is refused).
       fake.isConfiguredReadsFalse = true;
       fake.configureFails = true;
       for (const start of [1, 2]) {
