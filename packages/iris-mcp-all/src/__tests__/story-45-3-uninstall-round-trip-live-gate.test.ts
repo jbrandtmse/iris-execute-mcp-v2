@@ -19,8 +19,9 @@
  * LEGS. plain round trip (with the extra `ConfigureMapping` call an IPM reinstall makes, and a second run), foreign `%ALL`, a
  * foreign mapping added after the install, an `ExecuteMCPv2` mapping that existed before it, `^UnitTestRoot` preset, `^UnitTestRoot` changed, no record (an install by 1.2.0), two
  * namespaces with a shadowed copy, a `dev`-marked copy in a second namespace (ownership), a dev Setup over a recorded install and a
- * marker-less copy (ownership), IPM-owned (the guard stub) with a second
- * run, a failing step (a namespace whose only database is dismounted), the SQL path (`SELECT ExecuteMCPv2.Setup_Uninstall()` through the
+ * marker-less copy over a recorded install (ownership), IPM-owned (the guard stub) with a second
+ * run, a failing step (a namespace whose only database is dismounted), a failing `^UnitTestRoot` step (a database mounted read-only) that
+ * leaves the classes for a re-run which then finishes, the SQL path (`SELECT ExecuteMCPv2.Setup_Uninstall()` through the
  * built server's `iris_sql_query` fails and removes nothing), an account without `%Admin_Manage`, the return values of the five install
  * methods through the SQL route (AC 45.3.8), and a failing install step that writes no record node (AC 45.3.2).
  */
@@ -68,8 +69,26 @@ const WEBAPP_LINE = `Removed: web application ${WEBAPP}`;
 const MAPPING_LINE = "Removed: package mapping ExecuteMCPv2 in %ALL";
 const SERVER_LINE =
   "A server with the automatic install on puts the IRIS side back the next time it starts or first uses this instance: stop it, or set IRIS_AUTO_INSTALL=false (or remove it from the client configuration) before removing the IRIS side.";
+const NAMESPACES_LINE_START = "Namespaces USER, HSCUSTOM used the suite: the instance has one web application and one %ALL mapping, so none of them has either now;";
 const ALL_MANUAL =
   'in %SYS: Do ##class(Config.Namespaces).Delete("%ALL"). This deletes %ALL together with every mapping in it, so check what else is mapped there first';
+/** The README's one-line check that the uninstall finished in a namespace (decision #168): it prints `record=0 webapp=0` when nothing is left. */
+const DONE_CHECK =
+  'Set ns=$NAMESPACE Write "record=",$Data(^ExecuteMCPv2.InstallRecord) Set $NAMESPACE="%SYS" Write " webapp=",##class(Security.Applications).Exists("/api/executemcp/v2"),! Set $NAMESPACE=ns';
+const HELD_REASON = "an earlier step failed, so the classes stay and the command can run again once it is fixed";
+const RECORDS_KEPT_LINE = "Left: install records (a step failed, so the records stay and the command can run again)";
+const SCRATCH_DB_DIR = "/usr/irissys/mgr/uninstalltestdb/";
+/** A namespace UNINSTALLNS over a database UNINSTALLDB of its own (the reset removes both). */
+const SCRATCH_NAMESPACE_SCRIPT: readonly string[] = [
+  'Set $NAMESPACE="%SYS"',
+  `Set dir="${SCRATCH_DB_DIR}"`,
+  "Set mk=##class(%File).CreateDirectoryChain(dir)",
+  "Set sc=##class(SYS.Database).CreateDatabase(dir,1)",
+  'Kill p Set p("Directory")=dir',
+  'Set sc=##class(Config.Databases).Create("UNINSTALLDB",.p)',
+  'Kill p Set p("Globals")="UNINSTALLDB",p("Routines")="UNINSTALLDB"',
+  'Set sc=##class(Config.Namespaces).Create("UNINSTALLNS",.p)',
+];
 
 /** The state of the instance, as `key -> value` lines of the snapshot script. */
 type State = Record<string, string>;
@@ -126,6 +145,8 @@ const SNAPSHOT_SCRIPT: readonly string[] = [
   'For tk="Config.MapPackages:List","Config.MapGlobals:List","Config.MapRoutines:List" { Set rs=##class(%ResultSet).%New(tk) Set sc=rs.Execute("%ALL") Set n=0,s="" While rs.Next() { Set n=n+1,s=s_rs.GetData(2)_";" } Write "SNAP map ",tk,"=",n," ",s,! }',
   `For tn=${NAMESPACES.map((ns) => `"${ns}"`).join(",")} { Set $NAMESPACE=tn Kill ti Do $System.OBJ.GetPackageList(.ti,"ExecuteMCPv2","/includesubpackages") Set n=0,k="",s="" For { Set k=$Order(ti(k)) Quit:k=""  Set n=n+1,s=s_k_"," } Write "SNAP classes ",tn,"=",n," ",s,! Write "SNAP utr ",tn,"=",$Get(^UnitTestRoot,"<undefined>"),! Set rk="",s="" For { Set rk=$Order(^ExecuteMCPv2.InstallRecord(rk)) Quit:rk=""  Set s=s_rk_"="_$Get(^ExecuteMCPv2.InstallRecord(rk))_";" } Write "SNAP record ",tn,"=",$Data(^ExecuteMCPv2.InstallRecord)," ",s,"database=",$Get(^ExecuteMCPv2.InstallRecord("mapping","database")),! }`,
   'Set $NAMESPACE="%SYS"',
+  // What the legs make besides the IRIS side: the gate accounts and roles, the scratch namespace and its database (1 = it exists).
+  'Write "SNAP extras=",##class(Security.Users).Exists("uninstalllp1"),##class(Security.Users).Exists("uninstalllp2"),##class(Security.Roles).Exists("uninstalllprole1"),##class(Security.Roles).Exists("uninstalllprole2"),##class(Config.Namespaces).Exists("UNINSTALLNS"),##class(Config.Databases).Exists("UNINSTALLDB"),!',
   'Write ">>>SNAP",!',
 ];
 
@@ -284,7 +305,9 @@ beforeAll(async () => {
 
   embedded = await loadEmbedded(REPO_ROOT);
   baseline = snapshot();
-  const dirty = Object.entries(baseline).filter(([key, value]) => (key === "webapp" || key === "%ALL" ? value !== "0" : /^(classes|record) /.test(key) ? !/^0\b/.test(value) : false));
+  const dirty = Object.entries(baseline).filter(([key, value]) =>
+    key === "webapp" || key === "%ALL" ? value !== "0" : key === "extras" ? value !== "000000" : /^(classes|record) /.test(key) ? !/^0\b/.test(value) : false,
+  );
   if (dirty.length > 0) {
     throw new Error(`the instance is not a clean throwaway (it already holds part of the IRIS side): ${dirty.map(([key, value]) => `${key}=${value}`).join("; ")}`);
   }
@@ -337,20 +360,25 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(repeated, "the repeated install did not turn the mapping node into found either (its early-exit branch writes found)").toContain("mapping=created;");
     expect(repeated, "nor did it change the mapping's recorded database").toContain("database=USER");
 
+    // Before the run the README's check finds the record and the web application.
+    expect(between(terminal("USER", ['Write "<<<CHECK",!', DONE_CHECK, 'Write ">>>CHECK",!']), "CHECK"), "the check sees an install").toEqual(["record=10 webapp=1"]);
+
     const run = runOneLiner();
-    expect(run.lines).toEqual([WEBAPP_LINE, MAPPING_LINE, classesLine("USER", embedded.classes.size), "Removed: %ALL", "Removed: ^UnitTestRoot (USER)", "Removed: install record (USER)", SERVER_LINE]);
+    expect(run.lines).toEqual([WEBAPP_LINE, MAPPING_LINE, "Removed: %ALL", "Removed: ^UnitTestRoot (USER)", classesLine("USER", embedded.classes.size), "Removed: install record (USER)", SERVER_LINE]);
     expect(differences(baseline, snapshot()), "the instance equals the state before the install").toEqual([]);
 
     // A second run: the class is gone, so the terminal cannot call it and nothing changes. (The idempotent, status-OK second run is the IPM-owned leg.)
     const second = terminal("USER", ["Do ##class(ExecuteMCPv2.Setup).Uninstall()"]);
     expect(second).toContain("CLASS DOES NOT EXIST");
     expect(differences(baseline, snapshot())).toEqual([]);
+    // The README's one-line check confirms there is nothing left to do in the namespace, and leaves the terminal where it was.
+    expect(between(terminal("USER", ['Write "<<<CHECK",!', DONE_CHECK, 'Write "NS=",$NAMESPACE,!', 'Write ">>>CHECK",!']), "CHECK")).toEqual(["record=0 webapp=0", "NS=USER"]);
   });
 
   leg("run from %SYS, which sees the class only through the %ALL mapping the command removes: the same result as in the install namespace", async () => {
     await install();
     const run = runOneLiner("%SYS");
-    expect(run.lines).toEqual([WEBAPP_LINE, MAPPING_LINE, classesLine("USER", embedded.classes.size), "Removed: %ALL", "Removed: ^UnitTestRoot (USER)", "Removed: install record (USER)", SERVER_LINE]);
+    expect(run.lines).toEqual([WEBAPP_LINE, MAPPING_LINE, "Removed: %ALL", "Removed: ^UnitTestRoot (USER)", classesLine("USER", embedded.classes.size), "Removed: install record (USER)", SERVER_LINE]);
     expect(differences(baseline, snapshot())).toEqual([]);
   });
 
@@ -369,8 +397,8 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(run.lines).toEqual([
       WEBAPP_LINE,
       MAPPING_LINE,
-      classesLine("USER", embedded.classes.size),
       "Removed: ^UnitTestRoot (USER)",
+      classesLine("USER", embedded.classes.size),
       "Removed: install record (USER)",
       "Left: %ALL (the install did not create it)",
       SERVER_LINE,
@@ -395,8 +423,8 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(run.lines).toEqual([
       WEBAPP_LINE,
       MAPPING_LINE,
-      classesLine("USER", embedded.classes.size),
       "Removed: ^UnitTestRoot (USER)",
+      classesLine("USER", embedded.classes.size),
       "Removed: install record (USER)",
       "Left: %ALL (it still holds mappings: package ForeignPkg, global ForeignAfter, routine ForeignRtn)",
       SERVER_LINE,
@@ -427,8 +455,8 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(run.lines).toEqual([
       WEBAPP_LINE,
       MAPPING_LINE,
-      classesLine("USER", embedded.classes.size),
       "Removed: ^UnitTestRoot (USER)",
+      classesLine("USER", embedded.classes.size),
       "Removed: install record (USER)",
       "Left: %ALL (the install did not create it)",
       SERVER_LINE,
@@ -442,7 +470,7 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(snapshot()["record USER"], "the install recorded no unitTestRoot node for a value it did not set").not.toContain("unitTestRoot=");
 
     const run = runOneLiner();
-    expect(run.lines).toEqual([WEBAPP_LINE, MAPPING_LINE, classesLine("USER", embedded.classes.size), "Removed: %ALL", "Removed: install record (USER)", SERVER_LINE]);
+    expect(run.lines).toEqual([WEBAPP_LINE, MAPPING_LINE, "Removed: %ALL", classesLine("USER", embedded.classes.size), "Removed: install record (USER)", SERVER_LINE]);
     expect(differences(baselinePlus({ "utr USER": "/preset/before/the/install/" }), snapshot())).toEqual([]);
   });
 
@@ -454,8 +482,8 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(run.lines).toEqual([
       WEBAPP_LINE,
       MAPPING_LINE,
-      classesLine("USER", embedded.classes.size),
       "Removed: %ALL",
+      classesLine("USER", embedded.classes.size),
       "Removed: install record (USER)",
       "Left: ^UnitTestRoot (USER) (it changed since the install set it). To remove it by hand: in USER: Kill ^UnitTestRoot",
       SERVER_LINE,
@@ -480,7 +508,7 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(differences(baselinePlus({ "%ALL": "1", "utr USER": installed["utr USER"] as string }), snapshot())).toEqual([]);
   });
 
-  leg("two namespaces with a shadowed copy: both lose the web application, the mapping and their classes, and the report names both", async () => {
+  leg("two namespaces with a shadowed copy: both lose the web application, the mapping and their classes, and the report names both with their outcome", async () => {
     await install("USER");
     // Probe P2: the mapping goes, a probe class lands in USER (a shadowed copy), and a second install deploys to HSCUSTOM.
     terminal("%SYS", ['Set sc=##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")']);
@@ -499,15 +527,15 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(run.lines).toEqual([
       WEBAPP_LINE,
       MAPPING_LINE,
-      // Entries follow the order of the namespace list; the current namespace's own classes go last, because its copy is the one running.
-      classesLine("HSCUSTOM", embedded.classes.size),
-      classesLine("USER", embedded.classes.size + 1),
       "Removed: %ALL",
       "Removed: ^UnitTestRoot (HSCUSTOM)",
       "Removed: ^UnitTestRoot (USER)",
+      // Entries follow the order of the namespace list; the current namespace's own classes go last, because its copy is the one running.
+      classesLine("HSCUSTOM", embedded.classes.size),
+      classesLine("USER", embedded.classes.size + 1),
       "Removed: install record (HSCUSTOM)",
       "Removed: install record (USER)",
-      "Namespaces USER, HSCUSTOM used the suite: each loses the web application, the %ALL mapping and its classes (the instance has one of each).",
+      `${NAMESPACES_LINE_START} USER lost its classes; HSCUSTOM lost its classes.`,
       SERVER_LINE,
     ]);
     expect(differences(baseline, snapshot()), "both namespaces end with no ExecuteMCPv2 class").toEqual([]);
@@ -531,12 +559,13 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(run.lines).toEqual([
       WEBAPP_LINE,
       MAPPING_LINE,
-      classesLine("USER", embedded.classes.size),
       "Removed: %ALL",
       "Removed: ^UnitTestRoot (USER)",
+      classesLine("USER", embedded.classes.size),
       "Removed: install record (USER)",
       "Left: classes (HSCUSTOM) (its Setup class carries the dev marker, so it is not a copy this install deployed). To remove it by hand: in HSCUSTOM: Do $System.OBJ.DeletePackage(\"ExecuteMCPv2\")",
-      "Namespaces USER, HSCUSTOM used the suite: each loses the web application, the %ALL mapping and its classes (the instance has one of each).",
+      // DW-776: the line words each namespace's own outcome, so the namespace whose copy is left is not told it lost its classes.
+      `${NAMESPACES_LINE_START} USER lost its classes; HSCUSTOM kept its classes (see its Left: line).`,
       SERVER_LINE,
     ]);
     const after = await Promise.all(devNames.map((name) => atelierDocument(hsTarget, name)));
@@ -546,16 +575,19 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(differences({ ...baseline, "classes HSCUSTOM": state["classes HSCUSTOM"] as string }, state)).toEqual([]);
   });
 
-  leg("ownership: a dev Setup over a recorded install and a marker-less copy in a second namespace are both left byte for byte untouched", async () => {
+  leg("ownership: a dev Setup and a marker-less copy, each over an install record that names a release marker, are both left byte for byte untouched", async () => {
     await install("USER");
     terminal("%SYS", ['Set sc=##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")']);
-    // USER keeps its install record (it names a release marker) but now holds a hand-loaded dev Setup; HSCUSTOM holds a copy with no Setup class.
+    // USER keeps its install record (it names a release marker) but now holds a hand-loaded dev Setup; HSCUSTOM holds a copy with no Setup class
+    // under a record that names the release marker too (as an install there would have left it): a record never vouches for the copy found now.
     await putClass("USER", "ExecuteMCPv2.Setup.cls", replaceMarker(embedded.classes.get("ExecuteMCPv2.Setup.cls") as string, "dev"));
     await putClass("HSCUSTOM", "ExecuteMCPv2.Temp.NoSetupProbe.cls", "Class ExecuteMCPv2.Temp.NoSetupProbe Extends %RegisteredObject\n{\n}");
+    terminal("HSCUSTOM", [`Set ^ExecuteMCPv2.InstallRecord("format")=1,^ExecuteMCPv2.InstallRecord("deployed")="${embedded.marker}"`]);
     const userTarget = { ...target, namespace: "USER" };
     const hsTarget = { ...target, namespace: "HSCUSTOM" };
     const before = [await atelierDocument(userTarget, "ExecuteMCPv2.Setup.cls"), await atelierDocument(hsTarget, "ExecuteMCPv2.Temp.NoSetupProbe.cls")];
     expect(snapshot()["record USER"], "the record still names the release marker").toContain(`deployed=${embedded.marker};`);
+    expect(snapshot()["record HSCUSTOM"]).toContain(`deployed=${embedded.marker};`);
     terminal("%SYS", ['Kill p Set p("Database")="USER"', 'Set sc=##class(Config.MapPackages).Create("%ALL","ExecuteMCPv2",.p)']);
 
     const run = runOneLiner("USER");
@@ -565,10 +597,11 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
       MAPPING_LINE,
       "Removed: %ALL",
       "Removed: ^UnitTestRoot (USER)",
+      "Removed: install record (HSCUSTOM)",
       "Removed: install record (USER)",
-      `Left: classes (HSCUSTOM) (it has no release marker (no Setup class, or none on it) and no install record names it)${manual("HSCUSTOM")}`,
+      `Left: classes (HSCUSTOM) (it has no release marker (no Setup class, or none on it), so it is not shown to be a copy this install deployed)${manual("HSCUSTOM")}`,
       `Left: classes (USER) (its Setup class carries the dev marker, so it is not a copy this install deployed)${manual("USER")}`,
-      "Namespaces USER, HSCUSTOM used the suite: each loses the web application, the %ALL mapping and its classes (the instance has one of each).",
+      `${NAMESPACES_LINE_START} USER kept its classes (see its Left: line); HSCUSTOM kept its classes (see its Left: line).`,
       SERVER_LINE,
     ]);
     const after = [await atelierDocument(userTarget, "ExecuteMCPv2.Setup.cls"), await atelierDocument(hsTarget, "ExecuteMCPv2.Temp.NoSetupProbe.cls")];
@@ -583,7 +616,7 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     await seedInstance(target, embedded, { marker: embedded.marker, perturb: false, guard: true });
     const installed = snapshot();
     expect(installed["webapp"]).toBe("1");
-    expect(installed["record USER"], "IPM's Configure and ConfigureMapping wrote the record").toContain(`deployed=${embedded.marker};`);
+    expect(installed["record USER"], "the Configure and ConfigureMapping calls IPM's module.xml makes (here through SQL) wrote the record").toContain(`deployed=${embedded.marker};`);
     expect(installed["record USER"]).toContain("all=created;");
 
     const classCount = Number(/^(\d+) /.exec(installed["classes USER"] as string)?.[1]);
@@ -601,18 +634,9 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(differences(baselinePlus({ "classes USER": installed["classes USER"] as string }), snapshot())).toEqual([]);
   });
 
-  leg("a failing step: a namespace whose only database is dismounted is a failed item with IRIS's text, the independent steps still run and the records stay", async () => {
+  leg("a failing step: a namespace whose only database is dismounted is a failed item with IRIS's text, the independent steps still run, and the classes and the records stay", async () => {
     await install();
-    terminal("%SYS", [
-      'Set dir="/usr/irissys/mgr/uninstalltestdb/"',
-      "Set mk=##class(%File).CreateDirectoryChain(dir)",
-      "Set sc=##class(SYS.Database).CreateDatabase(dir,1)",
-      'Kill p Set p("Directory")=dir',
-      'Set sc=##class(Config.Databases).Create("UNINSTALLDB",.p)',
-      'Kill p Set p("Globals")="UNINSTALLDB",p("Routines")="UNINSTALLDB"',
-      'Set sc=##class(Config.Namespaces).Create("UNINSTALLNS",.p)',
-      "Set sc=##class(SYS.Database).DismountDatabase(dir)",
-    ]);
+    terminal("%SYS", [...SCRATCH_NAMESPACE_SCRIPT, "Set sc=##class(SYS.Database).DismountDatabase(dir)"]);
     const installed = snapshot();
 
     const run = runUninstall("USER");
@@ -624,14 +648,65 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(failed, "the text is IRIS's, with its error token").toContain("DIRECTORY");
     expect(run.lines).toContain(WEBAPP_LINE);
     expect(run.lines).toContain(MAPPING_LINE);
-    expect(run.lines).toContain(classesLine("USER", embedded.classes.size));
     expect(run.lines, "the independent steps ran: %ALL and ^UnitTestRoot are gone").toContain("Removed: %ALL");
     expect(run.lines).toContain("Removed: ^UnitTestRoot (USER)");
+    expect(run.lines, "the classes, this class among them, stay for a re-run").toContain(`Left: classes (USER) (${HELD_REASON})`);
+    expect(run.lines.some((line) => line.startsWith("Removed: classes")), "no class was removed").toBe(false);
     expect(run.lines.some((line) => line.startsWith("Removed: install record")), "no record was removed").toBe(false);
-    expect(run.lines).toContain("Left: install records (a step failed, so the records stay and the command can run again)");
+    expect(run.lines).toContain(RECORDS_KEPT_LINE);
     const state = snapshot();
     expect(state["record USER"], "the record stays").toBe(installed["record USER"]);
-    expect(differences(baselinePlus({ "record USER": installed["record USER"] as string }), state), "only the record is left behind").toEqual([]);
+    expect(
+      differences(baselinePlus({ "record USER": installed["record USER"] as string, "classes USER": installed["classes USER"] as string, extras: "000011" }), state),
+      "only the classes and the record are left behind",
+    ).toEqual([]);
+  });
+
+  leg("a failing ^UnitTestRoot step (a database mounted read-only): the classes and the records stay, and a re-run after the fix finishes and names only what it removed", async () => {
+    await install();
+    // A second namespace over a database of its own, where EnsureUnitTestRoot (as iris_execute_tests calls it) set ^UnitTestRoot and recorded it;
+    // its database is then mounted read-only, so the uninstall can read that namespace but cannot kill the global.
+    terminal("%SYS", [...SCRATCH_NAMESPACE_SCRIPT]);
+    terminal("UNINSTALLNS", ["Set v=##class(ExecuteMCPv2.Setup).EnsureUnitTestRoot()"]);
+    const scratchState = (): string[] =>
+      between(terminal("UNINSTALLNS", ['Write "<<<NS",!', 'Write "utr=",$Data(^UnitTestRoot)," record=",$Data(^ExecuteMCPv2.InstallRecord("unitTestRoot")),!', 'Write ">>>NS",!']), "NS");
+    expect(scratchState(), "the install set and recorded ^UnitTestRoot there").toEqual(["utr=1 record=1"]);
+    terminal("%SYS", [`Set dir="${SCRATCH_DB_DIR}"`, "Set sc=##class(SYS.Database).DismountDatabase(dir)", "Set sc=##class(SYS.Database).MountDatabase(dir,1)"]);
+    const installed = snapshot();
+
+    const first = runUninstall("USER");
+    expect(first.statusOk, "the status is an error").toBe(false);
+    expect(first.statusText).toContain("Uninstall did not finish: ^UnitTestRoot (UNINSTALLNS)");
+    const failed = first.lines.filter((line) => line.startsWith("Failed: "));
+    expect(failed, "one failed item").toHaveLength(1);
+    expect(failed[0], "the failed step is the ^UnitTestRoot kill, with IRIS's own text").toMatch(/^Failed: \^UnitTestRoot \(UNINSTALLNS\): .*PROTECT/);
+    expect(first.lines.filter((line) => !line.startsWith("Failed: "))).toEqual([
+      WEBAPP_LINE,
+      MAPPING_LINE,
+      "Removed: %ALL",
+      "Removed: ^UnitTestRoot (USER)",
+      `Left: classes (USER) (${HELD_REASON})`,
+      RECORDS_KEPT_LINE,
+      SERVER_LINE,
+    ]);
+    const held = snapshot();
+    expect(held["classes USER"], "the classes, ExecuteMCPv2.Setup among them, are all still there").toBe(installed["classes USER"]);
+    expect(held["classes USER"]).toMatch(/[ ,]ExecuteMCPv2\.Setup(\.cls)?,/);
+    expect(held["record USER"], "the record stays").toBe(installed["record USER"]);
+
+    // Fix the cause (the database writable again) and run the same command again: it finishes, and its report names only what this run removed.
+    terminal("%SYS", [`Set dir="${SCRATCH_DB_DIR}"`, "Set sc=##class(SYS.Database).DismountDatabase(dir)", "Set sc=##class(SYS.Database).MountDatabase(dir)"]);
+    const second = runUninstall("USER");
+    expect(second.statusOk, second.statusText).toBe(true);
+    expect(second.lines).toEqual([
+      "Removed: ^UnitTestRoot (UNINSTALLNS)",
+      classesLine("USER", embedded.classes.size),
+      "Removed: install record (UNINSTALLNS)",
+      "Removed: install record (USER)",
+      SERVER_LINE,
+    ]);
+    expect(scratchState(), "nothing is left in the second namespace").toEqual(["utr=0 record=0"]);
+    expect(differences(baselinePlus({ extras: "000011" }), snapshot()), "the instance is back to the state before the install").toEqual([]);
   });
 
   leg("SQL path: SELECT ExecuteMCPv2.Setup_Uninstall() through the built server's iris_sql_query fails and removes nothing", async () => {
@@ -661,11 +736,14 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect.soft(await sqlValue("SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS V"), "GetBootstrapVersion returns the class's marker").toBe(embedded.marker);
     expect(differences(installed, snapshot()), "calling the five methods again changes nothing: not the record, not the web application, not ^UnitTestRoot").toEqual([]);
 
-    // EnsureUnitTestRoot on an undefined global sets it, returns what it set, and records the value it set.
-    terminal("USER", ["Kill ^UnitTestRoot"]);
+    // EnsureUnitTestRoot on an undefined global sets it, returns what it set, and records the value it set (the record's node is killed too,
+    // so the comparison below sees the node only if this call wrote it).
+    terminal("USER", ['Kill ^UnitTestRoot,^ExecuteMCPv2.InstallRecord("unitTestRoot")']);
+    expect(snapshot()["record USER"], "the node is gone before the call").not.toContain("unitTestRoot=");
     const returned = await sqlValue("SELECT ExecuteMCPv2.Setup_EnsureUnitTestRoot() AS V");
     expect.soft(returned, "EnsureUnitTestRoot returns the value it set").toBe(installed["utr USER"]);
     expect.soft(snapshot()["utr USER"], "and the global holds it").toBe(returned);
+    expect(snapshot()["record USER"], "and the call recorded the value it set").toContain(`unitTestRoot=${String(returned)};`);
     expect(differences(installed, snapshot()), "the instance is back to the installed state, record included").toEqual([]);
   });
 
@@ -725,7 +803,7 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(noSys.report?.removed, "nothing was removed").toEqual([]);
     expect(noSys.report?.failed.map((entry) => entry["item"])).toEqual([`web application ${WEBAPP}`, "package mapping ExecuteMCPv2 in %ALL", "namespace list"]);
     for (const entry of noSys.report?.failed ?? []) expect(entry["error"], `${entry["item"]} carries IRIS's text`).toContain("PROTECT");
-    expect(noSys.lines.some((line) => line.startsWith("Left: classes, %ALL, ^UnitTestRoot and the install records")), "the rest is left, with the reason").toBe(true);
+    expect(noSys.lines.some((line) => line.startsWith("Left: %ALL, ^UnitTestRoot, classes and the install records")), "the rest is left, with the reason").toBe(true);
     expect(differences(installed, snapshot()), "the instance is unchanged").toEqual([]);
 
     // lp2 can read %SYS but is not allowed to change it.

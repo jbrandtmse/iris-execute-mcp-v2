@@ -46,6 +46,20 @@ deferred:
     location: >-
       packages/iris-dev-mcp/src/__tests__/custom-rest.integration.test.ts (roster pattern); src/ExecuteMCPv2/Tests/SetupTest.cls, SetupUninstallTest.cls
     severity: low
+  - summary: >-
+      The "Delete returned an error after Exists succeeded" branches of Uninstall steps 1 and 2 (web application, mapping) are reached by no test.
+    evidence: |-
+      Code review 2026-11-26 (QA gap, lead ask). No live account was found for which Security.Applications.Exists or Config.MapPackages.Exists succeeds and the matching Delete fails: the least-privilege leg's read-only account (uninstalllp2) fails at Exists. Each branch is three lines that mirror the pinned ElseIf branch beside it (tCfgFailed=1 plus a failed entry), and the tCfgFailed stop they feed is pinned by the least-privilege legs and their mutation. No leg was added: building one needs an account or resource setup that has to be found by probing first, which costs more than the branch it would cover. reopen_if: a live probe finds an account that can read but not delete the web application or the mapping, or a field report shows either Delete failing after Exists.
+    location: >-
+      src/ExecuteMCPv2/Setup.cls (Uninstall steps 1 and 2)
+    severity: low
+  - summary: >-
+      An install that started at 1.2.0 and was extended later (an IPM upgrade of 1.3.0 over it, or EnsureUnitTestRoot in another namespace) gets a record that says "found": the report then leaves %ALL saying "the install did not create it" with no manual command, and does not mention a ^UnitTestRoot that 1.2.0 set.
+    evidence: |-
+      Code review 2026-11-26 (Acceptance Auditor, Blind Hunter, Edge Case Hunter, one root cause). module.xml invokes Configure and ConfigureMapping on every zpm load, and ConfigureMapping's early exit records all=found; DecideAll and DecideUnitTestRoot read instance-wide record flags. Nothing is removed wrongly (fail-safe). The texts are the I/O Matrix rows (foreign %ALL: "the install did not create it"; preset ^UnitTestRoot: not reported), so changing the code is spec-bound; the README, CHANGELOG and changeset were corrected in this review to say what happens and to point to the manual commands. Decision for the lead: amend the foreign-%ALL row so a "found" record also carries the Delete("%ALL") command and the warning, and the no-record ^UnitTestRoot rule so it applies per namespace.
+    location: >-
+      src/ExecuteMCPv2/Setup.cls (DecideAll, DecideUnitTestRoot); spec I/O Matrix rows "Foreign %ALL", "^UnitTestRoot set before install"
+    severity: low
 ---
 
 <intent-contract>
@@ -119,6 +133,39 @@ deferred:
 - Given `DecideAll` (or its equivalent) changed to remove `%ALL` whatever the record and mappings say, when the gate runs, then the foreign-`%ALL` and foreign-mapping legs go red because the foreign mapping is gone; restored, green (Rule #59; path: the terminal one-liner on a throwaway).
 - Given the IPM-owned recorded live proof (Verification), when `zpm load` of the staged current embed, the one-liner and then `zpm "uninstall iris-execute-mcp-v2"` run, then the record was written by IPM's `Configure`/`ConfigureMapping`, the classes survive the one-liner, and the end snapshot equals S0 (AC 45.3.2, 45.3.4).
 - Given the changed tree, when `bootstrap.test.ts`, `story-42-2-bootstrap-guard-orchestration.test.ts`, the handler and wire goldens, `pnpm gen:ipm:check`, `pnpm gen:governance-baseline:check` and `pnpm gen:tools-list-snapshot:check` run, then all pass with no fixture change; `SetupTest` (and `SetupUninstallTest`) pass on a throwaway with `total` equal to the counted `Test*` methods (AC 45.3.7, 45.3.8; Rule #35).
+
+### Review Findings
+
+Code review 2026-11-26 (`review_mode=full`, frozen diff `git diff 47b4f546..1ea4808d`, four layers: Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor; all four delivered). Lead directives of decision #168 applied as patches; the follow-up re-read of `Uninstall` step 3 (`followup_review_recommended`) done here (finding 4).
+
+- [x] [Review][Patch] (medium) DW-775: the classes went before `%ALL` and `^UnitTestRoot`, so a later failure deleted the `Setup` class a re-run needs. Order now web app, mapping, `%ALL`, `^UnitTestRoot`, classes, records; the classes go only when no earlier step failed (any failure, a namespace scan included, keeps them with a `Left:` line per namespace). New leg (read-only database fails the `^UnitTestRoot` kill; `Setup` stays; the re-run after the fix finishes and names only what it removed); the dismount leg now expects the classes kept [src/ExecuteMCPv2/Setup.cls Uninstall steps 3-5]
+- [x] [Review][Patch] (medium) Decision #168 item 1: README tells a user who sees `<CLASS DOES NOT EXIST>` that the uninstall finished, with a one-line check verified live (prints `record=0 webapp=0`); the plain leg runs the same line before (`record=10 webapp=1`) and after the removal; doc pin [README.md "Removing the IRIS Side"]
+- [x] [Review][Patch] (medium) DW-776: the namespaces line said every namespace lost its classes when a copy was left; `NamespacesLine(pReport)` now words each namespace's outcome from its `classes` entry (lost / kept, see its `Left:` line / still holds classes that could not be removed / held no classes of its own) [src/ExecuteMCPv2/Setup.cls NamespacesLine]
+- [x] [Review][Patch] (medium) Step 3 re-read: a marker-less or unparseable copy under a record naming a release marker was deleted, contradicting decision #163's foreign list, the README and the CHANGELOG (the same stale-record hazard the build review fixed for `dev`). `DecideClasses` now decides from the copy's own `Setup` marker only (release marker: delete; `dev`, unparseable or none: foreign); the ownership leg seeds a release record under the marker-less copy [src/ExecuteMCPv2/Setup.cls DecideClasses]
+- [x] [Review][Patch] (medium) A 1.2.0 install extended later (IPM `zpm load` of 1.3.0 over it) gets a `found` record; the README said an in-place upgrade adds no record. README, CHANGELOG and changeset now say a server's upgrade adds none, an IPM upgrade does, and what the report then says; the code texts are spec-bound (frontmatter `deferred:`, decision for the lead) [README.md, CHANGELOG.md, .changeset]
+- [x] [Review][Patch] (medium) The back-compat leg's "EnsureUnitTestRoot records the value it set" check could not fail (the node was already there, and the baseline came from the same code). The node is killed first and asserted directly; mutation red [story-45-3-uninstall-round-trip-live-gate.test.ts back-compat leg]
+- [x] [Review][Patch] (low) The runtime `Left:` text said "nothing after it was removed" although step 2 runs after a step-1 failure; reworded to "none of them was touched" [src/ExecuteMCPv2/Setup.cls Uninstall]
+- [x] [Review][Patch] (low) The gate's baseline check could not see the accounts, roles, scratch namespace and database the legs make; the snapshot gains an `extras` key, and beforeAll refuses a target where they exist [live gate SNAPSHOT_SCRIPT]
+- [x] [Review][Patch] (low) The IPM-owned leg's message said IPM's invokes wrote the record; the leg makes the same calls through SQL. Reworded [live gate IPM-owned leg]
+- [x] [Review][Patch] (low) README "leaves what it did not add" overclaimed: the `ExecuteMCPv2` mapping goes whoever made it, and the whole package goes with any class someone added to it. Steps 2 and 5 now say so [README.md]
+- [x] [Review][Patch] (low) Rule 19: QA's legs (no record on a failed step; the five return values) and the running-server line had no `mutation:` line; recorded under Verification (code-review results) [spec Verification]
+- [x] [Review][Defer] The unit classes have no automatic runner [src/ExecuteMCPv2/Tests/] — deferred: existing DW-778 (burn-down, terminal answer required there per decision #168); no new entry
+- [x] [Review][Defer] The Delete-after-Exists error branches of steps 1 and 2 are unreached [src/ExecuteMCPv2/Setup.cls Uninstall] — deferred: frontmatter `deferred:` with the reason and `reopen_if`
+
+**Rejected:**
+- (false) Blind: the server line's "remove it from the client configuration" turns the install back on: "it" is the server, and the text is the I/O Matrix's own; the profile precedence is documented in the README env table.
+- (false) Auditor: a bare 12-hex marker counts as ownership: AD-14 and `bootstrap-version.ts` (`LEGACY_PATTERN`) treat it as a release marker of a pre-sequence build; now pinned in `TestDecideClasses`.
+- (low) Blind: the DW-777 rationale cites siblings of another shape: a ledger note of the lead's; the Planner's by-design call (#168) stands on the CI path. Reported to the lead.
+- (low) Blind: `sprint-status.yaml` `last_updated` went backwards and the spec says `done` while the tracker says `review`: lead bookkeeping, out of this review's scope. Reported to the lead.
+- (low) Blind: the `own-container` suite kind hard-codes the step id and state file: one suite of the kind exists; reopen_if a second own-container suite is added.
+- (low) Blind: status numbers 869/420/421 instead of the `%occErrors` macros: cosmetic; the parameter doc names the macros and the codes are stable.
+- (low) Auditor: `SetupUninstallTest` added under the ~500-line split trigger: no user harm; the seed roster change (65 to 66) is absorbed.
+- (low) Edge: two namespaces on one globals database report the record and `^UnitTestRoot` twice (the ownership half is fixed by finding 4); rare configuration, cosmetic.
+- (low) Edge: two namespaces on one routines database report the classes twice: rare configuration, cosmetic.
+- (low) Edge: the `GetPackageList` status is ignored: no failing case shown; the fix adds branches.
+- (low) Edge: a mapping added to `%ALL` between the read and the delete is lost: a seconds-wide window; the README says to stop the servers first (theoretical).
+- (low) Edge: a failed scan of the namespace holding `all=created` gives `%ALL` a misleading reason: transient, since the run fails, keeps the classes and records, and the re-run decides on full data.
+- (low) Edge: `SetupTest` loses the real record if the test job dies between its save and restore: theoretical; the result is fail-safe (treated as no record).
 
 ## Spec Change Log
 
@@ -286,6 +333,26 @@ Patches applied (see the Review Triage Log): `DecideClasses` returns `foreign` f
 - `EnsureUnitTestRoot` records a preset value too -> gate leg "`^UnitTestRoot` set before the install" red.
 - `ConfigureMapping` early-exit branch writes no `all`/`mapping` found nodes -> gate leg "an ExecuteMCPv2 mapping that existed before the install" red.
 - the `tCfgFailed` stop removed (`If 0 {`) -> gate least-privilege leg red.
+
+### Code-review results (2026-11-26)
+
+**BOOTSTRAP_VERSION** `1.2.0+9.db691c6fee3d` (build) to `1.2.0+10.109d0129528f` (story: `1.2.0+8.5cedcac20ae9` to `1.2.0+10.109d0129528f`; the sequence was left to rise, because a build of `9.db691c6fee3d` may already be deployed somewhere, and an equal sequence with another hash reads as foreign); `pnpm run gen:bootstrap` a second time rewrites nothing (`cmp` identical).
+
+**Order (decision #168, DW-775):** web application, mapping, `%ALL`, `^UnitTestRoot`, classes, records. `%ALL` reads only the record scan, the step-2 outcome and the `:List` mapping text, and `^UnitTestRoot` only the record scan and the current value; the scan reads every namespace before anything is deleted, so neither depends on the classes. The classes go only when the report holds no failure (`DecideRecords(failed.%Size())`, the same gate as the records), and the current namespace's copy still goes last.
+
+**One-line check (decision #168, verified live on a throwaway before writing it, then pinned in the plain leg):** `Set ns=$NAMESPACE Write "record=",$Data(^ExecuteMCPv2.InstallRecord) Set $NAMESPACE="%SYS" Write " webapp=",##class(Security.Applications).Exists("/api/executemcp/v2"),! Set $NAMESPACE=ns` prints `record=10 webapp=1` while installed and `record=0 webapp=0` after the full removal, and leaves the terminal in its namespace.
+
+**Live gate:** 18 of 18 through `pnpm live:uninstall-round-trip` (port 52792, own container, `down` after; `docker ps -a --filter label=iris-mcp.owner=throwaway` empty). `SetupTest` 7 of 7 and `SetupUninstallTest` 12 of 12 (`%UnitTest_Result.TestMethod` rows by status; counted `Test*` methods 7 and 12) on a throwaway seeded by `ci-seed-throwaway.mjs` (66 classes), container removed. **Suites** (closed-port env, `IRIS_REQUIRE_LIVE` unset): `@iris-mcp/all` full, 248 files, 6600 passed, 755 skipped; `@iris-mcp/shared` 95 files, 2830 passed; `pnpm lint`, `pnpm type-check`, `gen:ipm:check`, `gen:governance-baseline:check`, `gen:tools-list-snapshot:check`, `check:live-guards` (76 armed files, 0 findings) pass.
+
+**Mutations** (path: the terminal one-liner on a throwaway through `pnpm live:uninstall-round-trip` unless named; each reverted with `Setup.cls`, `bootstrap-classes.ts` and `bootstrap-sequence.json` restored from copies, `cmp` identical, `git status --short` and `git diff --stat` unchanged):
+- mutation: `DecideAll` returns `remove` after the existence check (re-run after the reorder, #168) -> exactly the four legs red: foreign `%ALL`, foreign mapping added after the install, an `ExecuteMCPv2` mapping that existed before it, no record; 14 green.
+- mutation: the classes step ignores earlier failures (`If 1 {` for the `DecideRecords` gate of step 5) -> the dismounted-namespace leg and the read-only `^UnitTestRoot` leg red (the running `Setup` is deleted; the re-run cannot run).
+- mutation: `NamespacesLine` says "lost its classes" for every namespace (DW-776) -> both ownership legs red.
+- mutation: `DecideClasses` deletes any copy whose marker is not `dev` -> the leg "a dev Setup and a marker-less copy, each over an install record that names a release marker" red.
+- mutation: `EnsureUnitTestRoot` writes no record node -> the back-compat leg red on its new direct assertion (it stayed green before that assertion was added), with 11 other legs.
+- mutation: the README loses its `<CLASS DOES NOT EXIST>` sentence -> `story-45-3-doc-claims.test.ts` red (default suite).
+- mutation: the running-server line drops `IRIS_AUTO_INSTALL=false (or remove it from the client configuration)` -> `story-45-3-doc-claims.test.ts` "the claims against the class source" red (default suite); every gate leg also pins `SERVER_LINE` exactly.
+- QA-run mutations (recorded in the cycle log, `qa_complete` 2026-11-26T03:13:25Z; QA restored each): the five install methods' return values through the SQL route -> the back-compat leg red; `Configure` writing its node before `Security.Applications.Create` -> the leg "a step that fails writes no record node" red; the `MergeRecordValue` bypass -> the plain leg red; the least-privilege status swallowed -> the least-privilege leg red.
 
 ## Auto Run Result
 

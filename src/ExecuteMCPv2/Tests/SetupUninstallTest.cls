@@ -76,29 +76,22 @@ Method TestIsReleaseMarker() As %Status
 Method TestDecideClasses() As %Status
 {
     Set tStamped = "1.2.0+8.5cedcac20ae9"
-    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(0, 0, "", "", .tWhy)
+    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(0, 0, "", .tWhy)
     Do $$$AssertEquals(tD, "none", "no classes, nothing to do")
-    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(35, 0, tStamped, tStamped, .tWhy)
-    Do $$$AssertEquals(tD, "delete", "record and marker: delete")
-    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(35, 0, tStamped, "", .tWhy)
-    Do $$$AssertEquals(tD, "delete", "a record naming a release marker alone shows the copy is ours")
-    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(35, 0, "", tStamped, .tWhy)
-    Do $$$AssertEquals(tD, "delete", "a stamped marker alone shows the copy is ours")
-    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(35, 1, tStamped, tStamped, .tWhy)
-    Do $$$AssertEquals(tD, "ipm", "InstallGuard present: IPM owns the copy, even with a record and a stamped marker")
+    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(35, 0, tStamped, .tWhy)
+    Do $$$AssertEquals(tD, "delete", "a stamped marker shows the copy is ours")
+    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(35, 0, "5cedcac20ae9", .tWhy)
+    Do $$$AssertEquals(tD, "delete", "a bare hash from a build that predates the sequence is a release marker too")
+    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(35, 1, tStamped, .tWhy)
+    Do $$$AssertEquals(tD, "ipm", "InstallGuard present: IPM owns the copy, even with a stamped marker")
     Do $$$AssertEquals(tWhy, "IPM owns them", "the IPM reason")
-    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(35, 0, "", "dev", .tWhy)
-    Do $$$AssertEquals(tD, "foreign", "dev marker, no record: foreign")
+    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(35, 0, "dev", .tWhy)
+    Do $$$AssertEquals(tD, "foreign", "dev marker: foreign")
     Do $$$AssertTrue(tWhy [ "dev marker", "the reason names the dev marker")
-    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(35, 0, "dev", "dev", .tWhy)
-    Do $$$AssertEquals(tD, "foreign", "a record that only holds the dev marker proves nothing")
-    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(35, 0, tStamped, "dev", .tWhy)
-    Do $$$AssertEquals(tD, "foreign", "a dev Setup over a record naming a release marker is still foreign")
-    Do $$$AssertTrue(tWhy [ "dev marker", "the reason names the dev marker")
-    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(3, 0, "", "", .tWhy)
-    Do $$$AssertEquals(tD, "foreign", "no marker and no record: foreign")
+    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(3, 0, "", .tWhy)
+    Do $$$AssertEquals(tD, "foreign", "no marker (no Setup class, or none on it): foreign")
     Do $$$AssertTrue(tWhy [ "no release marker", "the reason says there is no marker")
-    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(3, 0, "", "weird", .tWhy)
+    Set tD = ##class(ExecuteMCPv2.Setup).DecideClasses(3, 0, "weird", .tWhy)
     Do $$$AssertEquals(tD, "foreign", "an unparseable marker: foreign")
     Do $$$AssertTrue(tWhy [ "weird", "the reason names the marker")
 
@@ -196,11 +189,11 @@ Method TestReportLines() As %Status
     Do $$$AssertEquals(tLines.%Get(0), "Nothing was removed: no part of the IRIS side was found.", "the nothing-removed line")
     Do $$$AssertEquals(tLines.%Get(1), ##class(ExecuteMCPv2.Setup).ServerLine(), "the server line is last")
 
-    Set tTwo = {"removed": [{"item": "%ALL"}], "left": [], "failed": [], "namespaces": ["USER", "HSCUSTOM"]}
+    Set tTwo = {"removed": [{"item": "%ALL"}, {"item": "classes", "namespace": "USER", "detail": "35 classes"}], "left": [{"item": "classes", "namespace": "HSCUSTOM", "reason": "IPM owns them"}], "failed": [{"item": "classes", "namespace": "APP", "error": "2 classes could not be deleted"}], "namespaces": ["USER", "HSCUSTOM", "APP", "SAMPLES"]}
     Set tLines = ##class(ExecuteMCPv2.Setup).ReportLines(tTwo)
-    Do $$$AssertEquals(tLines.%Size(), 3, "an entry, the namespaces line and the server line")
+    Do $$$AssertEquals(tLines.%Size(), 6, "four entries, the namespaces line and the server line")
     Do $$$AssertEquals(tLines.%Get(0), "Removed: %ALL", "the entry")
-    Do $$$AssertEquals(tLines.%Get(1), "Namespaces USER, HSCUSTOM used the suite: each loses the web application, the %ALL mapping and its classes (the instance has one of each).", "the two-namespace line")
+    Do $$$AssertEquals(tLines.%Get(4),"Namespaces USER, HSCUSTOM, APP, SAMPLES used the suite: the instance has one web application and one %ALL mapping, so none of them has either now; USER lost its classes; HSCUSTOM kept its classes (see its Left: line); APP still holds classes that could not be removed (see its Failed: line); SAMPLES held no classes of its own.", "the namespaces line words each namespace's own outcome")
 
     Set tOne = {"removed": [], "left": [{"item": "classes", "namespace": "HSCUSTOM", "reason": "IPM owns them"}], "failed": [], "namespaces": ["HSCUSTOM"]}
     Set tLines = ##class(ExecuteMCPv2.Setup).ReportLines(tOne)

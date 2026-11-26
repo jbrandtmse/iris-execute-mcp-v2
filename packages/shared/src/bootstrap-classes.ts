@@ -31,7 +31,7 @@
  * packages/shared/package.json. Compared against
  * `ExecuteMCPv2.Setup_GetBootstrapVersion()` at MCP server startup.
  */
-export const BOOTSTRAP_VERSION = "1.2.0+9.db691c6fee3d";
+export const BOOTSTRAP_VERSION = "1.2.0+10.109d0129528f";
 
 export interface BootstrapClass {
   name: string;
@@ -1286,7 +1286,7 @@ Parameter GUARDCLASS = "InstallGuard";
 /// deployment, an equal semver and sequence with a different hash, the
 /// <code>"dev"</code> placeholder and any unparseable value are left in place
 /// with a warning.</p>
-Parameter BOOTSTRAPVERSION = "1.2.0+9.db691c6fee3d";
+Parameter BOOTSTRAPVERSION = "1.2.0+10.109d0129528f";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -1364,19 +1364,22 @@ ClassMethod Configure(pNamespace As %String = "") As %Status [ SqlProc ]
 /// </example>
 /// <p>In this order it removes: (1) the <code>/api/executemcp/v2</code> web application;
 /// (2) the <code>ExecuteMCPv2</code> package mapping in <code>%ALL</code>; (3) the
+/// <code>%ALL</code> namespace, only when an install record says the install created it
+/// and nothing else is mapped in it; (4) <code>^UnitTestRoot</code> of each namespace
+/// whose record says the install set it, only while its value is unchanged; (5) the
 /// <code>ExecuteMCPv2</code> classes of every namespace that holds a copy the install
 /// deployed (shadowed copies included; a copy owned by IPM or not deployed by this
-/// install is left and named); (4) the <code>%ALL</code> namespace, only when an install
-/// record says the install created it and nothing else is mapped in it; (5)
-/// <code>^UnitTestRoot</code> of each namespace whose record says the install set it,
-/// only while its value is unchanged; (6) the install records, only when no step failed.
+/// install is left and named), only when no earlier step failed; (6) the install
+/// records, only when no step failed. A failed step therefore leaves this class and the
+/// records in place, and the command can run again once the cause is fixed.
 /// Without any install record (an install by 1.2.0 or earlier) <code>%ALL</code> and
 /// <code>^UnitTestRoot</code> are never removed and the report gives the commands.
 /// If the web application, the mapping or the namespace list cannot be read or removed,
-/// the classes, <code>%ALL</code>, <code>^UnitTestRoot</code> and the records are left
-/// alone, so a re-run can finish.</p>
+/// <code>%ALL</code>, <code>^UnitTestRoot</code>, the classes and the records are left
+/// alone.</p>
 /// <p>A repeat run removes nothing more and returns <code>$$$OK</code> while a copy of this
-/// class remains; after a full removal the class is gone, so there is nothing to run.
+/// class remains; after a full removal the class is gone, so the call raises
+/// <code>&lt;CLASS DOES NOT EXIST&gt;</code> and there is nothing left to do.
 /// <var>pReport</var> is a <class>%DynamicObject</class>
 /// <code>{removed:[], left:[], failed:[], namespaces:[]}</code>; each entry is
 /// <code>{item, namespace?, detail|reason|error, manual?}</code>. With
@@ -1485,7 +1488,7 @@ ClassMethod Uninstall(pVerbose As %Boolean = 1, Output pReport As %DynamicObject
 
     Try {
         If tCfgFailed {
-            Do ..AddEntry(pReport, "left", "classes, %ALL, ^UnitTestRoot and the install records", "", "reason", "an earlier step failed, so nothing after it was removed and the command can run again once it is fixed")
+            Do ..AddEntry(pReport, "left", "%ALL, ^UnitTestRoot, classes and the install records", "", "reason", "an earlier step failed, so none of them was touched and the command can run again once it is fixed")
         } ElseIf tListOK {
             ; Read every namespace once, while nothing is deleted. Nothing below calls a
             ; helper from inside another namespace: the classes may be gone there.
@@ -1546,31 +1549,7 @@ ClassMethod Uninstall(pVerbose As %Boolean = 1, Output pReport As %DynamicObject
                 If tN '= tOrigNS Do pReport.namespaces.%Push(tN)
             }
 
-            ; Step 3: the classes, namespace by namespace
-            Set tN = ""
-            For {
-                Set tN = $Order(tScan(tN))
-                If tN = "" Quit
-                If '$Data(tScan(tN, "error")) {
-                    Set tCode = ..DecideClasses(tScan(tN, "count"), tScan(tN, "guard"), tScan(tN, "deployed"), tScan(tN, "marker"), .tWhy)
-                    If tCode = "delete" {
-                        Set tDel(tN) = tScan(tN, "count")
-                    } ElseIf tCode = "ipm" {
-                        Do ..AddEntry(pReport, "left", "classes", tN, "reason", tWhy, "in " _ tN _ ": zpm ""uninstall iris-execute-mcp-v2""")
-                    } ElseIf tCode = "foreign" {
-                        Do ..AddEntry(pReport, "left", "classes", tN, "reason", tWhy, "in " _ tN _ ": Do $System.OBJ.DeletePackage(""ExecuteMCPv2"")")
-                    }
-                }
-            }
-            Set tN = ""
-            For {
-                Set tN = $Order(tDel(tN))
-                If tN = "" Quit
-                If tN '= tOrigNS Do ..RemoveClasses(pReport, tN, tDel(tN))
-            }
-            If $Data(tDel(tOrigNS)) Do ..RemoveClasses(pReport, tOrigNS, tDel(tOrigNS))
-
-            ; Step 4: the %ALL namespace
+            ; Step 3: the %ALL namespace
             If tAllExists && ($$$ISOK(tMapStatus)) {
                 Set tCode = ..DecideAll(tAllExists, $Get(tAnyAll), $Get(tAnyCreated), tStep2OK, tMapText, .tWhy, .tManual)
                 If tCode = "remove" {
@@ -1591,7 +1570,7 @@ ClassMethod Uninstall(pVerbose As %Boolean = 1, Output pReport As %DynamicObject
                 }
             }
 
-            ; Step 5: ^UnitTestRoot
+            ; Step 4: ^UnitTestRoot
             Set tN = ""
             For {
                 Set tN = $Order(tScan(tN))
@@ -1610,6 +1589,40 @@ ClassMethod Uninstall(pVerbose As %Boolean = 1, Output pReport As %DynamicObject
                     } ElseIf tCode = "norecord" {
                         Do ..AddEntry(pReport, "left", "^UnitTestRoot", tN, "reason", "no install record says the install set it (an install by 1.2.0 or earlier writes none)", "in " _ tN _ ": Kill ^UnitTestRoot")
                     }
+                }
+            }
+
+            ; Step 5: the classes, namespace by namespace. They go only when no earlier step
+            ; failed: this class is among them, and a re-run needs it to finish the job.
+            Set tN = ""
+            For {
+                Set tN = $Order(tScan(tN))
+                If tN = "" Quit
+                If '$Data(tScan(tN, "error")) {
+                    Set tCode = ..DecideClasses(tScan(tN, "count"), tScan(tN, "guard"), tScan(tN, "marker"), .tWhy)
+                    If tCode = "delete" {
+                        Set tDel(tN) = tScan(tN, "count")
+                    } ElseIf tCode = "ipm" {
+                        Do ..AddEntry(pReport, "left", "classes", tN, "reason", tWhy, "in " _ tN _ ": zpm ""uninstall iris-execute-mcp-v2""")
+                    } ElseIf tCode = "foreign" {
+                        Do ..AddEntry(pReport, "left", "classes", tN, "reason", tWhy, "in " _ tN _ ": Do $System.OBJ.DeletePackage(""ExecuteMCPv2"")")
+                    }
+                }
+            }
+            If ..DecideRecords(pReport.failed.%Size()) = "remove" {
+                Set tN = ""
+                For {
+                    Set tN = $Order(tDel(tN))
+                    If tN = "" Quit
+                    If tN '= tOrigNS Do ..RemoveClasses(pReport, tN, tDel(tN))
+                }
+                If $Data(tDel(tOrigNS)) Do ..RemoveClasses(pReport, tOrigNS, tDel(tOrigNS))
+            } Else {
+                Set tN = ""
+                For {
+                    Set tN = $Order(tDel(tN))
+                    If tN = "" Quit
+                    Do ..AddEntry(pReport, "left", "classes", tN, "reason", "an earlier step failed, so the classes stay and the command can run again once it is fixed")
                 }
             }
 
@@ -1655,16 +1668,16 @@ ClassMethod Uninstall(pVerbose As %Boolean = 1, Output pReport As %DynamicObject
 /// namespace. Returns <code>none</code> (no classes), <code>delete</code>,
 /// <code>ipm</code> (the IPM install guard class is present, so IPM owns them)
 /// or <code>foreign</code> (the copy is not shown to be this install's). A copy is ours
-/// only when the namespace's install record names a release marker or its
-/// <code>Setup</code> class carries a stamped release marker; a <code>Setup</code> class
-/// with the <code>dev</code> marker is always foreign, even where a record exists, and an
-/// unparseable marker or none proves nothing.
+/// only when the namespace's own <code>Setup</code> class carries a release marker, which
+/// only the bootstrap and IPM write. The namespace's install record never overrides the
+/// copy itself: a <code>Setup</code> class with the <code>dev</code> marker, an
+/// unparseable marker or none (no <code>Setup</code> class) is foreign even where a record
+/// exists, because the copy may have been replaced after the install wrote the record.
 /// @param pClassCount Classes of the package held by the namespace itself.
 /// @param pHasGuard 1 when the IPM install guard class exists there.
-/// @param pRecordDeployed The record's <code>("deployed")</code> value, or "".
 /// @param pMarker The <code>BOOTSTRAPVERSION</code> of the namespace's own Setup class, or "".
 /// @param pReason Output: why the classes are left.
-ClassMethod DecideClasses(pClassCount As %Integer, pHasGuard As %Boolean, pRecordDeployed As %String, pMarker As %String, Output pReason As %String) As %String
+ClassMethod DecideClasses(pClassCount As %Integer, pHasGuard As %Boolean, pMarker As %String, Output pReason As %String) As %String
 {
     Set pReason = ""
     If +pClassCount = 0 Quit "none"
@@ -1672,15 +1685,13 @@ ClassMethod DecideClasses(pClassCount As %Integer, pHasGuard As %Boolean, pRecor
         Set pReason = "IPM owns them"
         Quit "ipm"
     }
+    If ..IsReleaseMarker(pMarker) Quit "delete"
     If pMarker = "dev" {
         Set pReason = "its Setup class carries the dev marker, so it is not a copy this install deployed"
-        Quit "foreign"
-    }
-    If ..IsReleaseMarker(pRecordDeployed) || ..IsReleaseMarker(pMarker) Quit "delete"
-    If pMarker = "" {
-        Set pReason = "it has no release marker (no Setup class, or none on it) and no install record names it"
+    } ElseIf pMarker = "" {
+        Set pReason = "it has no release marker (no Setup class, or none on it), so it is not shown to be a copy this install deployed"
     } Else {
-        Set pReason = "its marker " _ pMarker _ " is not a release marker and no install record names it"
+        Set pReason = "its marker " _ pMarker _ " is not a release marker, so it is not shown to be a copy this install deployed"
     }
     Quit "foreign"
 }
@@ -1745,8 +1756,9 @@ ClassMethod DecideUnitTestRoot(pRecorded As %String, pCurrent As %String, pAnyRe
     Quit "none"
 }
 
-/// Decide whether the install records go: <code>remove</code> only when no step failed,
-/// otherwise <code>keep</code>, so a re-run can finish what a failed step left.
+/// Decide whether the classes, and after them the install records, go: <code>remove</code>
+/// only when no step before them failed, otherwise <code>keep</code>, so this class and the
+/// records stay and a re-run can finish what a failed step left.
 /// @param pFailedCount How many items the report holds under <code>failed</code>.
 ClassMethod DecideRecords(pFailedCount As %Integer) As %String
 {
@@ -1879,15 +1891,27 @@ ClassMethod FormatEntry(pKind As %String, pEntry As %DynamicObject) As %String
     Quit "Failed: " _ tWho _ ": " _ pEntry.%Get("error")
 }
 
-/// The line that names the namespaces of a report that holds more than one.
-ClassMethod NamespacesLine(pNamespaces As %DynamicArray) As %String
+/// The line that names the namespaces of a report that holds more than one, with what
+/// happened to each namespace's own classes, read from the report's <code>classes</code>
+/// entries.
+ClassMethod NamespacesLine(pReport As %DynamicObject) As %String
 {
-    Set tList = ""
-    Set tIter = pNamespaces.%GetIterator()
+    Set tList = "", tFates = ""
+    Set tIter = pReport.%Get("namespaces").%GetIterator()
     While tIter.%GetNext(.tKey, .tName) {
         Set tList = tList _ $Select(tList = "": "", 1: ", ") _ tName
+        Set tFate = tName _ " held no classes of its own"
+        For tKind = "removed", "left", "failed" {
+            Set tEntries = pReport.%Get(tKind).%GetIterator()
+            While tEntries.%GetNext(.tK, .tEntry) {
+                If (tEntry.%Get("item") = "classes") && (tEntry.%Get("namespace") = tName) {
+                    Set tFate = tName _ $Case(tKind, "removed": " lost its classes", "left": " kept its classes (see its Left: line)", : " still holds classes that could not be removed (see its Failed: line)")
+                }
+            }
+        }
+        Set tFates = tFates _ $Select(tFates = "": "", 1: "; ") _ tFate
     }
-    Quit "Namespaces " _ tList _ " used the suite: each loses the web application, the %ALL mapping and its classes (the instance has one of each)."
+    Quit "Namespaces " _ tList _ " used the suite: the instance has one web application and one %ALL mapping, so none of them has either now; " _ tFates _ "."
 }
 
 /// The line printed on every run about a server that is still running.
@@ -1908,7 +1932,7 @@ ClassMethod ReportLines(pReport As %DynamicObject) As %DynamicArray
             Do tLines.%Push(..FormatEntry(tKind, tEntry))
         }
     }
-    If pReport.%Get("namespaces").%Size() > 1 Do tLines.%Push(..NamespacesLine(pReport.%Get("namespaces")))
+    If pReport.%Get("namespaces").%Size() > 1 Do tLines.%Push(..NamespacesLine(pReport))
     If (pReport.%Get("removed").%Size() = 0) && (pReport.%Get("left").%Size() = 0) && (pReport.%Get("failed").%Size() = 0) {
         Do tLines.%Push("Nothing was removed: no part of the IRIS side was found.")
     }
@@ -21915,7 +21939,7 @@ Class ExecuteMCPv2.InstallGuard Extends %RegisteredObject
 /// This package's bootstrap version marker, <code>&lt;semver&gt;+&lt;sequence&gt;.&lt;hash&gt;</code>.
 /// <p>The value on disk is <code>"dev"</code>, a placeholder. <code>scripts/gen-bootstrap.mjs</code>
 /// stamps the real marker into the copy it embeds and packages, and this file is not edited for it.</p>
-Parameter BOOTSTRAPVERSION = "1.2.0+9.db691c6fee3d";
+Parameter BOOTSTRAPVERSION = "1.2.0+10.109d0129528f";
 
 /// The class whose compiled BOOTSTRAPVERSION parameter is the deployed marker.
 Parameter SETUPCLASS = "ExecuteMCPv2.Setup";

@@ -72,16 +72,28 @@ describe("Story 45.3: the README section 'Removing the IRIS Side'", () => {
   it("lists what it removes in the order the code runs, and what it leaves", () => {
     for (const needle of [
       "1. the `/api/executemcp/v2` web application;",
-      "2. the `ExecuteMCPv2` package mapping in the `%ALL` namespace;",
-      "4. the `%ALL` namespace, only when the install created it **and** nothing else is mapped in it;",
-      "5. `^UnitTestRoot` in each namespace where the install set it, only while its value is the one the install set;",
-      "6. the install records, last.",
+      "2. the `ExecuteMCPv2` package mapping in the `%ALL` namespace",
+      "3. the `%ALL` namespace, only when the install created it **and** nothing else is mapped in it;",
+      "4. `^UnitTestRoot` in each namespace where the install set it, only while its value is the one the install set;",
+      "5. the `ExecuteMCPv2` classes, in every namespace that holds a copy of its own",
+      "6. the install records, last, only when no step failed.",
     ]) {
       expect(flat, needle).toContain(needle);
     }
+    // Decision #168 (DW-775): the classes go after %ALL and ^UnitTestRoot and only when every step before them succeeded; the source runs them in that order.
+    expect(flat).toContain("The classes go only when every step before them succeeded, because the `Setup` class that runs the command is among them");
+    const body = setup.slice(setup.indexOf("ClassMethod Uninstall("), setup.indexOf("ClassMethod DecideClasses("));
+    const steps = ["; Step 3: the %ALL namespace", "; Step 4: ^UnitTestRoot", "; Step 5: the classes", "; Step 6: the records"].map((marker) => body.indexOf(marker));
+    expect(steps.every((position) => position > 0), "every step marker is in Uninstall").toBe(true);
+    expect([...steps].sort((a, b) => a - b), "the steps run in the documented order").toEqual(steps);
     expect(flat).toContain("shadowed copies included");
     expect(flat).toContain("A namespace where IPM installed the classes is left too, because IPM owns them");
     expect(flat).toContain("a `dev` copy loaded by hand, or a copy with no release marker");
+    // The oracle for "even where an install record exists": the ownership leg seeds a record naming the release marker under both left copies.
+    expect(flat).toContain("is left alone and named, with the command to remove it, even where an install record exists");
+    expect(read("packages/iris-mcp-all/src/__tests__/story-45-3-uninstall-round-trip-live-gate.test.ts")).toContain(
+      'leg("ownership: a dev Setup and a marker-less copy, each over an install record that names a release marker, are both left byte for byte untouched"',
+    );
   });
 
   it("documents the install record and the failure behavior", () => {
@@ -97,7 +109,10 @@ describe("Story 45.3: the README section 'Removing the IRIS Side'", () => {
   });
 
   it("gives the no-record case with both manual commands and the warning that deleting %ALL removes every mapping", () => {
-    expect(flat).toContain("An install by `1.2.0` or earlier has no record, and upgrading it in place does not add one.");
+    expect(flat).toContain("An install by `1.2.0` or earlier has no record, and a server that upgrades it in place does not add one.");
+    expect(flat, "the IPM upgrade of a 1.2.0 install writes a found record, and the README says what that means").toContain(
+      "says only what that later install did. It found `%ALL` and the mapping already there",
+    );
     expect(flat).toContain("it never removes `%ALL` or `^UnitTestRoot`");
     expect(removing).toContain('Do ##class(Config.Namespaces).Delete("%ALL")');
     expect(removing).toContain("Kill ^UnitTestRoot");
@@ -151,7 +166,8 @@ describe("Story 45.3 QA: the README claims against their oracles", () => {
     }
     expect(removing).toContain("A repeat run removes nothing more while a copy of the `Setup` class remains (a copy left for IPM, or a foreign one)");
     expect(removing).toContain("after a full removal the class is gone, so there is nothing to run");
-    expect(uninstallComment).toContain("after a full removal the class is gone, so there is nothing to run");
+    expect(uninstallComment).toContain("after a full removal the class is gone, so the call raises");
+    expect(uninstallComment).toContain("<code>&lt;CLASS DOES NOT EXIST&gt;</code> and there is nothing left to do");
     // The oracles: the plain leg's second terminal call raises <CLASS DOES NOT EXIST> and changes nothing; the IPM-owned leg's second run keeps the class
     // and returns OK while removing nothing more.
     expect(gateSource).toContain('expect(second).toContain("CLASS DOES NOT EXIST")');
@@ -176,11 +192,27 @@ describe("Story 45.3 QA: the README claims against their oracles", () => {
     expect(changelogEntry).toContain("an `EXECUTE` grant is not a protection for the `Setup` methods");
   });
 
-  it("says a failure while it reads one namespace does not stop the others, so the running copy can already be deleted and the records stay (the failing-step leg)", () => {
-    expect(removing).toContain("A failure while it reads one namespace does not stop the others, so the command can already have deleted the classes it runs from; the records stay");
-    expect(removing).toContain("put the install back (start a server with the automatic install on, or load the package) and run the command again");
+  it("says a later failure keeps the classes and the records, and a re-run finishes and reports only what it removed (decision #168: the failing-step legs)", () => {
+    expect(removing).toContain(
+      "but the classes and the records stay, the `Setup` class among them: fix the cause and run the same command again, and it finishes and reports only what that run removed",
+    );
+    expect(removing, "the README no longer tells the user to put the install back first").not.toContain("put the install back");
     expect(gateSource).toContain("the independent steps ran: %ALL and ^UnitTestRoot are gone");
     expect(gateSource).toContain('"Left: install records (a step failed, so the records stay and the command can run again)"');
+    expect(gateSource).toContain('leg("a failing ^UnitTestRoot step (a database mounted read-only): the classes and the records stay, and a re-run after the fix finishes and names only what it removed"');
+    expect(setup).toContain('"an earlier step failed, so the classes stay and the command can run again once it is fixed"');
+  });
+
+  it("tells a user who sees <CLASS DOES NOT EXIST> that the uninstall already finished, with the one-line check the gate runs live (decision #168)", () => {
+    expect(removing).toContain("**If the command fails with `<CLASS DOES NOT EXIST>`, the uninstall already finished in that namespace and nothing is left to do.**");
+    expect(removing).toContain("it prints `record=0 webapp=0` when the install record of that namespace and the `/api/executemcp/v2` web application are both gone");
+    const check = /```\n(Set ns=\$NAMESPACE [^\n]+)\n```/.exec(section(readme, 3, "Removing the IRIS Side"))?.[1];
+    expect(check, "the README gives the check as one line in a code block").toBeDefined();
+    // The oracle: the plain leg runs exactly this line after the full removal and the <CLASS DOES NOT EXIST> second call, and expects record=0 webapp=0
+    // (and record=10 webapp=1 before the removal, so the check can vary).
+    expect(gateSource).toContain(`const DONE_CHECK =\n  '${check as string}';`);
+    expect(gateSource).toContain('toEqual(["record=0 webapp=0", "NS=USER"])');
+    expect(gateSource).toContain('toEqual(["record=10 webapp=1"])');
   });
 
   it("says the last line is the running-server warning, and the source prints it last", () => {
@@ -277,10 +309,10 @@ describe("Story 45.3: the CHANGELOG entry", () => {
   });
 
   it("records the BOOTSTRAP_VERSION move from the 45.2 value to a value the embed holds or has moved past", () => {
-    expect(entry).toContain("`1.2.0+8.5cedcac20ae9` to `1.2.0+9.db691c6fee3d`");
+    expect(entry).toContain("`1.2.0+8.5cedcac20ae9` to `1.2.0+10.109d0129528f`");
     const embedded = parseBootstrapMarker(BOOTSTRAP_VERSION);
     expect(embedded.kind).toBe("stamped");
-    if (embedded.kind === "stamped") expect(embedded.sequence >= 9n, "the embed is the story's value or a later one").toBe(true);
+    if (embedded.kind === "stamped") expect(embedded.sequence >= 10n, "the embed is the story's value or a later one").toBe(true);
   });
 });
 
