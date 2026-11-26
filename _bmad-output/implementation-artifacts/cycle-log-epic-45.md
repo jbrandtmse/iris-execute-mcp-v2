@@ -103,3 +103,5 @@
 2026-11-26T11:00:50Z	Story 45.5	fresh_check	files=shared1+all7 in_order=pass shuffle_seed7=pass tests=192p/5s shared_full=97f/2903p full_all=255f/6742p/760s live-guards=79/0
 2026-11-26T11:00:50Z	Story 45.5	story_cycle	commits=a9a4f65c(build),0403dea2(qa),3da2d934(cr) review=CLEAN smoke=armed_capstone_21/21 ledger=DW-766,DW-768(resolved) decisions=173,174 quota_weekly=54%
 2026-11-26T11:02:36Z	Epic 45	ledger_burndown_chartered	stories=45-6(IRIS_side:DW-765,773,774,778,780,786,787),45-7(TS_docs:DW-767,770,784+SECURITY.md_wording) decision_pending_on_sheet=DW-719,720,722(owner,restated_only) decision=175 order=45.6_then_45.7
+2026-11-26T11:02:48Z	Story 45.5	committed	sha=c597cf4c ci=pending run=45806637731
+2026-11-26T11:02:48Z	Story 45.6	stage_spawned	stage=plan spawn_at=2026-11-26T11:02:48Z model=claude-opus-5-5 agent_name=45-6-burndown-iris-plan-1 cycle_iteration=1 ledger_inbox=DW-765,773,774,778,780,786,787 prev_ci=pending(45806637731) quota_weekly=54%
