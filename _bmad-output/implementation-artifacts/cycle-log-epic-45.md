@@ -72,3 +72,5 @@
 2026-11-26T04:36:51Z	Story 45.3	story_cycle	commits=6cf4fd4a(build),fcb5d4dc(qa),08a3dca7(cr) review=CLEAN smoke=18/18 ledger=DW-774(burndown),DW-775/776(resolved),DW-777(by-design),DW-778(burndown,terminal),DW-779(wontfix-theoretical),DW-780(burndown) decisions=162,163,166,168
 2026-11-26T04:37:24Z	Story 45.3	committed	sha=0ae0884b ci=pending run=45756335327
 2026-11-26T04:37:24Z	Story 45.4	stage_spawned	stage=plan spawn_at=2026-11-26T04:37:24Z model=claude-opus-5-5 agent_name=45-4-block-plan-1 cycle_iteration=1 ledger_inbox=none prev_ci=pending(45756335327)
+2026-11-26T04:50:09Z	Story 45.4	story_created	spec=_bmad-output/implementation-artifacts/spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md model=claude-opus-5-5 probes=code+built_universe_render(no_IRIS)
+2026-11-26T04:50:09Z	Story 45.4	spec_validated	service_introducing=false integration_ac=present(real_SDK_client_vs_built_servers_stdio,stub_IRIS_request_recorder) adr_constrained_acs=AD-6,AD-7,AD-15,AD-19,AD-26,Rule_19,Rule_44,Rule_45,Rule_56,Rule_59 decision_dependency=none owned_ledger=none amendments=epics_A1-A5 spine=AD-6,AD-19,AD-26(Rule20) decision=169 covered=11
