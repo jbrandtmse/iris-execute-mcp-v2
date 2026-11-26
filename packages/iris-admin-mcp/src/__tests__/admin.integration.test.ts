@@ -343,6 +343,60 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         await safeDelete(databaseManageTool, { action: "delete", name: FIELDS_DB_NAME }, ctx);
       }
     });
+
+    it("an account with only %Development and read access to the databases reads the same resource and flags the administrator reads", async () => {
+      const roleName = "MCPAdminTestLPDbRole";
+      const userName = "MCPAdminTestLPDbUser";
+      const password = "MCPAdm1nLPDb!Pwd";
+      const { rows: adminRows } = await listAllRows<DatabaseRow>(databaseListTool, "databases", ctx);
+      const adminRow = (name: string): DatabaseRow | undefined => adminRows.find((row) => row.name.toUpperCase() === name.toUpperCase());
+
+      // The databases the account can open: the target namespace's own (read and write), and the two system ones the call reads
+      // SYS.Database through (read only).
+      const namespaces = await namespaceListTool.handler({}, ctx);
+      expect(namespaces.isError, namespaces.content[0]?.text).toBeFalsy();
+      const targetNamespace = (namespaces.structuredContent as { namespaces: Array<{ name: string; globals: string; routines: string }> }).namespaces.find(
+        (entry) => entry.name.toUpperCase() === config.namespace.toUpperCase(),
+      );
+      expect(targetNamespace, `the namespace list holds ${config.namespace}`).toBeDefined();
+      const ownDatabases = [...new Set([targetNamespace?.globals ?? "", targetNamespace?.routines ?? ""])];
+      const ownResources = ownDatabases.map((name) => adminRow(name)?.resource ?? "");
+      expect(ownResources.every((resource) => resource !== ""), `the administrator reads a resource for ${ownDatabases.join(", ")}`).toBe(true);
+      const grants = [...ownResources.map((resource) => `${resource}:RW`), "%DB_IRISSYS:R", "%DB_IRISLIB:R", "%Development:U"].join(",");
+
+      try {
+        const role = await roleManageTool.handler({ action: "create", name: roleName, description: "Integration test role", resources: grants }, ctx);
+        expect(role.isError, role.content[0]?.text).toBeFalsy();
+        const user = await userManageTool.handler(
+          { action: "create", name: userName, password, fullName: "MCP Admin Integration Test User", roles: roleName, enabled: true, namespace: "USER" },
+          ctx,
+        );
+        expect(user.isError, user.content[0]?.text).toBeFalsy();
+
+        const limitedConfig: IrisConnectionConfig = { ...config, username: userName, password };
+        const limitedClient = new IrisHttpClient(limitedConfig);
+        try {
+          const limitedCtx = buildToolContext("SYS", limitedConfig, limitedClient, await negotiateVersion(limitedClient));
+          const { first, rows: limitedRows } = await listAllRows<DatabaseRow>(databaseListTool, "databases", limitedCtx);
+          expect(first.isError, first.content[0]?.text).toBeFalsy();
+          const limitedRow = (name: string): DatabaseRow | undefined => limitedRows.find((row) => row.name.toUpperCase() === name.toUpperCase());
+          for (const name of ["IRISSYS", "IRISLIB", ...ownDatabases]) {
+            const expected = adminRow(name);
+            expect(limitedRow(name)?.resource, `${name}: the account reads the administrator's resource`).toBe(expected?.resource);
+            expect(limitedRow(name)?.readOnly, `${name}: the account reads the administrator's readOnly`).toBe(expected?.readOnly);
+            expect(limitedRow(name)?.globalJournalState, `${name}: the account reads the administrator's globalJournalState`).toBe(expected?.globalJournalState);
+          }
+          expect(limitedRow("IRISSYS")?.resource, "IRISSYS holds its own resource, not the empty default").toBe("%DB_IRISSYS");
+          expect(limitedRow("IRISLIB")?.resource).toBe("%DB_IRISLIB");
+          expect(limitedRow("IRISLIB")?.readOnly, "IRISLIB is mounted read-only").toBe(true);
+        } finally {
+          limitedClient.destroy();
+        }
+      } finally {
+        await safeDelete(userManageTool, { action: "delete", name: userName }, ctx);
+        await safeDelete(roleManageTool, { action: "delete", name: roleName }, ctx);
+      }
+    });
   });
 
   // ── 2. Namespace create & verify ─────────────────────────────────

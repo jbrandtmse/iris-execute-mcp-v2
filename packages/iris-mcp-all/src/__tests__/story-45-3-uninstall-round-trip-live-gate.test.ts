@@ -18,7 +18,10 @@
  *
  * LEGS. plain round trip (with the extra `ConfigureMapping` call an IPM reinstall makes, and a second run), foreign `%ALL`, a
  * foreign mapping added after the install, an `ExecuteMCPv2` mapping that existed before it, `^UnitTestRoot` preset, `^UnitTestRoot` changed, no record (an install by 1.2.0),
- * `^UnitTestRoot` in a namespace with no record of its own while another holds one (Story 45.6, DW-780), two
+ * an install by 1.2.0 upgraded in place by IPM (the Configure phase runs in a transaction with no web request, so `%ALL` is recorded as found),
+ * `^UnitTestRoot` in a namespace with no record of its own while another holds one (Story 45.6, DW-780), the web-route refusal of
+ * the two configuration calls (DW-786, whose teardown re-activates the namespace table), the bootstrap into a namespace without
+ * interoperability (DW-787), two
  * namespaces with a shadowed copy, a `dev`-marked copy in a second namespace (ownership), a dev Setup over a recorded install and a
  * marker-less copy over a recorded install (ownership), IPM-owned (the guard stub) with a second
  * run, a failing step (a namespace whose only database is dismounted), a failing `^UnitTestRoot` step (a database mounted read-only) that
@@ -511,6 +514,47 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(differences(baselinePlus({ "%ALL": "1", "utr USER": installed["utr USER"] as string }), snapshot())).toEqual([]);
   });
 
+  leg("a 1.2.0 install upgraded in place by IPM (DW-780): the Configure phase finds %ALL and the mapping, so %ALL is left with its command, the mapping goes, and the ^UnitTestRoot that 1.2.0 set is not reported", async () => {
+    await install();
+    const installed = snapshot();
+    // 1.2.0 wrote no record: everything it created stays, and the record goes.
+    terminal("USER", ["Kill ^ExecuteMCPv2.InstallRecord"]);
+    expect(snapshot()["record USER"], "an install by 1.2.0 leaves no record").toMatch(/^0\b/);
+
+    // The IPM Configure phase: Configure, then ConfigureMapping, inside a transaction and with no web request.
+    const phase = outputLines(
+      terminal("USER", [
+        "TSTART",
+        'Write "TLEVEL=",$TLevel,!',
+        'Write "REQUEST=",$IsObject($Get(%request)),!',
+        'Write "CONFIGURE-OK=",$System.Status.IsOK(##class(ExecuteMCPv2.Setup).Configure()),!',
+        'Write "MAPPING-OK=",$System.Status.IsOK(##class(ExecuteMCPv2.Setup).ConfigureMapping()),!',
+        "TCOMMIT",
+      ]),
+    );
+    const phaseField = (name: string): string => (phase.find((line) => line.startsWith(`${name}=`)) ?? "").slice(name.length + 1);
+    expect(phaseField("TLEVEL"), "the phase runs inside a transaction").toBe("1");
+    expect(phaseField("REQUEST"), "and with no web request").toBe("0");
+    expect(phaseField("CONFIGURE-OK"), "the guard lets Configure through").toBe("1");
+    expect(phaseField("MAPPING-OK"), "the guard lets ConfigureMapping through").toBe("1");
+    const upgraded = snapshot()["record USER"] as string;
+    expect(upgraded, "%ALL was there already, so the record says found").toContain("all=found;");
+    expect(upgraded).toContain("mapping=found;");
+    expect(upgraded).toContain(`deployed=${embedded.marker};`);
+    expect(upgraded, "no unitTestRoot node: the phase does not set the global").not.toContain("unitTestRoot=");
+
+    const run = runOneLiner();
+    expect(run.lines).toEqual([
+      WEBAPP_LINE,
+      MAPPING_LINE,
+      classesLine("USER", embedded.classes.size),
+      "Removed: install record (USER)",
+      `Left: %ALL (${ALL_FOUND_REASON}). To remove it by hand: ${ALL_MANUAL}`,
+      SERVER_LINE,
+    ]);
+    expect(differences(baselinePlus({ "%ALL": "1", "utr USER": installed["utr USER"] as string }), snapshot()), "%ALL and the value 1.2.0 set survive, everything else is back").toEqual([]);
+  });
+
   leg("^UnitTestRoot in a namespace with no record of its own, while another namespace holds one (DW-780): the value survives and is reported with its command", async () => {
     await install("USER");
     terminal("HSCUSTOM", ['Set ^UnitTestRoot="/set/by/someone/else/in/hscustom/"']);
@@ -762,23 +806,30 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
       const printed = terminal("%SYS", ['Set sc=##class(Security.Applications).Get("/api/executemcp/v2",.p) Write "WEBAPPNS=",$Get(p("NameSpace")),!']);
       return (outputLines(printed).find((entry) => entry.startsWith("WEBAPPNS=")) ?? "").slice("WEBAPPNS=".length);
     };
-    const before = snapshot();
-    expect(before["%ALL"], "precondition: %ALL is absent").toBe("0");
-    expect(cpfLines(), "precondition: iris.cpf holds no %ALL line").toBe(0);
-    const appNamespaceBefore = webAppNamespace();
-    expect(appNamespaceBefore, "precondition: the web application points at the install namespace").toBe("USER");
+    try {
+      const before = snapshot();
+      expect(before["%ALL"], "precondition: %ALL is absent").toBe("0");
+      expect(cpfLines(), "precondition: iris.cpf holds no %ALL line").toBe(0);
+      const appNamespaceBefore = webAppNamespace();
+      expect(appNamespaceBefore, "precondition: the web application points at the install namespace").toBe("USER");
 
-    // The automatic install is off, so no startup repair can put anything back and hide a call that ran.
-    const served = await runServerCalls("startup", { repoRoot: REPO_ROOT, sdkEsmDir, target }, { IRIS_AUTO_INSTALL: "false" }, [
-      { tool: "iris_sql_query", args: { query: "SELECT ExecuteMCPv2.Setup_ConfigureMapping('USER') AS Result" } },
-      { tool: "iris_sql_query", args: { query: "SELECT ExecuteMCPv2.Setup_Configure('HSCUSTOM') AS Result" } },
-    ]);
-    expect(served.results, "both calls were answered").toHaveLength(2);
-    expect(JSON.stringify(served.results[0]), "ConfigureMapping names the refusal").toContain("ConfigureMapping changed nothing: it was called inside a transaction during a web request");
-    expect(JSON.stringify(served.results[1]), "Configure names the refusal").toContain("Configure changed nothing: it was called inside a transaction during a web request");
-    expect(differences(before, snapshot()), "%ALL, the mapping and the classes are as they were").toEqual([]);
-    expect(cpfLines(), "iris.cpf still holds no %ALL line").toBe(0);
-    expect(webAppNamespace(), "the web application still points at the install namespace").toBe(appNamespaceBefore);
+      // The automatic install is off, so no startup repair can put anything back and hide a call that ran.
+      const served = await runServerCalls("startup", { repoRoot: REPO_ROOT, sdkEsmDir, target }, { IRIS_AUTO_INSTALL: "false" }, [
+        { tool: "iris_sql_query", args: { query: "SELECT ExecuteMCPv2.Setup_ConfigureMapping('USER') AS Result" } },
+        { tool: "iris_sql_query", args: { query: "SELECT ExecuteMCPv2.Setup_Configure('HSCUSTOM') AS Result" } },
+      ]);
+      expect(served.results, "both calls were answered").toHaveLength(2);
+      expect(JSON.stringify(served.results[0]), "ConfigureMapping names the refusal").toContain("ConfigureMapping changed nothing: it was called inside a transaction during a web request");
+      expect(JSON.stringify(served.results[1]), "Configure names the refusal").toContain("Configure changed nothing: it was called inside a transaction during a web request");
+      expect(differences(before, snapshot()), "%ALL, the mapping and the classes are as they were").toEqual([]);
+      expect(cpfLines(), "iris.cpf still holds no %ALL line").toBe(0);
+      expect(webAppNamespace(), "the web application still points at the install namespace").toBe(appNamespaceBefore);
+    } finally {
+      // The leg's own teardown. A configuration write that ran inside the route's transaction is rolled back with it, and IRIS then
+      // keeps a namespace table that no namespace created afterwards can be entered through, so the legs that create a namespace
+      // of their own would fail for this leg's reason. Re-activating the table restores it.
+      terminal("%SYS", ["Set sc=##class(Config.Namespaces).ActivateAll()"]);
+    }
   });
 
   leg("DW-787: the real bootstrap into a namespace that is not interoperability-enabled compiles every class, ExecuteMCPv2.REST.Interop included", async () => {
