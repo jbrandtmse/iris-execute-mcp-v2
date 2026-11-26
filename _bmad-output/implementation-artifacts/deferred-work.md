@@ -4324,6 +4324,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Config.cls:209 reads tProps(Resource) from Config.Databases.Get, but Config.Databases has no Resource property (irissys/Config/Databases.cls); IRIS keeps it in SYS.Database.ResourceName. Live read 2026-11-25 (shared instance, iris_database_list): resource is empty for all 15 databases, IRISSYS included. The create/modify resource input (Config.cls:244) is unverified too.
 - 2026-11-25T16:31:50Z status=routed owner=burndown by=cr note=IRIS-side fix (read SYS.Database ResourceName in %SYS, probe the create/modify path) plus embed regen; found while reviewing the 45.1 live gate
 - 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
+- 2026-11-26T15:02:37Z status=resolved-by:45-6-epic-45-burn-down-iris-side owner=45-6-epic-45-burn-down-iris-side by=lead note=Story 45.6 (build 45f52674, QA 4e93d6ad, CR patches): proven live on throwaways with a mutation per entry (spec Verification); BOOTSTRAP_VERSION 1.2.0+10.109d0129528f -> 1.2.0+12.bd38d590c26e
 
 ### DW-766: The SQL tools' minimum account (%Development:U plus the namespace's database resource) is proven only where the namespace's globals, routines and the ExecuteMCPv2 classes share one database
 - source: cr spec-45-1-sql-statements-honor-sql-privileges.md | severity: med | fix-risk: low | footprint: in-epic
@@ -4376,12 +4377,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-25T22:56:02Z status=routed owner=burndown by=cr note=Burn-down candidate. A distinct cannot-read result would remove the WARN, the per-connect recompile for least-privilege accounts and the 404 heuristic, but IsConfigured's return values are pinned by AC 45.3.8 and it is one of DW-771's five procedures: probe first whether the TS probe can read the web app another way (e.g. a read-only route an account with %Development can call), else a new non-SqlProc path; .cls change moves BOOTSTRAP_VERSION
 - 2026-11-25T23:18:33Z status=routed owner=burndown by=lead note=Planner 2026-11-25 (decision #167), BINDING: terminal disposition inside Epic 45 (resolved, or closed by an owner decision), never re-deferred. Probe first (Rule #16) whether IsConfigured or a new non-SQL helper can tell PROTECT from not-registered (e.g. a third state the probe maps to an unconfirmed/unknown state that never triggers a recompile), keeping the pinned five SqlProcs' contracts; if the only fix changes a pinned procedure contract, bring it to the Planner first. Order: 45.5 documents today's least-privilege behavior at each auto-install setting; the burn-down story (runs after 45.5) updates that text in the same change if its fix lands
 - 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
+- 2026-11-26T15:02:37Z status=resolved-by:45-6-epic-45-burn-down-iris-side owner=45-6-epic-45-burn-down-iris-side by=lead note=Story 45.6 (build 45f52674, QA 4e93d6ad, CR patches): proven live on throwaways with a mutation per entry (spec Verification); BOOTSTRAP_VERSION 1.2.0+10.109d0129528f -> 1.2.0+12.bd38d590c26e
 
 ### DW-774: IPM Unconfigure-phase invoke in module.xml so a bare zpm uninstall also removes the web app, mapping and %ALL
 - source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: 45.3 build review; today the order is the one-liner first, then zpm uninstall (probe P7); module.xml is in the stamped IPM tree, regenerated only at release
 - 2026-11-26T02:13:32Z status=routed owner=burndown by=harvest note=IPM tree change; burn-down candidate
 - 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
+- 2026-11-26T15:02:37Z status=wontfix-accepted owner=45-6-epic-45-burn-down-iris-side by=lead note=Closed by decision (#176 D5): the uninstall is instance-wide while zpm uninstall is per namespace; a module.xml generator change turns gen:ipm:check red until the version step; the documented order (one-liner first, then zpm uninstall) is complete. The owner may reopen.
 
 ### DW-775: A run that fails after deleting the classes cannot be re-run without reinstalling (Setup itself is gone)
 - source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: low | footprint: in-footprint
@@ -4408,6 +4411,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-26T02:13:32Z status=routed owner=burndown by=harvest note=Burn-down candidate: run the seeded ObjectScript unit classes in the CI throwaway suite with total checked (Rule #35)
 - 2026-11-26T02:16:28Z status=routed owner=burndown by=lead note=Planner 2026-11-25 (decision #168): terminal answer required in the burn-down, never re-deferred: a CI job runs SetupTest and SetupUninstallTest on the throwaway with totals checked (Rule #35), or closed by decision with the reason
 - 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
+- 2026-11-26T15:02:37Z status=resolved-by:45-6-epic-45-burn-down-iris-side owner=45-6-epic-45-burn-down-iris-side by=lead note=Story 45.6 (build 45f52674, QA 4e93d6ad, CR patches): proven live on throwaways with a mutation per entry (spec Verification); BOOTSTRAP_VERSION 1.2.0+10.109d0129528f -> 1.2.0+12.bd38d590c26e
 
 ### DW-779: Delete-after-Exists error branches of the uninstall's web-app and mapping steps are not reached by any test
 - source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: low | footprint: in-footprint
@@ -4420,6 +4424,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-26T04:06:50Z status=routed owner=burndown by=cr note=Burn-down candidate: amend the I/O Matrix so a found %ALL still carries the manual delete command, and apply the no-record ^UnitTestRoot rule per namespace; Setup.cls change
 - 2026-11-26T04:09:37Z status=routed owner=burndown by=lead note=Planner 2026-11-25: the burn-down fixes the text (the 1.2.0-upgrade path most current users take), not close by decision, unless that costs more than a few lines
 - 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
+- 2026-11-26T15:02:37Z status=resolved-by:45-6-epic-45-burn-down-iris-side owner=45-6-epic-45-burn-down-iris-side by=lead note=Story 45.6 (build 45f52674, QA 4e93d6ad, CR patches): proven live on throwaways with a mutation per entry (spec Verification); BOOTSTRAP_VERSION 1.2.0+10.109d0129528f -> 1.2.0+12.bd38d590c26e
 
 ### DW-781: Code-running write tools (compile/load, start a production, build a cube, run a task) stay on under block alone
 - source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -4457,6 +4462,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-26T09:26:17Z status=routed owner=burndown by=merge_gate note=OWNER decision 2026-11-26 via the Planner (decision #174): option (b), amends #171 point 3 (points 1, 2, 4 stand). Build in the burn-down: Configure and ConfigureMapping refuse when called inside a transaction (TLEVEL>0). Conditions: (1) probe first on a throwaway that the bootstrap's Atelier action/query runs at TLEVEL=0 (fresh install and upgrade) and iris_sql_query's read-only path at TLEVEL>0, else stop and tell the Planner; (2) clear error status: ran inside a transaction (as a read-only SQL query does), changed nothing, run it from an IRIS terminal or let the automatic install do it; no change to %ALL, mapping, iris.cpf, web app; (3) live leg: read-only server, admin account, %ALL and mapping removed, SELECT Setup_ConfigureMapping through iris_sql_query refused and Exists still 0, same for Configure; mutation removing the guard turns it red; the automatic install and uninstall-round-trip stay green; (4) docs in the same change: 45.5 residual text (A2) updated to the guarded behavior, direct-Atelier admin case stays documented as account = boundary; (5) BOOTSTRAP_VERSION from->to recorded, pinned SqlProc set stays exactly the five
 - 2026-11-26T10:31:37Z status=routed owner=burndown by=cr note=45.5 CR: when the guard ships, update both 'This release documents...' sentences (README residual bullet and CHANGELOG 45.5 bullet) in the same change
 - 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
+- 2026-11-26T15:02:37Z status=resolved-by:45-6-epic-45-burn-down-iris-side owner=45-6-epic-45-burn-down-iris-side by=lead note=Story 45.6 (build 45f52674, QA 4e93d6ad, CR patches): proven live on throwaways with a mutation per entry (spec Verification); BOOTSTRAP_VERSION 1.2.0+10.109d0129528f -> 1.2.0+12.bd38d590c26e
 
 ### DW-787: The bootstrap fails to compile ExecuteMCPv2.REST.Interop in a namespace that is not interoperability-enabled
 - source: spec-45-5-what-the-safety-settings-protect.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -4464,6 +4470,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-26T08:04:18Z status=routed owner=burndown by=cr note=Probe first: confirm on both editions; decide whether the bootstrap should skip or tolerate the Interop handler in a non-interop namespace, and what the docs say
 - 2026-11-26T08:05:09Z status=routed owner=burndown by=lead note=Planner 2026-11-26: probe first on both editions; if it reproduces, the fix keeps a non-interop namespace installing cleanly (skip REST.Interop there with a clear report, or make it compile), never a half-compiled package
 - 2026-11-26T11:02:30Z status=routed owner=45-6-epic-45-burn-down-iris-side by=lead note=chartered into Story 45.6 at the Epic 45 burn-down gate (decision #175)
+- 2026-11-26T15:02:37Z status=resolved-by:45-6-epic-45-burn-down-iris-side owner=45-6-epic-45-burn-down-iris-side by=lead note=Story 45.6 (build 45f52674, QA 4e93d6ad, CR patches): proven live on throwaways with a mutation per entry (spec Verification); BOOTSTRAP_VERSION 1.2.0+10.109d0129528f -> 1.2.0+12.bd38d590c26e
 
 ### DW-788: The bootstrap compile check reads Atelier docnames with a filter, which IRIS returns empty to an account without SQL privileges, so a least-privilege account always gets Compile failed: 35 of 35
 - source: spec-45-6-epic-45-burn-down-iris-side.md | severity: med | fix-risk: low | footprint: in-footprint
@@ -4474,9 +4481,20 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-45-6-epic-45-burn-down-iris-side.md | severity: med | fix-risk: low | footprint: in-footprint
 - evidence: 45.6 build review (unverified): needs an account that can enter %SYS but cannot read Security.Applications; project rule: restore the namespace first in a catch block
 - 2026-11-26T13:13:59Z status=routed owner=45-6-epic-45-burn-down-iris-side by=harvest note=Lead directive to this story's CR: restore the original namespace at the top of the Catch before the fallback (no probe needed for the defensive fix); pin with a unit/live leg if a reachable account exists, else record why it is unreachable
+- 2026-11-26T15:02:37Z status=resolved-by:45-6-epic-45-burn-down-iris-side owner=45-6-epic-45-burn-down-iris-side by=lead note=Story 45.6 (build 45f52674, QA 4e93d6ad, CR patches): proven live on throwaways with a mutation per entry (spec Verification); BOOTSTRAP_VERSION 1.2.0+10.109d0129528f -> 1.2.0+12.bd38d590c26e
 
 ### DW-790: The bootstrap discards the status row Setup_Configure and Setup_ConfigureMapping return, so a refused call (e.g. the 45.6 guard) reports configured:true
 - source: spec-45-6-epic-45-burn-down-iris-side.md | severity: med | fix-risk: low | footprint: in-footprint
 - evidence: 45.6 mutation B exposed it: packages/shared/src/bootstrap.ts configureWebApp/configurePackageMapping read the SQL call's success, not the %Status value in the result row
 - 2026-11-26T13:13:59Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=harvest note=45.7 (TypeScript): read the returned %Status and report the step failed with its text; mutation-prove
 - 2026-11-26T13:16:44Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=lead note=Planner 2026-11-26: accepted for 45.7 and it matters (hides real failures from every user): read the %Status row of both calls, report the failure text, pin with the live refusal path (an account without %Admin_Manage), mutation-verify
+
+### DW-791: TypeScript texts still describe the old least-privilege behaviour (warnWebAppUnconfirmed, bootstrap.ts comments, the bootstrap-auto-install.test.ts header)
+- source: spec-45-6-epic-45-burn-down-iris-side.md | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: 45.6 CR: DW-773 makes IsConfigured answer truly for a least-privilege account; the TS warning and comments still describe the false unconfigured reading
+- 2026-11-26T15:02:37Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=cr note=45.7: align the TS texts with shipped behavior together with DW-788/DW-790
+
+### DW-792: A rolled-back Config.Namespaces.Create(%ALL) breaks the namespace table until ActivateAll(); an IPM install that fails after Configure created %ALL may leave the same state (unverified)
+- source: spec-45-6-epic-45-burn-down-iris-side.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 45.6 QA on a throwaway: after a rolled-back %ALL create, iris session into any namespace created afterwards exits 233; Config.Namespaces.ActivateAll() repairs it; the 45.6 guard closes the route path; the IPM-failure path is unprobed
+- 2026-11-26T15:02:37Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=cr note=45.7: probe with an IPM module whose later phase fails after Configure created %ALL; if it reproduces, decide (report or repair via ActivateAll) or close with evidence
