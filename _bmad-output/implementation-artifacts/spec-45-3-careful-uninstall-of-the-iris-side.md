@@ -134,6 +134,12 @@ deferred:
      - an explicit warning that deleting `%ALL` removes every mapping in it, so check for other mappings first.
 
   Throwaways only: the uninstall is never run on the shared instance (localhost:52773).
+- 2026-11-25 (lead, decision #168, Planner ruling after the build; BINDING for code review):
+  1. **Second run after a full removal.** The README says: if the one-liner fails with `<CLASS DOES NOT EXIST>`, the uninstall already finished in that namespace and nothing is left to do. It then gives a one-line check, verified live on a throwaway, that confirms `^ExecuteMCPv2.InstallRecord` is gone in that namespace and the `/api/executemcp/v2` web application is gone. Pin the sentence in `story-45-3-doc-claims.test.ts`.
+  2. **DW-775, reorder.** The new order is: web application, mapping, `%ALL`, `^UnitTestRoot`, classes, records. A failed later step then leaves `Setup` in place, so a re-run resumes. Pin both of these on the live gate:
+     - a forced failure in the `%ALL` or `^UnitTestRoot` step leaves `Setup` present; a re-run resumes and finishes, and the second report names only what it removed;
+     - re-run the `%ALL`-guard mutation (`DecideAll` always `remove`) after the reorder: the same four legs go red (foreign `%ALL`, foreign mapping, pre-existing mapping, no record). Restore all three files byte-identically.
+  3. **DW-776.** The two-namespace line is worded from each namespace's actual outcome.
 - 2026-11-25 (lead, decision #166; BINDING): **least-privilege axis.** The uninstall's refusal and report legs also run under an account without `%Admin_Manage` (e.g. `%Development:U` plus the namespace's database resource). The one-liner must refuse cleanly: each step it cannot do is a `failed` item with IRIS's own text, the records stay, the status is an error, and the snapshot is unchanged (nothing removed). Pin it in the live gate and in the lead smoke. The README must not claim that `EXECUTE` protects the `Setup` procedures; the boundary is the IRIS account's privileges (DW-771).
 
 ## Review Triage Log
