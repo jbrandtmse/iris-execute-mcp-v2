@@ -48,6 +48,19 @@ let skipReason: string | undefined;
 let sdkEsmDir = "";
 let replay: BackCompatRecord[] = [];
 
+/** The path and both values of the first place where `expected` and `actual` differ, or undefined when equal. */
+function firstDifference(expected: unknown, actual: unknown, at = "$"): string | undefined {
+  if (JSON.stringify(expected) === JSON.stringify(actual)) return undefined;
+  if (typeof expected === "object" && expected !== null && typeof actual === "object" && actual !== null) {
+    const keys = new Set([...Object.keys(expected), ...Object.keys(actual)]);
+    for (const key of keys) {
+      const found = firstDifference((expected as Record<string, unknown>)[key], (actual as Record<string, unknown>)[key], `${at}.${key}`);
+      if (found !== undefined) return found;
+    }
+  }
+  return `${at}: expected ${JSON.stringify(expected)?.slice(0, 300)}, got ${JSON.stringify(actual)?.slice(0, 300)}`;
+}
+
 /** The record without the Story 45.4 warning line. */
 function withoutWarning(record: BackCompatRecord): BackCompatRecord {
   return { ...record, warnLines: record.warnLines.filter((line) => !line.includes(WARNING_MARK)) };
@@ -116,7 +129,13 @@ describe("Story 45.4: nothing changes under redact, allow and an unset policy (A
       .map(withoutWarning)
       .filter((record, index) => JSON.stringify(record) !== JSON.stringify(baseline[index]))
       .map((record) => record.id);
-    expect(mismatches).toEqual([]);
+    // Name the first differing field of each mismatch: a long record otherwise prints only its truncated start.
+    const where = replay
+      .map(withoutWarning)
+      .map((record, index) => ({ id: record.id, diff: firstDifference(baseline[index], record) }))
+      .filter((entry) => entry.diff !== undefined)
+      .map((entry) => `${entry.id} at ${entry.diff}`);
+    expect(mismatches, where.join("\n")).toEqual([]);
     expect(replay.map(withoutWarning)).toEqual(baseline);
   });
 

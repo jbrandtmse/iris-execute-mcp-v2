@@ -141,6 +141,27 @@ function normalizeAudit(entry: AuditEntry): Record<string, unknown> {
   return rest;
 }
 
+/**
+ * Wait until `read()` contains every one of `needles` (each at least as many times as it is listed), polling every
+ * 20 ms, for at most `timeoutMs`. On timeout it returns without throwing: the record then shows what arrived, and
+ * the comparison against the baseline names the case.
+ */
+async function waitForStderrLines(read: () => string, needles: string[], timeoutMs: number): Promise<void> {
+  const counts = new Map<string, number>();
+  for (const needle of needles) counts.set(needle, (counts.get(needle) ?? 0) + 1);
+  const satisfied = (): boolean => {
+    const text = read();
+    for (const [needle, count] of counts) {
+      if (text.split(needle).length - 1 < count) return false;
+    }
+    return true;
+  };
+  const deadline = Date.now() + timeoutMs;
+  while (!satisfied() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 /** Replace the stub's port wherever it appears, so a record does not depend on the port the run drew. */
 function maskPort(value: unknown, port: number): unknown {
   const text = JSON.stringify(value) ?? "null";
@@ -251,6 +272,13 @@ async function runCase(spec: BackCompatCase, repoRoot: string, sdkEsmDir: string
       const entries = await pollAuditEntries(auditFile, { tool: call.tool, count: 1, intervalMs: 50, timeoutMs: 15000, excerpt: 300 });
       audit.push(normalizeAudit(entries[0] as AuditEntry));
     }
+    // Every denied call writes one `[WARN] Tool <name>: … denied …` line on stderr, but stderr and the stdio result are
+    // two pipes with no order between them: the line for the last call can land after its result (and after the
+    // audit entries, which are often already on disk). Reading stderr then would miss it under CI load (main CI
+    // 45899784897, `dev/enable-query/redact/read-only`). So wait until every denied call's line has arrived; the
+    // set of lines read is then the same on every run.
+    const deniedTools = calls.filter((call) => call.gate === "denied").map((call) => call.tool);
+    await waitForStderrLines(() => stderr, deniedTools.map((tool) => `[WARN] Tool ${tool}:`), 15000);
     const warnLines = stderr
       .split("\n")
       .filter((line) => line.includes("[WARN]"))

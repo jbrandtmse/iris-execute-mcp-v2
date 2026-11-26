@@ -7,6 +7,7 @@ import {
   executeTestsTool,
   createExecuteTestsHandler,
   buildRunningHint,
+  MAX_WORK_LOCK_CONTENTIONS,
   type TestClock,
 } from "../tools/execute.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
@@ -1155,6 +1156,73 @@ describe("iris_execute_tests", () => {
   // The correct shape: accumulate EVERY drain (keyed class::method, which
   // also dedupes if the endpoint ever returns cumulative sets) and finalize
   // only when retryafter is absent. These tests pin all of it.
+
+  // ── Work-manager lock contention on a poll (main CI 45899784897, 2026-11-26) ──
+  // The Atelier /work/{id} poll can fail with ERROR #7808 ($$$MultiNoModLock, "Unable to obtain group '<id>'
+  // command lock") when the running job holds the work manager's command lock past the manager's 5 s lock timeout
+  // (`%occWorkQueue.inc` CheckAccessLock). The lock is taken before anything is drained, so no rows are lost; the
+  // poll must wait and poll again. The error shape below is the one main CI recorded (HTTP 500 with the Atelier
+  // status error), so the fake answers what the real endpoint returned (Rule #54).
+  function workLockError(): IrisApiError {
+    return new IrisApiError(
+      500,
+      [{ error: "ERROR #7808: Unable to obtain group '7268733364350' command lock.", code: 7808 }],
+      "/api/atelier/v8/HSCUSTOM/work/42538326",
+      "IRIS reported errors for GET /api/atelier/v8/HSCUSTOM/work/42538326. Review the error details and correct the request. Details: ERROR #7808: Unable to obtain group '7268733364350' command lock.",
+    );
+  }
+
+  it("polls again after ERROR #7808 (work-manager lock contention) and returns every drained row", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-lock" }));
+    mockHttp.get
+      .mockResolvedValueOnce({
+        status: { errors: [] },
+        console: [],
+        result: [{ class: "MyApp.Tests.LockTest", method: "A", status: 1, duration: 10, failures: [] }],
+        retryafter: "1",
+      })
+      .mockRejectedValueOnce(workLockError())
+      .mockRejectedValueOnce(workLockError())
+      .mockResolvedValueOnce({
+        status: { errors: [] },
+        console: [],
+        result: [
+          { class: "MyApp.Tests.LockTest", method: "B", status: 1, duration: 10, failures: [] },
+          { class: "MyApp.Tests.LockTest", method: "C", status: 1, duration: 10, failures: [] },
+        ],
+      });
+
+    const result = await executeTestsTool.handler({ target: "MyApp.Tests.LockTest", level: "class" }, ctx);
+
+    expect(mockHttp.get).toHaveBeenCalledTimes(4);
+    const structured = result.structuredContent as { total: number; passed: number; error?: string };
+    expect(structured.error).toBeUndefined();
+    expect(structured.total).toBe(3);
+    expect(structured.passed).toBe(3);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("does not retry a poll error other than ERROR #7808", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-other-error" }));
+    mockHttp.get.mockRejectedValueOnce(
+      new IrisApiError(500, [{ error: "ERROR #5002: ObjectScript error: <UNDEFINED>", code: 5002 }], "/api/atelier/v8/HSCUSTOM/work/1", "IRIS reported errors for GET /api/atelier/v8/HSCUSTOM/work/1. Details: ERROR #5002: ObjectScript error: <UNDEFINED>"),
+    );
+
+    const result = await executeTestsTool.handler({ target: "MyApp.Tests.LockTest", level: "class" }, ctx);
+
+    expect(mockHttp.get).toHaveBeenCalledTimes(1);
+    expect((result.structuredContent as { error?: string }).error ?? result.content[0]?.text).toContain("ERROR #5002");
+  });
+
+  it("reports ERROR #7808 once contention outlasts MAX_WORK_LOCK_CONTENTIONS consecutive polls", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-lock-forever" }));
+    mockHttp.get.mockRejectedValue(workLockError());
+
+    const result = await executeTestsTool.handler({ target: "MyApp.Tests.LockTest", level: "class" }, ctx);
+
+    expect(mockHttp.get).toHaveBeenCalledTimes(MAX_WORK_LOCK_CONTENTIONS + 1);
+    expect((result.structuredContent as { error?: string }).error ?? result.content[0]?.text).toContain("ERROR #7808");
+  });
 
   it("accumulates DELTA drains across polls — neither first-drain-only nor last-drain-only (truncation regression)", async () => {
     mockHttp.post.mockResolvedValue(envelope({ location: "job-slow" }));
