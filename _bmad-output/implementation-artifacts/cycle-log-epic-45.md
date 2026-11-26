@@ -123,3 +123,5 @@
 2026-11-26T15:26:39Z	Story 45.6	story_cycle	commits=45f52674(build),4e93d6ad(qa),17b56d0a(cr) review=CLEAN smoke=gate23/23+capstone21/21 dispositions=resolved7,wontfix1 decisions=174,176,177 quota_weekly=68%
 2026-11-26T15:27:32Z	Story 45.6	committed	sha=56dad75e ci=pending run=45849160665
 2026-11-26T15:27:32Z	Story 45.7	stage_spawned	stage=plan spawn_at=2026-11-26T15:27:32Z model=claude-opus-5-5 agent_name=45-7-burndown-ts-plan-1 cycle_iteration=1 ledger_inbox=DW-767,770,784,788,790,791,792 decision=178 prev_ci=pending(45849160665) quota_weekly=68%
+2026-11-26T15:58:07Z	Story 45.7	story_created	spec=_bmad-output/implementation-artifacts/spec-45-7-epic-45-burn-down-typescript-and-docs.md model=claude-opus-5-5 probes=throwaways(health+community,ports_52792-52794) teardown=clean deviation=one_sed_-i_on_spec(verified)
+2026-11-26T15:58:07Z	Story 45.7	hold	reason=D1_DW-792_mechanism(prevention_vs_Planner_options) to=Planner decision=179 ledger_new=DW-793(45-7)
