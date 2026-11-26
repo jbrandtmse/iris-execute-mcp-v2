@@ -1061,6 +1061,8 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     const stateBeforeSame = snapshot();
     const same = await runServerCalls("startup", { repoRoot: REPO_ROOT, sdkEsmDir, target }, readOnly, [{ tool: "iris_global_get", args: { global: "Story457Probe" } }]);
     expect(same.results[0]?.structuredContent?.["code"], "the call was not refused").not.toBe("IRIS_SIDE_NOT_INSTALLED");
+    expect(same.results[0], "the call was answered").toBeDefined();
+    expect(same.results[0]?.isError, `the call ran: ${JSON.stringify(same.results[0]).slice(0, 300)}`).not.toBe(true);
     expect(same.stderr).toContain(
       `Bootstrap: the automatic install is off for profile "default" (IRIS_GOVERNANCE_PRESET=read-only); found current (the deployed marker "${lower}" has the same IRIS-side classes as this server's ${embedded.marker}), nothing to install.`,
     );

@@ -158,6 +158,31 @@ const MAX_ADVISE_TOPN = 20;
  *  and `EXPLAIN` rejects a `DECLARE`; the workload mode advises the wrapped SELECT. */
 const DECLARE_CURSOR_PREFIX = /^DECLARE\s+\S+\s+CURSOR\s+FOR\s+/i;
 
+/** The workload mode's own traffic, never a candidate (DW-794): each `advise` run stores its EXPLAIN as
+ *  `SELECT %SYSTEM.QUERY_PLAN(...)`, the advise-data route's dictionary lookups read `%Dictionary`, and the workload and
+ *  `stats` reads read `INFORMATION_SCHEMA`. IRIS 2026.2 stores the text normalized (upper case, tokens spaced:
+ *  `%SYSTEM . QUERY_PLAN (`), so both the SQL filter and the row check match without the dots and case-insensitively. */
+const OWN_STATEMENT_FILTER =
+  "UPPER(Statement) NOT LIKE '%\\%SYSTEM%QUERY\\_PLAN%' ESCAPE '\\' " +
+  "AND UPPER(Statement) NOT LIKE '%INFORMATION\\_SCHEMA%' ESCAPE '\\' " +
+  "AND UPPER(Statement) NOT LIKE '%\\%DICTIONARY%' ESCAPE '\\'";
+const OWN_STATEMENT = /%SYSTEM\s*\.\s*QUERY_PLAN|INFORMATION_SCHEMA|%DICTIONARY\s*\./i;
+
+/** IRIS's own error text of an advise-data failure (the `status.errors` entries), without the HTTP client's generic summary. */
+function irisErrorText(error: IrisApiError): string {
+  const parts = error.errors
+    .map((entry) =>
+      typeof entry === "string"
+        ? entry
+        : entry !== null && typeof entry === "object" && typeof (entry as Record<string, unknown>)["error"] === "string"
+          ? ((entry as Record<string, unknown>)["error"] as string)
+          : "",
+    )
+    .map((text) => text.trim())
+    .filter((text) => text !== "");
+  return parts.length > 0 ? parts.join(" | ") : error.message;
+}
+
 /**
  * Ensure a value is a record suitable for MCP `structuredContent` (never a
  * bare array). Local copy — mirrors `iris-data-mcp/docdb.ts`'s `toStructured`;
@@ -306,14 +331,15 @@ async function handleAdvise(
       : DEFAULT_ADVISE_TOPN;
     const workloadSql =
       `SELECT TOP ${topNValue} Hash, Statement, StatCount, StatTotal, StatAverage, ` +
-      "StatStdDev, StatRowCount, Timestamp FROM INFORMATION_SCHEMA.STATEMENTS ORDER BY Timestamp DESC";
+      "StatStdDev, StatRowCount, Timestamp FROM INFORMATION_SCHEMA.STATEMENTS " +
+      `WHERE ${OWN_STATEMENT_FILTER} ORDER BY Timestamp DESC`;
 
     let rows: Record<string, unknown>[];
     try {
       const response = await ctx.http.post(atelierPath(ctx.atelierVersion, ns, "action/query"), {
         query: workloadSql,
       });
-      rows = rowObjects(response);
+      rows = rowObjects(response).filter((row) => !OWN_STATEMENT.test(String(row["Statement"] ?? "")));
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
         return {
@@ -366,7 +392,7 @@ async function handleAdvise(
         if (error instanceof IrisApiError) {
           skippedCount++;
           errorCount++;
-          if (firstErrorMessage === "") firstErrorMessage = error.message;
+          if (firstErrorMessage === "") firstErrorMessage = irisErrorText(error);
           if (/not privileged/i.test(error.message)) privilegeRefusedCount++;
           continue;
         }

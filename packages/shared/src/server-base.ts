@@ -3411,8 +3411,8 @@ export class McpServerBase {
     if (result.customRestRefused === true) {
       client.refuseCustomRest(buildIrisSideRefusal({ ...config, name: profileName } as IrisConnectionConfig, result));
     } else if (result.webAppUnconfirmed === true) {
-      // DW-772: the web application could not be confirmed (an account that cannot read %SYS reads the same), so the tools
-      // go on and only the 404 of an absent web application refuses, with `found: "unconfigured"`.
+      // DW-772, DW-791: the web application lookup failed or the web application is absent, so the tools go on and only the
+      // 404 of an absent web application refuses, with `found: "unconfigured"`.
       client.refuseCustomRestWhenAbsent(
         buildIrisSideRefusal({ ...config, name: profileName } as IrisConnectionConfig, result),
       );

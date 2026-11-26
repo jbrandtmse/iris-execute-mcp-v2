@@ -30,6 +30,20 @@ Property ALLRemoved As %Boolean [ InitialExpression = 0 ];
 /// databases of the removed <code>%ALL</code>, as a list.
 Property SavedALL As %String;
 
+/// The disposable namespace a guard test creates when the instance has no second namespace (IRIS Community has
+/// <code>USER</code> only), over a database of its own.
+Parameter SCRATCHNS = "SETUPTESTNS";
+
+/// The configuration name of the disposable namespace's database.
+Parameter SCRATCHDB = "SETUPTESTDB";
+
+/// 1 while <method>CreateScratchNamespace</method> has made the disposable namespace that
+/// <method>DropScratchNamespace</method> has not removed yet.
+Property ScratchCreated As %Boolean [ InitialExpression = 0 ];
+
+/// The web application's namespace before a test that may target the disposable namespace.
+Property WebAppNSBefore As %String;
+
 Method OnBeforeOneTest(testname As %String) As %Status
 {
     Kill i%SavedRecord
@@ -45,6 +59,11 @@ Method OnAfterOneTest(testname As %String) As %Status
     Do ..RestoreALL()
     Do ..RestoreMapping()
     Do ..ActivateAll()
+    If ..ScratchCreated {
+        ; The web application never stays on the namespace that is about to be removed
+        If (..WebAppNSBefore '= "") && (..WebAppNamespace() = ..#SCRATCHNS) Do ##class(ExecuteMCPv2.Setup).Configure(..WebAppNSBefore)
+        Do ..DropScratchNamespace()
+    }
     Kill ^ExecuteMCPv2.InstallRecord
     If ..HadRecord Merge ^ExecuteMCPv2.InstallRecord = i%SavedRecord
     Kill i%SavedRecord
@@ -271,13 +290,19 @@ Method RestoreALL() As %Status
     Try {
         New $NAMESPACE
         Set $NAMESPACE = "%SYS"
+        Kill tProps
+        Set tProps("Globals") = $List(..SavedALL, 1)
+        Set tProps("Routines") = $List(..SavedALL, 2)
+        Set tProps("Library") = $List(..SavedALL, 3)
+        Set tProps("TempGlobals") = $List(..SavedALL, 4)
         If '##class(Config.Namespaces).Exists("%ALL") {
-            Kill tProps
-            Set tProps("Globals") = $List(..SavedALL, 1)
-            Set tProps("Routines") = $List(..SavedALL, 2)
-            Set tProps("Library") = $List(..SavedALL, 3)
-            Set tProps("TempGlobals") = $List(..SavedALL, 4)
             Set tSC = ##class(Config.Namespaces).Create("%ALL", .tProps)
+        } Else {
+            ; A %ALL a test's own call created has the databases that call chose: put back the ones that were found
+            Kill tFound
+            If $$$ISOK(##class(Config.Namespaces).Get("%ALL", .tFound)) && ($ListBuild($Get(tFound("Globals")), $Get(tFound("Routines")), $Get(tFound("Library")), $Get(tFound("TempGlobals"))) '= ..SavedALL) {
+                Set tSC = ##class(Config.Namespaces).Modify("%ALL", .tProps)
+            }
         }
         If $$$ISOK(tSC) Set ..ALLRemoved = 0
     } Catch ex {
@@ -296,6 +321,62 @@ Method ActivateAll()
         Do ##class(Config.Namespaces).ActivateAll()
     } Catch ex {
     }
+}
+
+/// The directory of the disposable namespace's database, normalized.
+ClassMethod ScratchDir() As %String
+{
+    Quit ##class(%Library.File).NormalizeDirectory($SYSTEM.Util.ManagerDirectory() _ "setuptestdb")
+}
+
+/// Create the disposable namespace <parameter>SCRATCHNS</parameter> over a database of its own (a directory,
+/// <code>SYS.Database.CreateDatabase</code>, the <code>Config.Databases</code> entry, then the namespace), after removing
+/// whatever an earlier run left. Runs in %SYS and restores the namespace.
+Method CreateScratchNamespace() As %Status
+{
+    Do ..DropScratchNamespace()
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set $NAMESPACE = "%SYS"
+        Set tDir = ..ScratchDir()
+        If '##class(%Library.File).DirectoryExists(tDir) && '##class(%Library.File).CreateDirectoryChain(tDir) {
+            Set tSC = $$$ERROR($$$GeneralError, "Failed to create directory: " _ tDir)
+            Quit
+        }
+        Set tSC = ##class(SYS.Database).CreateDatabase(tDir, 1)
+        If $$$ISERR(tSC) Quit
+        Set ..ScratchCreated = 1
+        Kill tProps
+        Set tProps("Directory") = tDir
+        Set tSC = ##class(Config.Databases).Create(..#SCRATCHDB, .tProps)
+        If $$$ISERR(tSC) Quit
+        Kill tProps
+        Set tProps("Globals") = ..#SCRATCHDB, tProps("Routines") = ..#SCRATCHDB
+        Set tSC = ##class(Config.Namespaces).Create(..#SCRATCHNS, .tProps)
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Set $NAMESPACE = tOrigNS
+    Quit tSC
+}
+
+/// Remove the disposable namespace, its database entry, the database and its directory, whatever state a test left
+/// (best effort; each step runs whether or not the one before it succeeded). Runs in %SYS and restores the namespace.
+Method DropScratchNamespace()
+{
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set $NAMESPACE = "%SYS"
+        If ##class(Config.Namespaces).Exists(..#SCRATCHNS) Do ##class(Config.Namespaces).Delete(..#SCRATCHNS)
+        If ##class(Config.Databases).Exists(..#SCRATCHDB) Do ##class(Config.Databases).Delete(..#SCRATCHDB)
+        Set tDir = ..ScratchDir()
+        If ##class(SYS.Database).%ExistsId(tDir) Do ##class(SYS.Database).DeleteDatabase(tDir)
+        If ##class(%Library.File).DirectoryExists(tDir) Do ##class(%Library.File).RemoveDirectoryTree(tDir)
+        Set ..ScratchCreated = 0
+    } Catch ex {
+    }
+    Set $NAMESPACE = tOrigNS
 }
 
 /// 1 when the live package map of <code>ExecuteMCPv2</code> disagrees with the configuration (the state a rolled-back
@@ -338,18 +419,25 @@ Method RecordDump(pNamespace As %String) As %String
 /// <code>iris_sql_query</code> runs a SELECT) both install methods refuse and change nothing.
 /// The state is read INSIDE the transaction, before the rollback that would hide it, and the
 /// call targets a namespace other than the web application's and runs with the mapping absent,
-/// so an unguarded call would change what is read. The transaction is rolled back and the mapping
-/// is put back on every path.
+/// so an unguarded call would change what is read. On an instance with no second namespace (IRIS
+/// Community has <code>USER</code> only) that namespace is a disposable one over a database of its own,
+/// removed in <method>OnAfterOneTest</method>. The transaction is rolled back and the mapping is put
+/// back on every path.
 Method TestGuardRefusesInTransactionDuringWebRequest() As %Status
 {
     Do $$$AssertStatusOK(##class(ExecuteMCPv2.Setup).Configure(), "set up: Configure at transaction level 0")
     Kill ^ExecuteMCPv2.InstallRecord
     Set tNSBefore = ..WebAppNamespace()
+    Set ..WebAppNSBefore = tNSBefore
     ; The first existing namespace other than the web application's: an unguarded Configure would move the web application there
     Set tOther = "", tCandidates = $ListBuild("USER", "HSCUSTOM", "SAMPLES", "DOCBOOK")
     For tI = 1:1:$ListLength(tCandidates) {
         Set tName = $List(tCandidates, tI)
         If (tName '= tNSBefore) && ##class(%SYS.Namespace).Exists(tName) Set tOther = tName Quit
+    }
+    If tOther = "" {
+        Do $$$AssertStatusOK(..CreateScratchNamespace(), "set up: no second namespace exists, so a disposable one is created")
+        If ##class(%SYS.Namespace).Exists(..#SCRATCHNS) Set tOther = ..#SCRATCHNS
     }
     Do $$$AssertTrue(tOther '= "", "set up: a namespace other than the web application's exists, so an unguarded Configure would move the web application")
     Do ..RemoveMapping()
@@ -419,7 +507,11 @@ Method TestGuardPassesInTransactionWithoutWebRequest() As %Status
 /// mapping are put back as found on every path (<code>OnAfterOneTest</code>).
 Method TestMappingSurvivesRollbackOfOuterTransaction() As %Status
 {
-    Do $$$AssertStatusOK(##class(ExecuteMCPv2.Setup).ConfigureMapping(), "set up: %ALL and the mapping exist")
+    ; The restore puts back what was found, so the test runs only where an install left %ALL and the mapping
+    If '..ALLExists() || '..MappingExists() {
+        Do $$$AssertSkipped("%ALL and the ExecuteMCPv2 mapping are not both here: this test removes and restores only what an install left")
+        Quit $$$OK
+    }
     Set tForeign = ..ForeignALLMappings()
     If tForeign '= 0 {
         Do $$$AssertSkipped("%ALL holds " _ tForeign _ " mapping(s) of other software: this test does not remove it")

@@ -21,6 +21,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
 import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION } from "../../../shared/src/bootstrap-classes.js";
+import { parseBootstrapMarker } from "../../../shared/src/bootstrap-version.js";
 
 const read = (relative: string): string => readFileSync(path.join(REPO_ROOT, relative), "utf8");
 const squash = (text: string): string => text.replace(/\s+/g, " ");
@@ -69,11 +70,19 @@ describe("Story 45.7: the CHANGELOG section, the changeset and the doc sentences
       expect(section, `the CHANGELOG names ${id}`).toContain(id);
       if (present(CHANGESET_45_7)) expect(squash(read(CHANGESET_45_7)), `the changeset names ${id}`).toContain(id);
     }
-    expect(section).toContain("`BOOTSTRAP_VERSION` moves from `1.2.0+12.bd38d590c26e` to `" + BOOTSTRAP_VERSION + "`");
+    // The literal values, not the live embed: the release's version step restamps the semver of BOOTSTRAP_VERSION
+    // (`1.3.0+13.864f12b75f7b`), while the notes keep the value the story recorded.
+    expect(section).toContain("`BOOTSTRAP_VERSION` moves from `1.2.0+12.bd38d590c26e` to `1.2.0+13.864f12b75f7b`");
     if (present(CHANGESET_45_7)) {
-      expect(squash(read(CHANGESET_45_7))).toContain("`BOOTSTRAP_VERSION` moves from `1.2.0+12.bd38d590c26e` to `" + BOOTSTRAP_VERSION + "`");
+      expect(squash(read(CHANGESET_45_7))).toContain("`BOOTSTRAP_VERSION` moves from `1.2.0+12.bd38d590c26e` to `1.2.0+13.864f12b75f7b`");
     }
-    expect(BOOTSTRAP_VERSION, "the embed moved once, from sequence 12 to 13").toMatch(/^1\.2\.0\+13\.[0-9a-f]{12}$/);
+    const embedded = parseBootstrapMarker(BOOTSTRAP_VERSION);
+    expect(embedded.kind, "the embed is stamped").toBe("stamped");
+    if (embedded.kind === "stamped") {
+      // The classes this story recorded, or a later story's (a higher sequence): a restamp at the release keeps both.
+      if (embedded.sequence === 13n) expect(embedded.hash, "sequence 13 is the classes this story recorded").toBe("864f12b75f7b");
+      else expect(embedded.sequence > 13n, "the embed holds this story's classes or has moved past them").toBe(true);
+    }
     expect(section).toContain("No tool, action, governance key, preset, refusal code or input field is added or changed.");
     expect(section).toContain("A failed IPM install leaves `%ALL` and the mapping in place, consistent (`S-45.7-mapping-survives-rollback`, DW-792).");
   });
@@ -92,7 +101,12 @@ describe("Story 45.7: the CHANGELOG section, the changeset and the doc sentences
   });
 
   it("DW-770: the README and the CHANGELOG say that a restamp with the same hash reads current with the install off, and where to tell a real change", () => {
-    expect(readme).toContain("After a release that changes the IRIS-side classes (the release's CHANGELOG says so in its IRIS side section, and `BOOTSTRAP_VERSION` moves; 1.3.0 does)");
+    expect(readme).toContain("After a release that changes the IRIS-side classes (the release's CHANGELOG says so in its IRIS side section, and the hash at the end of `BOOTSTRAP_VERSION` changes; 1.3.0 does)");
+    expect(readme).toContain("Every release restamps the semver of `BOOTSTRAP_VERSION`; only the hash names the classes.");
+    // Every release restamps the semver, so "BOOTSTRAP_VERSION moves" would name every release as a class change.
+    for (const [name, text] of [["README", readme], ["CHANGELOG", squash(changelogRaw)]] as const) {
+      expect(text, name).not.toContain("and `BOOTSTRAP_VERSION` moves");
+    }
     expect(readme).toContain("A release that only restamps the version (a new semver with the same classes, so the same content hash) asks for nothing");
     expect(readme).not.toContain("After every upgrade of the servers (each release stamps");
     expect(section).toContain("a deployed marker whose hash equals this build's now reads `current`");
@@ -106,7 +120,27 @@ describe("Story 45.7: the CHANGELOG section, the changeset and the doc sentences
     expect(toolSupport, "Rule #30: the default state is stated at the point of use").toContain("all five actions are reads, enabled by default; under `block` the three are seeded disabled");
     expect(toolSupport).toContain("## PHI data policy scope (as of 2026-11-26)");
     expect(section).toContain("The covered set is 15 keys");
-    expect(section).toContain("Under `redact` the dev server's startup `[WARN]` line also names the three keys.");
+    // The redact warning names only visible tools, and `core` hides iris_sql_analyze.
+    expect(section).toContain("Under `redact` the dev server's startup `[WARN]` line also names the three keys when `iris_sql_analyze` is visible (it is under the default `full` preset; `core` hides it).");
+    expect(readme).toContain("Under `redact`, the dev server's startup warning also names those three SQL analyzer keys when the SQL analyzer tool is visible (it is under the default `full` preset; `core` hides it).");
+    // The unreleased 1.3.0 notes read as one release: the 45.5 bullet agrees with the 15 keys and no longer says "under probe".
+    const notes = squash(changelogRaw.slice(changelogRaw.indexOf("## [Unreleased] - Story 45.7"), changelogRaw.indexOf("## [Unreleased] - Story 45.4")));
+    expect(notes).toContain("`block` turns off the raw-read and code-execution keys (15 in 1.3.0: Story 45.7 adds the `stats`, `running` and `advise` actions of `iris_sql_analyze`");
+    expect(notes).not.toContain("the 12 raw-read and code-execution keys");
+    expect(notes).not.toContain("which is under probe");
+    expect(notes, "the release handoff names the embed this story left").toContain("`1.2.0+13.864f12b75f7b` on the branch after Story 45.7");
+  });
+
+  it("DW-784 (Rule #30): the dev server's README names the three actions in its IRIS_DATA_POLICY row and their default state", () => {
+    const devReadme = squash(read("packages/iris-dev-mcp/README.md"));
+    expect(devReadme).toContain("and from `1.3.0` the `stats`, `running` and `advise` actions of `iris_sql_analyze`");
+    expect(devReadme).toContain("Under `IRIS_DATA_POLICY=block`, `stats`, `running` and `advise` are seeded **disabled** (from `1.3.0`)");
+  });
+
+  it("DW-794: the CHANGELOG and the changeset say the workload candidates leave out the tool's own traffic", () => {
+    expect(section).toContain("**`iris_sql_analyze` `advise` in workload mode no longer analyzes its own traffic (DW-794).**");
+    expect(section).toContain("leave out statements that call `%SYSTEM.QUERY_PLAN` or read `INFORMATION_SCHEMA` or `%Dictionary`");
+    if (present(CHANGESET_45_7)) expect(squash(read(CHANGESET_45_7))).toContain("The workload candidates leave out the tool's own traffic");
   });
 
   it("DW-788 and DW-790: the least-privilege bullets say what is true after the fix", () => {

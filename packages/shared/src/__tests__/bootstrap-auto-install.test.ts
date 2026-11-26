@@ -403,6 +403,8 @@ describe("DW-770: with the install off, a deployed marker with this build's hash
     expect(result).not.toHaveProperty("customRestRefused");
     expect(lines("[WARN]")).toEqual([]);
     expect(lines("[INFO] Bootstrap: the automatic install is off")).toEqual([infoOf(source, deployed)]);
+    // The closing line names the deployed marker too, never this build's as if it were deployed.
+    expect(lines("[INFO] Bootstrap: REST service is current")).toEqual([`[INFO] Bootstrap: REST service is current (version ${deployed}), skipping deploy`]);
     // mutation: the same-hash rule dropped from `probeCustomRest` -> this row reads `stale` and the request list differs.
   });
 
@@ -599,7 +601,7 @@ describe("buildIrisSideRefusal", () => {
         `or run zpm "install ${IPM_MODULE_NAME} ${SEMVER}" in 'USER' as a user with %Admin_Manage. ` +
         "Then restart this server: the refusal is decided when the profile connects. " +
         "After a release that changes the IRIS-side classes (the release's CHANGELOG says so in its IRIS side section: " +
-        "BOOTSTRAP_VERSION moves), an instance that only read-only servers, or servers with the automatic install off, connect to " +
+        "the hash at the end of BOOTSTRAP_VERSION changes), an instance that only read-only servers, or servers with the automatic install off, connect to " +
         "needs this once: upgrading the IRIS side is a deliberate admin step.",
     );
   });
@@ -613,9 +615,11 @@ describe("buildIrisSideRefusal", () => {
     // operator, and how to tell (not every release stamps new classes).
     expect(text).toContain(
       "After a release that changes the IRIS-side classes (the release's CHANGELOG says so in its IRIS side section: " +
-        "BOOTSTRAP_VERSION moves), an instance that only read-only servers, or servers with the automatic install off, connect to " +
+        "the hash at the end of BOOTSTRAP_VERSION changes), an instance that only read-only servers, or servers with the automatic install off, connect to " +
         "needs this once",
     );
+    // Every release restamps the semver of BOOTSTRAP_VERSION, so "it moves" would name every release; the hash names a class change.
+    expect(text).not.toContain("BOOTSTRAP_VERSION moves");
     expect(text).not.toContain("After every upgrade of the servers");
     expect(text).toContain("an operator installs or upgrades the IRIS side once");
     expect(text).toContain("Then restart this server: the refusal is decided when the profile connects.");

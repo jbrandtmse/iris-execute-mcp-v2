@@ -1025,7 +1025,7 @@ export function buildIrisSideRefusal(config: IrisConnectionConfig, result: Boots
       ? "No restart is needed: this server checks the web application again on every call. "
       : "Then restart this server: the refusal is decided when the profile connects. ") +
     "After a release that changes the IRIS-side classes (the release's CHANGELOG says so in its IRIS side section: " +
-    "BOOTSTRAP_VERSION moves), an instance that only read-only servers, or servers with the automatic install off, connect to " +
+    "the hash at the end of BOOTSTRAP_VERSION changes), an instance that only read-only servers, or servers with the automatic install off, connect to " +
     "needs this once: upgrading the IRIS side is a deliberate admin step.";
   return {
     text,
@@ -1400,7 +1400,7 @@ export async function bootstrap(
     result.mapped = true;
     result.unitTestRootEnsured = true;
     logger.info(
-      `Bootstrap: REST service is current (version ${BOOTSTRAP_VERSION}), skipping deploy`,
+      `Bootstrap: REST service is current (version ${probe.deployedVersion ?? BOOTSTRAP_VERSION}), skipping deploy`,
     );
     return result;
   }

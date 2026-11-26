@@ -259,9 +259,9 @@ describe("iris_sql_analyze — advise action (Story 28.3 wiring)", () => {
     expect(mockHttp.post).toHaveBeenNthCalledWith(1, ATELIER_QUERY_PATH, {
       query: expect.stringContaining("SELECT TOP 5"),
     });
-    expect((mockHttp.post.mock.calls[0]?.[1] as { query: string }).query).toContain(
-      "FROM INFORMATION_SCHEMA.STATEMENTS ORDER BY Timestamp DESC",
-    );
+    const workloadSql = (mockHttp.post.mock.calls[0]?.[1] as { query: string }).query;
+    expect(workloadSql).toContain("FROM INFORMATION_SCHEMA.STATEMENTS WHERE ");
+    expect(workloadSql).toMatch(/ ORDER BY Timestamp DESC$/);
 
     expect(result.isError).toBeUndefined();
     const structured = result.structuredContent as StructuredAdvise;
@@ -309,8 +309,57 @@ describe("iris_sql_analyze — advise action (Story 28.3 wiring)", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("could not analyze any");
     expect(result.content[0]?.text).toContain("2 recent statement(s)");
+    // An outage that is not a privilege refusal quotes IRIS's text and never blames the SQL privilege.
+    expect(result.content[0]?.text).toContain("First failure: SQLCODE -481.");
+    expect(result.content[0]?.text).toContain("Try 'query' mode");
+    expect(result.content[0]?.text).not.toContain("no SQL privilege");
     // No misleading benign-success structuredContent on the total-outage path.
     expect(result.structuredContent).toBeUndefined();
+  });
+
+  // DW-794: the statement texts below are rows of INFORMATION_SCHEMA.STATEMENTS as captured 2026-11-26 on IRIS Community
+  // 2026.2 Build 221U right after one POST /api/executemcp/v2/dev/sql/advise-data (SELECT TOP 20 Statement ... ORDER BY
+  // Timestamp DESC): the route's EXPLAIN, its two dictionary lookups and the workload read itself, each stored normalized.
+  it("workload mode: the tool's own EXPLAIN, dictionary and INFORMATION_SCHEMA statements are never candidates (DW-794)", async () => {
+    const user = "DECLARE QRS CURSOR FOR SELECT NAME FROM P794 . PERSON WHERE SSN = ?";
+    routeWorkloadCalls({
+      statements: [
+        " DECLARE QRS CURSOR FOR SELECT TOP ? STATEMENT , TIMESTAMP FROM INFORMATION_SCHEMA . STATEMENTS ORDER BY TIMESTAMP DESC",
+        " DECLARE QRS CURSOR FOR SELECT NAME FROM %DICTIONARY . COMPILEDCLASS WHERE SQLSCHEMANAME = ? AND SQLTABLENAME = ?",
+        " DECLARE QRS CURSOR FOR SELECT %SYSTEM . QUERY_PLAN ( 'SELECT Name FROM P794.Person WHERE SSN = ''LIT-794''' , 0 , 'ShowPlan' ) AS PLAN",
+        " " + user,
+      ],
+    });
+
+    const result = await sqlAnalyzeTool.handler({ action: "advise", workload: true }, ctx);
+
+    const sql = (mockHttp.post.mock.calls[0]?.[1] as { query: string }).query;
+    expect(sql).toContain("UPPER(Statement) NOT LIKE '%\\%SYSTEM%QUERY\\_PLAN%' ESCAPE '\\'");
+    expect(sql).toContain("UPPER(Statement) NOT LIKE '%INFORMATION\\_SCHEMA%' ESCAPE '\\'");
+    expect(sql).toContain("UPPER(Statement) NOT LIKE '%\\%DICTIONARY%' ESCAPE '\\'");
+    const advised = mockHttp.post.mock.calls.filter((c) => String(c[0]) === ADVISE_DATA_PATH).map((c) => (c[1] as { query: string }).query);
+    expect(advised).toEqual(["SELECT NAME FROM P794 . PERSON WHERE SSN = ?"]);
+    expect((result.structuredContent as StructuredAdvise).analyzed).toEqual({ statements: 1, skipped: 0 });
+    expect(result.content[0]?.text).toContain("1 recent statement(s)");
+  });
+
+  it("workload mode: a mixed outage names the privilege refusals and says the others failed for IRIS's reasons (DW-793)", async () => {
+    const privilegeText = "ERROR #5001: EXPLAIN failed: User p793lp is not privileged for the operation";
+    mockHttp.post.mockImplementation(async (path: unknown, body: unknown) => {
+      const p = String(path);
+      if (p === ATELIER_QUERY_PATH) {
+        return envelope({ content: [{ Statement: "SELECT 1" }, { Statement: "SELECT 2" }] });
+      }
+      const text = (body as { query: string }).query === "SELECT 1" ? privilegeText : "SQLCODE -481";
+      throw new IrisApiError(400, [{ error: text }], ADVISE_DATA_PATH, `IRIS returned HTTP 400 for POST ${ADVISE_DATA_PATH}. Check the request parameters and try again.`);
+    });
+
+    const result = await sqlAnalyzeTool.handler({ action: "advise", workload: true }, ctx);
+
+    const text = result.content[0]?.text ?? "";
+    expect(result.isError).toBe(true);
+    expect(text).toContain("EXPLAIN for 1 of them");
+    expect(text).toContain("; the others failed for the reasons IRIS gave");
   });
 
   // DW-793: the statement text below is a row of INFORMATION_SCHEMA.STATEMENTS as captured 2026-11-26 on IRIS Community
@@ -341,14 +390,17 @@ describe("iris_sql_analyze — advise action (Story 28.3 wiring)", () => {
       if (p === ATELIER_QUERY_PATH) {
         return envelope({ content: [{ Statement: "SELECT 1" }, { Statement: "SELECT 2" }] });
       }
-      throw new IrisApiError(400, [{ error: irisText }], ADVISE_DATA_PATH, irisText);
+      // The shape the real client throws (http-client.ts): its generic HTTP summary, then IRIS's entry in `errors`.
+      throw new IrisApiError(400, [{ error: irisText }], ADVISE_DATA_PATH, `IRIS returned HTTP 400 for POST ${ADVISE_DATA_PATH}. Check the request parameters and try again.`);
     });
 
     const result = await sqlAnalyzeTool.handler({ action: "advise", workload: true }, ctx);
 
     expect(result.isError).toBe(true);
     const text = result.content[0]?.text ?? "";
-    expect(text).toContain("First failure: " + irisText);
+    expect(text).toContain("First failure: " + irisText + ".");
+    expect(text, "the quote is IRIS's text, not the HTTP client's summary").not.toContain("Check the request parameters");
+    expect(text).not.toContain("the others failed");
     expect(text).toContain("EXPLAIN for 2 of them");
     expect(text).toContain("no SQL privilege");
     expect(text).toContain("by design");

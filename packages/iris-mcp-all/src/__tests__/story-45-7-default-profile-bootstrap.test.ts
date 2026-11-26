@@ -195,8 +195,11 @@ describe("Story 45.7: the startup bootstrap of the default profile follows the I
     const run = await serve(CLOSED_IRIS_ENV, defaultEntry(fake), [{ tool: "iris_server_info", args: {} }]);
 
     expect(run.stderr).toContain("Configure failed: ERROR #5002: ObjectScript error: <PROTECT>Configure+9^ExecuteMCPv2.Setup.1");
-    expect(fake.state.configured, "a refused call never reads as configured").toBe(false);
-    // mutation: the status row ignored (the code before this story) -> no `Configure failed` line, and the result says `configured: true`.
+    // The server's own verdict, as it logs it: no success line for the web application, and the manual instructions follow.
+    expect(run.stderr, "a refused call never reads as configured").not.toContain("Bootstrap: web application configured successfully");
+    expect(run.stderr, "the manual instructions are set").toContain("registration requires %Admin_Manage privileges");
+    // mutation: the status row ignored (the code before this story) -> no `Configure failed` line, the success line is logged and
+    // no manual instructions follow.
   }, TEST_TIMEOUT_MS);
 
   it("no default entry: the bootstrap is today's IRIS_* start, and it equals the start of an entry that repeats the IRIS_* fields", async () => {
