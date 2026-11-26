@@ -47,6 +47,12 @@ export const NAMED_EXEMPTIONS = [
     reason:
       "armed by IRIS_THROWAWAY, which only scripts/throwaway-iris.mjs sets (pnpm live:bootstrap-guard, Story 42.3's CI); it refuses any target that already holds ExecuteMCPv2 classes, so a prepublish run against a real instance could never pass it",
   },
+  {
+    pkg: 'iris-mcp-all',
+    file: 'src/__tests__/story-45-3-uninstall-round-trip-live-gate.test.ts',
+    reason:
+      "armed by IRIS_THROWAWAY (set by scripts/throwaway-iris.mjs exec) together with THROWAWAY_STATE_FILE, and run by its own CI suite (uninstall-round-trip, pnpm live:uninstall-round-trip); it installs and uninstalls the IRIS side and refuses any target that already holds ExecuteMCPv2 classes, a web application, %ALL or an install record, so a prepublish run against a real instance could never pass it",
+  },
 ];
 
 /** Whether `file` of package directory `pkg` is a named exemption. */

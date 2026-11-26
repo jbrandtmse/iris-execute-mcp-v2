@@ -369,16 +369,63 @@ zpm "install iris-execute-mcp-v2 <version>"
 - **The install cannot downgrade a newer deployment.** At the start of every install the guard orders the marker of the `ExecuteMCPv2.Setup` already in the namespace against the package's own marker, with the same ordering as the server (semver first, then sequence). It refuses to install over a newer one, over `dev` or another foreign marker, or over a `Setup` whose marker cannot be read, and nothing is installed. To install the package deliberately over such a deployment, delete the class `ExecuteMCPv2.Setup` in the namespace and run the install again. An older deployment, or none, installs. The manifest sets `CheckStatus` on the guard's invoke, because IPM 0.10.0 to 0.10.4 ignore a returned error status without it; the CI proof runs on the IPM 0.10.5 that ships with the IRIS images it uses, and the earlier versions are not tested. IPM 0.10.5 marks `CheckStatus` deprecated, because it checks a returned `%Status` by default, but still reads it, and the CI proof checks that the manifest inside the built archive still carries it.
 - **Install with `zpm "install ..."` only, never with `-dev`.** A developer-mode load of a refused version keeps IPM's record at the version it refused.
 - The package configures the `/api/executemcp/v2` web application and the `%ALL` package mapping through `ExecuteMCPv2.Setup.Configure`, with no application roles: handlers run with the connecting user's own privileges.
-- **`zpm "uninstall iris-execute-mcp-v2"` leaves two things behind, and removes neither.** It removes the classes, but not the web application or the `%ALL` mapping that `Configure` created. To remove them by hand, in the `%SYS` namespace as an administrator:
-
-  ```
-  Do ##class(Security.Applications).Delete("/api/executemcp/v2")
-  Do ##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")
-  ```
-
-  Run them only when no other namespace still uses the suite: the instance has one such web application and one such mapping, shared by every namespace that uses the suite. Each call returns a `%Status`.
+- **`zpm "uninstall iris-execute-mcp-v2"` removes the classes and nothing else.** The web application, the `%ALL` mapping and the `%ALL` namespace stay. To take the IRIS side away completely, run the uninstall command first and `zpm "uninstall iris-execute-mcp-v2"` second: see [Removing the IRIS Side](#removing-the-iris-side).
 
 This adds no tool and no governed action. CI builds the package archive and installs it, with no network, on `iris-community` and `irishealth-community` (the `ipm` job below).
+
+### Removing the IRIS Side
+
+One documented command in an IRIS terminal takes away what the install added, and leaves what it did not add. It is not a tool, not a CLI command and not a REST route, and it is not an SQL procedure, so no SQL client and no agent can call it through `iris_sql_query` or `iris_sql_execute`.
+
+**Before you run it, stop the servers that use the instance, or turn their automatic install off.** A server whose automatic install is on puts the IRIS side back the next time it starts, or the first time it uses this instance. Stop the servers, or set `IRIS_AUTO_INSTALL=false` (or a profile's `autoInstall: false`) in the client configuration, run the command, and restart the servers only afterwards. With the automatic install off, a restarted server installs nothing, and its custom-REST tools answer `IRIS_SIDE_NOT_INSTALLED` until someone reinstalls.
+
+Run, in an IRIS terminal, in any namespace that sees the `ExecuteMCPv2.Setup` class (normally the namespace the suite was installed in):
+
+```
+Do ##class(ExecuteMCPv2.Setup).Uninstall()
+```
+
+It needs an account with `%Admin_Manage` and write access to the databases of the namespaces that hold the classes. A repeat run removes nothing more while a copy of the `Setup` class remains (a copy left for IPM, or a foreign one); after a full removal the class is gone, so there is nothing to run. It prints one line per thing it did: `Removed: ...`, `Left: ... (why). To remove it by hand: ...` and `Failed: ...: <IRIS's own text>`. Its last line repeats the warning above about running servers.
+
+What it removes, in this order:
+
+1. the `/api/executemcp/v2` web application;
+2. the `ExecuteMCPv2` package mapping in the `%ALL` namespace;
+3. the `ExecuteMCPv2` classes, in every namespace that holds a copy of its own, shadowed copies included (the instance has one web application and one mapping, but each namespace the suite was installed in has its own classes). A namespace whose copy this install did not deploy (a `dev` copy loaded by hand, or a copy with no release marker) is left alone and named, with the command to remove it. A namespace where IPM installed the classes is left too, because IPM owns them: the report names `zpm "uninstall iris-execute-mcp-v2"`;
+4. the `%ALL` namespace, only when the install created it **and** nothing else is mapped in it;
+5. `^UnitTestRoot` in each namespace where the install set it, only while its value is the one the install set;
+6. the install records, last.
+
+**The install record.** From `1.3.0` a new install writes down what it created, in the global `^ExecuteMCPv2.InstallRecord` of each namespace where one of its steps ran: whether it created `%ALL` and the mapping, the value it set `^UnitTestRoot` to, and the marker of the classes it deployed. The bootstrap and IPM's `Configure` and `ConfigureMapping` write it alike. `%ALL` that existed before the install, a mapping someone else added to `%ALL`, a `^UnitTestRoot` that was set before the install or has changed since are never removed; the report says `Left:` and why for all of them except the preset `^UnitTestRoot`, which it does not mention, because the install never touched it. If a step fails (for example the account lacks a privilege), the report says `Failed:` with IRIS's text, the records stay, and the command returns an error status. When the web application, the mapping or the list of namespaces cannot be read or removed, the command leaves the classes, `%ALL`, `^UnitTestRoot` and the records alone, so you can fix the cause and run it again. A failure while it reads one namespace does not stop the others, so the command can already have deleted the classes it runs from; the records stay, and to finish you then put the install back (start a server with the automatic install on, or load the package) and run the command again.
+
+**With IPM.** Run this command first, then `zpm "uninstall iris-execute-mcp-v2"` in the namespace IPM installed it in. The other order fails: `zpm "uninstall iris-execute-mcp-v2"` deletes the `Setup` class, so the command is gone. Run alone, `zpm "uninstall iris-execute-mcp-v2"` leaves the web application, the `%ALL` mapping and the `%ALL` namespace behind. If it already ran, the command no longer exists: remove what is left by hand, in the `%SYS` namespace as an administrator:
+
+```
+Do ##class(Security.Applications).Delete("/api/executemcp/v2")
+Do ##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")
+```
+
+Run them only when no other namespace still uses the suite: the instance has one such web application and one such mapping, shared by every namespace that uses the suite. Each call returns a `%Status`. The `%ALL` namespace and `^UnitTestRoot` follow the rules of the next paragraph.
+
+**An install by `1.2.0` or earlier has no record, and upgrading it in place does not add one.** The command still removes the web application, the mapping and the classes, but it never removes `%ALL` or `^UnitTestRoot`, because it cannot know who created them. It names both, with the commands to remove them by hand. In the `%SYS` namespace, as an administrator:
+
+```
+Do ##class(Config.Namespaces).Delete("%ALL")
+```
+
+and in each namespace where `^UnitTestRoot` is set and you do not use it for anything else:
+
+```
+Kill ^UnitTestRoot
+```
+
+**Deleting `%ALL` removes every mapping in it, not only ours.** Look at what else is mapped there first (the `Config.MapPackages`, `Config.MapGlobals` and `Config.MapRoutines` `:List` queries for `%ALL`, or the management portal), and run the first command only when nothing else is.
+
+**Two namespaces.** When more than one namespace used the suite, the report says so: each namespace loses its classes, and the instance has one web application and one mapping. A namespace that is left (IPM-owned, or a copy this install did not deploy) keeps its classes.
+
+**Who can run it.** The boundary is the IRIS account's privileges, not an `EXECUTE` grant on the `Setup` methods: an account without `%Admin_Manage` gets a `Failed:` line for each step it cannot do and nothing is removed, and an account that holds the privileges can remove the IRIS side with this command or by hand. Do not rely on an SQL `EXECUTE` grant to protect the `Setup` methods: IRIS's own Atelier `action/query` route does not check SQL privileges, so an account that can use it can call them whatever its grants say.
+
+The coverage tools' scratch global `^IRIS.TempExecuteMCPv2Coverage` lives in IRISTEMP, is written only by a coverage run and is cleared when IRIS restarts. The command does not touch it.
 
 ---
 
@@ -1167,13 +1214,13 @@ A plain `pnpm test` touches no IRIS instance. The test legs that need one are op
 
 - `gates` runs on Node 22.17.0, 24.0.0 and 26.0.0 (the floor of each even major; 22.17.0 is the `engines.node` floor of every package). It installs, builds, lints with no warning allowed, type-checks, runs the tests of the eight packages, and runs the governance baseline, skills, pack, prompt, provenance and tools-list checks, the epics-sync check and the live-guard check (`pnpm check:live-guards`). It also installs, type-checks and builds the launcher extension and runs its arming guard.
 - `launcher` runs the launcher extension's whole test suite (the real-CLI tests included) on `ubuntu-24.04`, `macos-15` and `windows-2025`, each on Node 22.17.0, because only CI shows a platform difference. It builds every package (the real-CLI tests read the client-config and shared CLIs and the five servers' tool lists), needs no other job and reaches no IRIS (its two live files stay unarmed and skip). A red leg fails the run, and a release waits for a green run.
-- `throwaway` runs everything that needs a live IRIS against throwaway containers that `scripts/throwaway-iris.mjs` starts, labels and removes. It refuses ports 52773 and 1972, the shared instance's container name and any image that is not pinned by digest. The bootstrap-guard gate runs on `iris-community` 2026.2 and on 2026.1 (the oldest tag that is tested: a Community image carries a time-limited license key and refuses to start once it expires, so the oldest tag moves forward before its key expires; the 2026.1 key is valid to 2027-03-27, and 2025.3 passed every guard leg in CI run 39749804619 on 2026-10-22 before its key expires on 2026-11-13), in `USER`, each in a container of its own, and the guard gate includes the leg that leaves an IPM installation alone. An `irishealth-community` 2026.2 container is then started in `HSCUSTOM` and seeded (the real bootstrap, then the test and fixture classes under `src/ExecuteMCPv2/Tests` and `src/ExecuteMCPv2/QAFixtures`). Every package's `prepublishOnly`, every integration suite, the five process gates and the launcher's live files run against it. A fresh instance has `%Service_DocDB` disabled, and the Epic 35 F5 gate (in the `all` package's `prepublishOnly`) needs it disabled, so the job enables the service in one session step (`scripts/ci-enable-docdb-service.script`) after the prepublish suites and just before the data integration suite, and the DocDB lifecycle runs. The step fails unless the service reads back as enabled; no test toggles the service.
+- `throwaway` runs everything that needs a live IRIS against throwaway containers that `scripts/throwaway-iris.mjs` starts, labels and removes. It refuses ports 52773 and 1972, the shared instance's container name and any image that is not pinned by digest. The bootstrap-guard gate runs on `iris-community` 2026.2 and on 2026.1 (the oldest tag that is tested: a Community image carries a time-limited license key and refuses to start once it expires, so the oldest tag moves forward before its key expires; the 2026.1 key is valid to 2027-03-27, and 2025.3 passed every guard leg in CI run 39749804619 on 2026-10-22 before its key expires on 2026-11-13), in `USER`, each in a container of its own, and the guard gate includes the leg that leaves an IPM installation alone. An `irishealth-community` 2026.2 container is then started in `HSCUSTOM` and seeded (the real bootstrap, then the test and fixture classes under `src/ExecuteMCPv2/Tests` and `src/ExecuteMCPv2/QAFixtures`). Every package's `prepublishOnly`, every integration suite, the five process gates and the launcher's live files run against it. A fresh instance has `%Service_DocDB` disabled, and the Epic 35 F5 gate (in the `all` package's `prepublishOnly`) needs it disabled, so the job enables the service in one session step (`scripts/ci-enable-docdb-service.script`) after the prepublish suites and just before the data integration suite, and the DocDB lifecycle runs. The step fails unless the service reads back as enabled; no test toggles the service. After that container is removed, the job starts one more `irishealth-community` 2026.2 container in `USER` for the uninstall round trip (the suite `uninstall-round-trip`, Story 45.3): the gate installs the IRIS side through the built dev server, runs `Do ##class(ExecuteMCPv2.Setup).Uninstall()` in an IRIS terminal and checks that the instance is back to its state before the install.
 - `package` packs the eight packages, installs the tarballs together into a clean directory, and starts every server bin (an `initialize` and a `tools/list`) and every CLI bin. It runs only after `gates` and `throwaway` are green, so no tarball is built from a red commit.
 - `ipm` builds the IPM archive of the `ExecuteMCPv2` package from the generated embed (never from `src/`) on a throwaway `iris-community` 2026.2 container with no network, and installs that one archive on a fresh `iris-community` 2026.2 container (`USER`) and a fresh `irishealth-community` 2026.2 container (`HSCUSTOM`), each with no network (`node scripts/ci-ipm-archive.mjs`). On the community edition it shows that the install guard refuses a newer, `dev` or marker-less `Setup` and leaves it untouched and that an older `Setup` is upgraded; on both editions it shows that 36 classes compile, that the REST application is configured with no roles and answers, that `%IPM_Repo.Definition` holds 0 rows at every read, and that the guard's `Classify` equals the TypeScript comparator on a shared table of cases. It then proves what the IPM registry would serve: it fetches GitHub's archive of the commit under test (three attempts, never a local stand-in in CI), requires it to equal `git archive` of that commit and to hold the module's members (the root `module.xml`, `ipm/src` and the guard under `preload/`), re-tars it as the registry does and installs it the same way on both editions, at the committed tree's marker. It issues only the IPM verbs `load`, `package` and `list`, publishes nothing and reads no secret. It runs after `gates` and `throwaway`, in parallel with `package`.
 
 An armed suite fails if any test in it was skipped (skipped, pending, todo or disabled), unless an `allowedSkips` entry in `scripts/lib/ci-checks.mjs` names the test and gives the reason. The allowlist holds only the four golden-capture legs, which run only under the capture CLI; a skipped DocDB lifecycle test fails the data integration suite. An entry that no longer matches a skipped test fails too. An armed run therefore cannot go green on a test that vitest reports as skipped. The other way a test can pass without testing is to end early or to assert only when a create worked, so `pnpm check:live-guards` (a `gates` step, and a check of the release `prepare`) reads the test files of every armed suite and refuses a `return` that ends a test without a skip, and an `if` on `isError` or a member of `created` whose then-branch does not throw or skip: an armed test asserts its precondition, or skips loudly. The check is syntactic, and `scripts/lib/live-guard-scan.mjs` lists the shapes it does not see. A new check is registered in `scripts/lib/ci-checks.mjs` and in `ci.yml`, and `ci-workflow.test.ts` fails when the two differ.
 
-`pnpm live:bootstrap-guard` runs the bootstrap-guard gate against a throwaway IRIS container. It needs Docker and the pinned image, and it removes its own container on every exit.
+`pnpm live:bootstrap-guard` runs the bootstrap-guard gate against a throwaway IRIS container. It needs Docker and the pinned image, and it removes its own container on every exit. `pnpm live:uninstall-round-trip` runs the uninstall round trip against a throwaway container in the same way, and removes the container when the run ends normally; it needs a POSIX shell as well, and a run that is interrupted leaves its container for `node scripts/throwaway-iris.mjs down`.
 
 ### Releasing
 

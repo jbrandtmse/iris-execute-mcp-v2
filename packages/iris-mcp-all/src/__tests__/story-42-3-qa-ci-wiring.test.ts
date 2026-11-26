@@ -111,7 +111,7 @@ describe("ci.yml: every step reference resolves to an earlier step, and every ex
   it("the real ci.yml has no unresolved reference", () => {
     expect(referenceProblems(text)).toEqual([]);
     const referenced = [...text.matchAll(/steps\.([a-z]+)\.outcome/g)].map((match) => match[1]);
-    expect(new Set(referenced), "the scan sees the conditions that gate the suites").toEqual(new Set(["setup", "up", "seed"]));
+    expect(new Set(referenced), "the scan sees the conditions that gate the suites").toEqual(new Set(["setup", "up", "seed", "uninstall"]));
   });
 
   it.each([

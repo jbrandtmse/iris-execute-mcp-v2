@@ -1,35 +1,50 @@
-/// Unit tests for <class>ExecuteMCPv2.Setup</class>.
-/// <p>Tests the Configure, Uninstall, and IsConfigured methods for
-/// web application registration.</p>
+/// Unit tests for <class>ExecuteMCPv2.Setup</class>: Configure, IsConfigured, the install
+/// record and the back-compat of the install methods.
+/// <p>No test calls the destructive <method>ExecuteMCPv2.Setup.Uninstall</method>: a run on
+/// a shared instance would remove the suite. The uninstall decisions are pinned in
+/// <class>ExecuteMCPv2.Tests.SetupUninstallTest</class>, and the uninstall itself is proven
+/// on a throwaway instance by the round-trip gate (Story 45.3).</p>
 /// <p><b>Note:</b> These tests require <code>%Admin_Manage</code> privileges
-/// since they create/delete web applications in the <code>%SYS</code> namespace.</p>
+/// since they create web applications in the <code>%SYS</code> namespace.</p>
 Class ExecuteMCPv2.Tests.SetupTest Extends %UnitTest.TestCase
 {
 
-/// Test that Configure creates the web application successfully.
+/// The install record of the test namespace, saved before each test and restored after it.
+Property SavedRecord As %String [ MultiDimensional ];
+
+/// 1 when the namespace had an install record before the test.
+Property HadRecord As %Boolean;
+
+Method OnBeforeOneTest(testname As %String) As %Status
+{
+    Kill i%SavedRecord
+    Set ..HadRecord = ($Data(^ExecuteMCPv2.InstallRecord) > 0)
+    If ..HadRecord Merge i%SavedRecord = ^ExecuteMCPv2.InstallRecord
+    Kill ^ExecuteMCPv2.InstallRecord
+    Quit $$$OK
+}
+
+Method OnAfterOneTest(testname As %String) As %Status
+{
+    Kill ^ExecuteMCPv2.InstallRecord
+    If ..HadRecord Merge ^ExecuteMCPv2.InstallRecord = i%SavedRecord
+    Kill i%SavedRecord
+    Quit $$$OK
+}
+
+/// Test that Configure creates (or updates) the web application successfully.
 Method TestConfigureCreatesWebApp() As %Status
 {
-    ; First uninstall to ensure clean state
-    Set tSC = ##class(ExecuteMCPv2.Setup).Uninstall()
-    Do $$$AssertStatusOK(tSC, "Uninstall should succeed (clean state)")
-
-    ; Verify it's gone
-    Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).IsConfigured(), 0, "Web app should not exist before Configure")
-
-    ; Run Configure
     Set tSC = ##class(ExecuteMCPv2.Setup).Configure()
     Do $$$AssertStatusOK(tSC, "Configure should succeed")
-
-    ; Verify it exists
     Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).IsConfigured(), 1, "Web app should exist after Configure")
 
     Quit $$$OK
 }
 
-/// Test that Configure is idempotent — calling it twice succeeds.
+/// Test that Configure is idempotent: calling it twice succeeds.
 Method TestConfigureIdempotent() As %Status
 {
-    ; Configure twice
     Set tSC = ##class(ExecuteMCPv2.Setup).Configure()
     Do $$$AssertStatusOK(tSC, "First Configure should succeed")
 
@@ -41,59 +56,84 @@ Method TestConfigureIdempotent() As %Status
     Quit $$$OK
 }
 
-/// Test that Uninstall removes the web application.
-Method TestUninstallRemovesWebApp() As %Status
-{
-    ; Ensure it exists first
-    Set tSC = ##class(ExecuteMCPv2.Setup).Configure()
-    Do $$$AssertStatusOK(tSC, "Configure should succeed")
-    Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).IsConfigured(), 1, "Web app should exist")
-
-    ; Uninstall
-    Set tSC = ##class(ExecuteMCPv2.Setup).Uninstall()
-    Do $$$AssertStatusOK(tSC, "Uninstall should succeed")
-
-    ; Verify removed
-    Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).IsConfigured(), 0, "Web app should not exist after Uninstall")
-
-    Quit $$$OK
-}
-
-/// Test that Uninstall is idempotent — calling it when no web app exists succeeds.
-Method TestUninstallIdempotent() As %Status
-{
-    ; Uninstall twice — second should be a no-op
-    Set tSC = ##class(ExecuteMCPv2.Setup).Uninstall()
-    Do $$$AssertStatusOK(tSC, "First Uninstall should succeed")
-
-    Set tSC = ##class(ExecuteMCPv2.Setup).Uninstall()
-    Do $$$AssertStatusOK(tSC, "Second Uninstall should succeed (idempotent)")
-
-    Quit $$$OK
-}
-
-/// Test IsConfigured returns correct boolean values.
+/// Test IsConfigured returns a true boolean once configured.
 Method TestIsConfigured() As %Status
 {
-    ; Configure and check
     Set tSC = ##class(ExecuteMCPv2.Setup).Configure()
     Do $$$AssertStatusOK(tSC, "Configure should succeed")
     Do $$$AssertTrue(##class(ExecuteMCPv2.Setup).IsConfigured(), "IsConfigured should return true when configured")
 
-    ; Uninstall and check
-    Set tSC = ##class(ExecuteMCPv2.Setup).Uninstall()
-    Do $$$AssertStatusOK(tSC, "Uninstall should succeed")
-    Do $$$AssertTrue('##class(ExecuteMCPv2.Setup).IsConfigured(), "IsConfigured should return false when not configured")
+    Quit $$$OK
+}
+
+/// Configure records the namespace it deployed to, with the class marker, in that namespace.
+Method TestConfigureWritesDeployedRecord() As %Status
+{
+    Set tSC = ##class(ExecuteMCPv2.Setup).Configure($NAMESPACE)
+    Do $$$AssertStatusOK(tSC, "Configure should succeed")
+    Do $$$AssertEquals($Get(^ExecuteMCPv2.InstallRecord("format")), 1, "the record carries its format version")
+    Do $$$AssertEquals($Get(^ExecuteMCPv2.InstallRecord("deployed")), ##class(ExecuteMCPv2.Setup).#BOOTSTRAPVERSION, "the deployed node holds this class's marker")
+    Do $$$AssertEquals($Data(^ExecuteMCPv2.InstallRecord("all")), 0, "Configure writes no %ALL node")
+    Do $$$AssertEquals($Data(^ExecuteMCPv2.InstallRecord("unitTestRoot")), 0, "Configure writes no unitTestRoot node")
 
     Quit $$$OK
 }
 
-/// Cleanup: ensure web app exists after test run (restore expected state).
-Method OnAfterAllTests() As %Status
+/// WriteRecord writes the nodes with the documented values and merges created over found.
+Method TestWriteRecordNodes() As %Status
 {
-    ; Re-configure to leave the system in a working state
-    Set tSC = ##class(ExecuteMCPv2.Setup).Configure()
-    Quit tSC
+    Set tNS = $NAMESPACE
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).WriteRecord(tNS, "all", "found"), 1, "a found node is written")
+    Do $$$AssertEquals($Get(^ExecuteMCPv2.InstallRecord("all")), "found", "all is found")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Setup).WriteRecord(tNS, "all", "created"), 1, "a created node is written")
+    Do $$$AssertEquals($Get(^ExecuteMCPv2.InstallRecord("all")), "created", "created replaces found")
+    Do ##class(ExecuteMCPv2.Setup).WriteRecord(tNS, "all", "found")
+    Do $$$AssertEquals($Get(^ExecuteMCPv2.InstallRecord("all")), "created", "a later found never overwrites created")
+
+    Do ##class(ExecuteMCPv2.Setup).WriteRecord(tNS, "mapping", "created", "SOMEDB")
+    Do $$$AssertEquals($Get(^ExecuteMCPv2.InstallRecord("mapping")), "created", "mapping is created")
+    Do $$$AssertEquals($Get(^ExecuteMCPv2.InstallRecord("mapping", "database")), "SOMEDB", "the mapping's database is recorded")
+    Do ##class(ExecuteMCPv2.Setup).WriteRecord(tNS, "mapping", "found", "OTHERDB")
+    Do $$$AssertEquals($Get(^ExecuteMCPv2.InstallRecord("mapping")), "created", "found never overwrites a created mapping")
+    Do $$$AssertEquals($Get(^ExecuteMCPv2.InstallRecord("mapping", "database")), "SOMEDB", "found never overwrites the recorded database")
+
+    Do ##class(ExecuteMCPv2.Setup).WriteRecord(tNS, "unitTestRoot", "/some/dir/")
+    Do $$$AssertEquals($Get(^ExecuteMCPv2.InstallRecord("unitTestRoot")), "/some/dir/", "the unitTestRoot value is recorded")
+    Do $$$AssertEquals($Get(^ExecuteMCPv2.InstallRecord("format")), 1, "every write sets the format version")
+
+    Quit $$$OK
+}
+
+/// A record write that cannot happen never raises and reports 0.
+Method TestWriteRecordNeverThrows() As %Status
+{
+    Set tOK = ##class(ExecuteMCPv2.Setup).WriteRecord("NOSUCHNAMESPACE", "deployed", "x")
+    Do $$$AssertEquals(tOK, 0, "a write into a namespace that does not exist returns 0 and does not raise")
+    Do $$$AssertEquals($Data(^ExecuteMCPv2.InstallRecord), 0, "nothing was written here")
+
+    Quit $$$OK
+}
+
+/// EnsureUnitTestRoot returns an already-set value unchanged and records nothing for it.
+Method TestEnsureUnitTestRootKeepsPresetValue() As %Status
+{
+    Set tHad = ($Data(^UnitTestRoot) > 0)
+    Set tSaved = $Get(^UnitTestRoot)
+    Set ^UnitTestRoot = "/preset/by/someone/else/"
+    Set tReturned = ##class(ExecuteMCPv2.Setup).EnsureUnitTestRoot()
+    Set tAfter = $Get(^UnitTestRoot)
+    Set tNode = $Data(^ExecuteMCPv2.InstallRecord("unitTestRoot"))
+    If tHad {
+        Set ^UnitTestRoot = tSaved
+    } Else {
+        Kill ^UnitTestRoot
+    }
+
+    Do $$$AssertEquals(tReturned, "/preset/by/someone/else/", "the preset value is returned")
+    Do $$$AssertEquals(tAfter, "/preset/by/someone/else/", "the preset value is unchanged")
+    Do $$$AssertEquals(tNode, 0, "no unitTestRoot node is written for a value the install did not set")
+
+    Quit $$$OK
 }
 
 }
