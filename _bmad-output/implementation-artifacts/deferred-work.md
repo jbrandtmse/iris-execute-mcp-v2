@@ -4421,8 +4421,20 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: med | fix-risk: low | footprint: in-footprint
 - evidence: 45.4 build review; verified in irislib/%Api/DocDB/v1.cls; the key is in the frozen baseline (governance-baseline.ts:74), so it is enabled by default
 - 2026-11-26T06:08:56Z status=routed owner=45-4-block-turns-off-raw-read-and-code-execution-tools by=harvest note=Lead decision #172: add iris_docdb_document:delete to DATA_POLICY_BLOCK_KEYS (12 keys); patched at this story's code review with the cross-check, docs, back-compat sweep (redact/allow unchanged) and a wire leg
+- 2026-11-26T07:21:11Z status=resolved-by:45-4-block-turns-off-raw-read-and-code-execution-tools owner=45-4-block-turns-off-raw-read-and-code-execution-tools by=lead note=CR (45.4): iris_docdb_document:delete added to DATA_POLICY_BLOCK_KEYS (12 keys); scope row off (get, delete), docs, CHANGELOG, changeset, AD-26, epics 12-key text; wire leg: denied under block with zero IRIS requests and dataPolicyApplied in the audit entry; mutation (drop delete) 9 tests red; redact/allow back-compat replay green with the fixture unedited
 
 ### DW-783: iris_analytics_mdx stays on under block
 - source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: low | fix-risk: low | footprint: in-footprint
 - evidence: 45.4 plan and build: the handler returns labels and cells only, never DRILLTHROUGH rows
 - 2026-11-26T06:08:56Z status=by-design owner=45-4-block-turns-off-raw-read-and-code-execution-tools by=harvest note=Documented residual (decision #169): aggregates, not stored records
+
+### DW-784: iris_sql_analyze stats/running may show other sessions' statement literals under block (unverified)
+- source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: med | fix-risk: low | footprint: in-footprint
+- evidence: 45.4 CR (maybe-false): iris_sql_analyze is residual (plans only, never runs the caller's SQL), but its stats and running modes may list other sessions' statement text, which can carry literals (identifiers)
+- 2026-11-26T07:21:11Z status=routed owner=burndown by=cr note=Probe first on a throwaway (Rule #16): run a statement with a literal in one session, read iris_sql_analyze stats and running from another; if literals appear, cover the affected actions under block (a key or action in DATA_POLICY_BLOCK_KEYS) or close with evidence
+
+### DW-785: Decision #172 record said insert/update return IDs or status only
+- source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: 45.4 QA/CR: httpPostDocument returns the caller's content plus the ID
+- 2026-11-26T07:21:11Z status=wontfix-accepted owner=45-4-block-turns-off-raw-read-and-code-execution-tools by=cr note=Corrected in orchestrator-decisions-wave-10.md row #172 by the lead (2026-11-26); no code change
+- 2026-11-26T07:21:16Z status=resolved-by:45-4-block-turns-off-raw-read-and-code-execution-tools owner=45-4-block-turns-off-raw-read-and-code-execution-tools by=lead note=status corrected: the record was fixed in row #172 (resolved, not wontfix)
