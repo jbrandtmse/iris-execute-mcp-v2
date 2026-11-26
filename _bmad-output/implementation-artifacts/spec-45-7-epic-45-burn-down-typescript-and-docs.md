@@ -116,6 +116,22 @@ deferred:
 
 ## Spec Change Log
 
+- 2026-11-26 (lead, spec gate, decisions #179 and #180; BINDING):
+  - **D1 is prevention, ruled by the Planner.** `BOOTSTRAP_VERSION` moves once, `+12` → `+13`.
+  - **D2–D5 and A1–A4 are accepted.** A1–A4 are applied to `epics.md`.
+  - **DW-793** is in scope.
+  - **DW-792 conditions, from the Planner:**
+    1. **The install record survives too.** Write the record entries for `%ALL` and the mapping (`^ExecuteMCPv2.InstallRecord`) outside the rollback, in the same suspended span. Live proof: force a later step of an IPM install to fail, then check, in order:
+       - the namespace table works: the namespace list reads, and a new namespace can be entered over Atelier and with `iris session`;
+       - `Uninstall()` then removes `%ALL` and the mapping;
+       - its report names both as removed.
+    2. **Suspension is restored on every path.** Restore the previous `TransactionsSuspended` state in a guaranteed place: after the Try/Catch and before any Quit, so IPM's later steps run transactionally as IPM expects. Pin it by source. Pin it live too: after `ConfigureMapping` returns inside an IPM transaction, the process is no longer suspended.
+    3. **Scope.** Suspend only around the `%ALL` and mapping creation and its record entries, and only when `$TLEVEL>0`. The R10 guard stays the first statement, so a web-request SELECT never reaches the suspension.
+    4. **Rule #59 mutation.** Remove the suspension, and the failed-IPM leg goes red (the namespace table is broken). Restore it, and the leg is green.
+    5. **Docs.** The README's IPM section says a failed IPM install may leave `%ALL` and the `ExecuteMCPv2` mapping in place, consistent, and that `Uninstall()` removes them. It keeps `Do ##class(Config.Namespaces).ActivateAll()` in `%SYS` as the recovery line for instances broken by an earlier release's failed install.
+  - **DW-790:** live pin with an account without `%Admin_Manage`, plus a mutation.
+  - **DW-784:** all three actions (`stats`, `running`, `advise` workload) join the block set. Add a zero-request wire leg. The `redact`/`allow` sweep stays unchanged.
+
 ## Review Triage Log
 
 ## Design Notes
