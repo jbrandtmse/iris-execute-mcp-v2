@@ -2,8 +2,8 @@
 title: 'Story 45.5: What the Safety Settings Protect'
 type: 'feature'
 created: '2026-11-26'
-status: 'ready-for-dev'
-baseline_revision: 'f4481848df128f80ea25c5fb9706818b83783542'
+status: 'done'
+baseline_revision: '4316c5ab2b607ad82df96dfa1bc0d8555c5d9873'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -193,6 +193,46 @@ deferred:
   - **DW-784:** the `iris_sql_analyze` stats/running literal exposure is unverified and the burn-down probes it. This story's residual table lists it as "under probe", and the burn-down writes the outcome.
 
 ## Review Triage Log
+
+### 2026-11-26 — Review pass
+- verdicts: 32 findings — high 0, medium 2 (one root cause, patched), low 20, false 10, maybe-false 0 (counted mechanically from the rows below)
+- findings:
+  - Blind Hunter
+    - `[low]` `[reject]` SECURITY.md "documented residual" carve-out could swallow a bypass of the read-only preset — spec-bound (decision D3 chose this wording); the `iris_sql_query` residual is in scope for the owner's decision-sheet call on DW-786, not here.
+    - `[low]` `[reject]` "Under probe" for `iris_sql_analyze` gives no workaround — spec-bound (Spec Change Log: DW-784 is listed as "under probe"; the burn-down writes the outcome).
+    - `[medium]` `[patch]` The Probe A and Probe B citations read the test's own source, so they cannot fail — now read the spec's Design Notes headings (`probeRecord()`); same root cause as the VerGap probe row.
+    - `[low]` `[reject]` The dev README 45.1 blockquote keeps the one-database sentence beside the appended three-resource rule — spec-bound (task 8: APPEND, because `story-45-1-doc-claims` pins the old substring); the appended text says "often one database".
+    - `[low]` `[reject]` The launcher README omits that an ambient `IRIS_AUTO_INSTALL=true` plus the launcher's preset fails startup — the client-config pages carry that sentence; a launcher line would need its own oracle for a rare setup.
+    - `[low]` `[reject]` The install-on half of the DW-773 paragraph has no live test — spec-bound: Design Notes pin it to the built `bootstrap.js` strings (recorded 45.2 probe).
+    - `[low]` `[reject]` "which the policy governs under `block` only" can be misread as covering the whole list — the next paragraph lists what `block` turns off, and the test parser pins the shape; rewording needs a parser change for no reader harm.
+    - `[low]` `[reject]` `%Development:U` is stated twice in one paragraph — the second sentence is the pinned oracle sentence (`requires the %Development resource`); not worth moving the pin.
+    - `[low]` `[reject]` Full-sentence pins are brittle and P1 uses positions and counts — the same house pattern as `story-45-4-doc-claims`; P1 cross-checks the counts against `iris_server_profiles`.
+  - Edge Case Hunter
+    - `[low]` `[patch]` README says `EnsureUnitTestRoot` "only sets an empty `^UnitTestRoot`", and it also writes the install record — README sentence now ends "and notes that in the install record".
+    - `[low]` `[patch]` The oracle counts only `Set ^UnitTestRoot` — it now also pins that the method holds no other global write or kill and exactly one `WriteRecord` of `unitTestRoot` (same root cause as the row above).
+    - `[low]` `[reject]` Warning lines are read from stderr right after the session opens, so the `[]` of the block leg could pass early — `openWireSession` returns after the bootstrap has run, and the re-enable leg uses the same read and asserts the line is present.
+    - `[low]` `[reject]` SECURITY.md could reject an escalation in the shipped REST classes under "using the account directly" — the in-scope list names `ExecuteMCPv2` and `/api/executemcp/v2`, and the exclusion covers calls that use only the account's own privileges.
+  - Verification Gap Reviewer
+    - `[low]` `[reject]` The default-suite P4 is source text only — spec-bound (A4 wording; the armed leg is the behavior oracle and joins `gateTestFiles`); recorded under Verification (P4 versus P5).
+    - `[medium]` `[patch]` The self-reading Probe A and Probe B assertions — same root cause as the Blind row; fixed.
+    - `[low]` `[reject]` The split-layout symptoms (500, 403) have no live check — spec-bound: Design Notes name Probe A as their oracle and the armed leg for the one-database form.
+    - `[low]` `[patch]` The arming-contract test repeated one value as a second `expect` — the second `expect` is deleted.
+    - `[low]` `[patch]` A leftover `backtickTokens(sec).length > 0` assertion and the unused `isResidual` export — both removed, together with the import that only `isResidual` used.
+    - `[low]` `[reject]` `it.skipIf(!present)` on the changeset check skips once `changeset version` consumes the file — intended: the release step is the one writer, and the CHANGELOG pin remains.
+    - `[low]` `[reject]` The "old pointer" walk reads untracked build output — it excludes `node_modules` and `dist`; it ran green on a fresh tree.
+    - `[low]` `[reject]` The armed start and block legs have no mutation recorded on the armed path — spec-bound: the plan names P5 as the armed-path mutation; P3, P6 and P1 cover the same properties hermetically.
+    - `[low]` `[patch]` Four AC groups had no `mutation:` line — four mutations run and recorded under Verification (AC 45.5.1 to 45.5.4); AC 45.5.6 is pinned by commands.
+  - Intent Alignment Auditor (descriptive; each observation checked against the spec and closed)
+    - `[false]` `[reject]` The capstone's behavior legs exercise 45.1 to 45.4 code — that is the epic-done gate's purpose (Rule #21).
+    - `[false]` `[reject]` The doc claims rest on recorded probes — Rule #36 and the spec's Design Notes allow a recorded probe as the oracle.
+    - `[false]` `[reject]` Style (plain words) is not mechanically checkable — the spec asks for it as a writing rule.
+    - `[false]` `[reject]` The P2 not-covered parser allows `iris_production_logs` through the row reason — the spec's pin says exactly that.
+    - `[false]` `[reject]` The LP-hermetic "answered" is an error envelope — the fake serves no custom-REST route; the matrix asks that the call is sent and answered.
+    - `[false]` `[reject]` The armed leg derives the resource names through the suite's config route — the grants are read back through `Security.*`, and a wrong guess fails closed.
+    - `[false]` `[reject]` The armed leg compares only the `Setup.cls` document — the matrix names that document.
+    - `[false]` `[reject]` The arming contract restates the helper's logic — a consistency check, stated as such.
+    - `[false]` `[reject]` The wording "four issue points" widens "points 1, 2 and 4" — the capstone covers the epic's four gate points (A4); the story's own README points are unchanged.
+    - `[false]` `[reject]` The dev README has no link in the read-only paragraph and the `IRIS_SQL_*` rows are unlinked — the dev Configuration section carries the link line (README L60), and the spec names the five governance rows.
 
 ## Design Notes
 
@@ -384,9 +424,63 @@ Every test added or changed passes on a fresh environment, in either order.
 - Lead smoke (decision #166): mutation P5, plus a least-privilege run of the capstone's armed leg on a local throwaway (port 52792; `down` afterwards; `docker ps -a --filter label=iris-mcp.owner=throwaway` prints nothing).
 - Armed run: the lead records the `ci` run URL for the pushed tip.
 
+### Implementation record (dev, 2026-11-26)
+
+**Mutation proofs.** Each is a temporary edit, restored with the Edit tool (or, for P4, with `cp` from the scratchpad copies and checked with `cmp`), and the tree checked byte-identical afterwards (`git status --short` and `git diff --stat` equal to the start; `shasum` of each mutated source equal to the start). Hermetic runs: the closed-port environment (`IRIS_HOST=127.0.0.1 IRIS_PORT=1 ...`, `IRIS_REQUIRE_LIVE` unset), `npx vitest run src/__tests__/epic45-capstone-gate.test.ts` after `pnpm --filter @iris-mcp/shared build`.
+- mutation: P1, delete the `dataPolicySeed(key, dataPolicy, blockKeys) ??` term in `effective` (`packages/shared/src/governance.ts` L1298) -> red: `P1 dev`, `P1 interop` and `P1 data` ("under block each declared key answers GOVERNANCE_DISABLED ...") and `P1 an explicit governance key re-enables iris_sql_query ...` (4 tests). Path: stdio `tools/call` -> `handleToolCall`'s gate in the rebuilt shared dist that the three built servers load.
+- mutation: P2a, drop `"iris_docdb_find"` from `DATA_POLICY_BLOCK_KEYS` (`packages/shared/src/data-policy.ts`) and rebuild shared -> red: capstone `P1 the keys this gate drives are exactly the declaration`, `P1 data: under block ...`, `P1 the default policy (redact) ...`, `P2 its block list equals DATA_POLICY_BLOCK_KEYS`, and doc-claims `the block list equals DATA_POLICY_BLOCK_KEYS` (5 tests). Path: README text against the built shared dist.
+- mutation: P2b, delete "A `SELECT` can call a `SqlProc` method, which runs with the account's privileges." from the README section -> red: capstone `P2 it says a SELECT can call a SqlProc method ...` and doc-claims `says a SELECT can call a SqlProc method ...` (2 tests). Path: README text.
+- mutation: P3, `return { autoInstall: true, ... }` instead of `false` for the read-only preset (`packages/shared/src/auto-install.ts` L82) and rebuild shared -> red: `P3 read-only preset on a server with no IRIS side ...` and `LP-hermetic ...` (2 tests: the writes appear and the refusal is gone). Path: `McpServerBase.start` -> `bootstrap` in the built dev process.
+- mutation: P4, `%Prepare(.pQuery)` in `Sql.cls`, `pnpm run gen:bootstrap` (BOOTSTRAP_VERSION 1.2.0+11.7e887e8f5849), rebuild shared -> red: capstone `P4 the PUT of ExecuteMCPv2.REST.Sql.cls holds exactly one %Prepare( ...` and doc-claims `SQL privileges: the embed prepares with checking on ...` (2 tests). Path: the built server's Atelier PUT. Restored `Sql.cls`, `bootstrap-classes.ts` and `scripts/bootstrap-sequence.json` from the scratchpad copies, `cmp` clean for all three, shared rebuilt, `BOOTSTRAP_VERSION` is `1.2.0+10.109d0129528f` in the source and in the dist, and a second `pnpm run gen:bootstrap` produced no diff.
+- mutation: P5, on a local throwaway (port 52792, pinned image), the armed leg with the built server deploying the mutated class. With the spec's `%Prepare(.pQuery)` the armed legs stayed GREEN, because the default of `checkPriv` is 1 (`irislib/%SQL/Statement.cls` L519: `Method %Prepare(ByRef pStatementText As %RawString, checkPriv As %Boolean = 1, ...)`), so dropping `, 1` changes no behavior. With `%Prepare(.pQuery, 0)` (checking off, BOOTSTRAP_VERSION 1.2.0+12.66efd1fac222) -> red: `LP-armed an ungranted SELECT answers SQLCODE -99 ...` and `LP-armed SELECT ExecuteMCPv2.Setup_ConfigureMapping(...) answers SQLCODE -99 ...` (the call was no longer refused), plus the P4 text pin. Path: the real `/dev/sql/execute` through the built server, as the disposable account. Restored as for P4.
+- mutation: P6, `if (probe.status === "unconfigured" && Date.now() < 0) {` for the install-off `unconfigured` branch (`packages/shared/src/bootstrap.ts`, `bootstrap` step with the install off) and rebuild shared -> red: `LP-hermetic ... one could-not-confirm warning` (the up-front refusal replaces the warning). Path: the built dev gateway. (An earlier attempt with `&& false` failed `tsc` as unreachable code; the result above is the clean build.)
+- mutation: pointer, the warning's last sentence back to `See "PHI data policy" in the README.` (`packages/shared/src/data-policy.ts` L325) and rebuild shared -> red: capstone `P1 an explicit governance key re-enables ...` and `P1 the default policy (redact) ...`, doc-claims `buildDataPolicyWarning's built output ends with the new pointer ...` and `no document, test or changeset names the old pointer any more` (4 tests).
+- mutation (review pass, AC 45.5.1 / DW-766): README "`RW` on the routines database is not needed." reworded to "Write access on the routines database is not needed." -> red: doc-claims `states Probe A's finding ...` (1 test). Path: README text. Restored with Edit; `cmp` against a scratchpad copy is clean.
+- mutation (review pass, AC 45.5.2): the `ops` README link target changed to `#safety` -> red: doc-claims `the five server READMEs carry the link line in their Configuration section` (1 test). Path: server README text against the section slug. Restored, `cmp` clean.
+- mutation (review pass, AC 45.5.3): the first out-of-scope bullet of `SECURITY.md` deleted -> red: doc-claims `says getting past a control through the servers' tools is in scope and using the account directly is not` (1 test). Path: `SECURITY.md` text. Restored, `cmp` clean.
+- mutation (review pass, AC 45.5.4 / DW-768): `IRIS_SIDE_NOT_INSTALLED` replaced by "an error" in `docs/client-config/claude-code.md` -> red: doc-claims `claude-code.md: the read-only section names the automatic install, the refusal and the link ...` (1 test). Path: client-config page text. Restored, `cmp` clean; `git status --short` hash equal before and after the four mutations.
+- AC 45.5.6 (no drift) is pinned by commands, not by a test: `gen:governance-baseline:check`, `gen:tools-list-snapshot:check`, `gen:ipm:check`, the empty `git diff` of the fixtures, the generated files and `src/`, and `BOOTSTRAP_VERSION` read back. No mutation is recorded for it.
+
+**Doc-claim oracles** (`story-45-5-doc-claims.test.ts`, 36 tests, and `story-45-5-section.ts`): the `block` list against `DATA_POLICY_BLOCK_KEYS` of the built dist; the not-covered tools against `DATA_POLICY_SCOPE` (`iris_production_logs` governed under `block` only); the five procedures against the `[ SqlProc ]` methods of `ExecuteMCPv2.Setup` in the embed (`Uninstall` is none); every `Set tProps("Resource")` is `%Development`; the `EnsureUnitTestRoot` guard and its single `Set ^UnitTestRoot = $System.Util.ManagerDirectory()`; exactly one `%Prepare(` in the embedded `Sql.cls`, `%Prepare(.pQuery, 1)`; the two DW-773 sentences against the built `bootstrap.js` and `MANUAL_INSTRUCTIONS`; `AuditLogger` absent from the shared barrel and `new AuditLogger(` only in `server-base.ts`; the warning pointer from `buildDataPolicyWarning` against the README `## ` headings and slugs; the shared README exports against the built dist barrel and `index.ts`; the launcher source has no `AUTO_INSTALL`/`autoInstall`; Rule #56: every row of the README variable table is named in the section or classified in the test; every link to the section resolves (20 links in 11 documents).
+
+**Commands and results (closed-port environment, `IRIS_REQUIRE_LIVE` unset).**
+- `pnpm build`: 7 of 7. `pnpm type-check`: 13 of 13. `pnpm lint`: 7 of 7. `pnpm check:live-guards`: `79 armed files, 0 findings`.
+- `pnpm --filter @iris-mcp/shared test`: 97 files, 2903 tests passed.
+- `@iris-mcp/all`, the changed files and their neighbours (`story-45`, `epic45`, `live-gate-roster`, `live-guard-check`, `ci-`, `qa-41`, `qa-42`, `story-42-5`, `story-42-9`, `story-38-6`, `data-policy`, `docs-`, `startup-env`, `meta-package`, `gate-helper`, `agent-text`): 40 files, 1081 passed, 42 skipped (the unarmed live legs). `live-arming-guard`: 61 passed (the capstone runs in its child runs with no IRIS reached). The full `@iris-mcp/all` suite is the caller's.
+- `pnpm gen:governance-baseline:check`, `pnpm gen:tools-list-snapshot:check` (115 entries), `pnpm gen:ipm:check` and `node scripts/check-epics-sync.mjs`: unchanged and clean. `git diff --stat f4481848... -- fixtures/ bootstrap-classes.ts bootstrap-sequence.json src/`: empty. `grep` for the old pointer: no hit.
+- Armed leg, on two fresh local throwaways (port 52792, `down` afterwards, `docker ps -a --filter label=iris-mcp.owner=throwaway` printed only its header): `node scripts/throwaway-iris.mjs exec --state <file> -- npx vitest run src/__tests__/epic45-capstone-gate.test.ts` -> 21 of 21 passed. With `IRIS_REQUIRE_LIVE=1` and the five target variables but no `IRIS_THROWAWAY`, the armed leg FAILED before any write, naming the missing harness variable.
+
+**Findings for the lead.**
+- Spec error (Rule #42): mutation P4 and P5 as written (`%Prepare(.pQuery)`) do not change behavior; the default of `checkPriv` is 1. The P4 text pin goes red on it (it pins the literal `%Prepare(.pQuery, 1)`), but P5 can only go red with `%Prepare(.pQuery, 0)`. The capstone header names the working mutation for P5.
+- The armed leg FAILS (does not skip) when armed against a target that is not throwaway-shaped, so a local `prepublish` of `@iris-mcp/all` against the shared instance now fails on it instead of skipping, as the 45.1 gate would. CI runs it through `throwaway-iris.mjs exec`, which sets the shape.
+- The `Config.Namespaces` and `Security.Users` SQL projections are not usable as simple oracles through the `%SYS` Atelier route (the first returns one row per CPF section; `%SYS` must be written `%25SYS` in the helper's URL), so the armed leg reads the namespace's databases from the suite's own config route and the principals from `Security.Users`/`Security.Roles`.
+- `packages/iris-dev-mcp/README.md`: the 45.1 blockquote said "the full trust model lands in Story 45.5"; that clause now reads "is in the suite README" (the pinned 45.1 substrings are untouched).
+
 ## Auto Run Result
 
-Status: ready-for-dev
-Blocking condition: none (halted after planning, as directed).
+Status: done
+Blocking condition: none.
 
-Planning ran two throwaway probes (Probe A: DW-766; Probe B: DW-771 point 3), and both containers were removed. Lead decisions D1 to D6 and the proposed `epics.md` amendments A1 to A5 are under Design Notes. The spec implements each recommendation.
+**Planning pass (2026-11-26):** two throwaway probes (Probe A: DW-766; Probe B: DW-771 point 3), both containers removed. Lead decisions D1 to D6 and amendments A1 to A5 are under Design Notes.
+
+**Implemented change.**
+- README section `## What the safety settings protect` (before `## PHI data policy`), the link sentences on the five governance rows, the CLI intro and "Who can run it", and `dataPolicySeed` in the three cascade texts.
+- `SECURITY.md` narrowed (C-3, D3), with no email address.
+- The one product-code change: the startup warning's last sentence is now `See "What the safety settings protect" in the README.` (`packages/shared/src/data-policy.ts`); its pins, the unreleased 45.4 CHANGELOG bullet and the 45.4 changeset moved with it.
+- DW-768 roll-up: `tool_support.md`, the three client-config pages, the launcher README, `packages/shared/README.md`, the five server READMEs (link line; dev: automatic-install sentence and the appended DW-766 layout rule).
+- A CHANGELOG 45.5 section and `.changeset/story-45-5-what-the-safety-settings-protect.md` (`minor`, six packages).
+- Tests: `story-45-5-doc-claims.test.ts` and its helper `story-45-5-section.ts`; `epic45-capstone-gate.test.ts` (P1 to P4, LP-hermetic, LP-armed), added to `gateTestFiles`; `writesIn` and `customRestIn` moved to `bootstrap-guard-legs.ts`.
+
+**Files changed.** `README.md`, `SECURITY.md`, `CHANGELOG.md`, `tool_support.md`, `.changeset/` (one edited, one new), `docs/client-config/{claude-code,claude-desktop,cursor}.md`, `extensions/iris-mcp-launcher/README.md`, `packages/shared/README.md`, `packages/shared/src/data-policy.ts`, the five server READMEs, `packages/iris-mcp-all/scripts/prepublish-gate.mjs`, and under `packages/iris-mcp-all/src/__tests__/` and `packages/shared/src/__tests__/`: the new tests and helper, `bootstrap-guard-legs.ts`, `story-45-2-auto-install-orchestration.test.ts`, `story-45-4-block-seed-wire.test.ts`, `story-45-4-doc-claims.test.ts`, `data-policy-warning.test.ts`.
+
+**Review.** Four layers, 32 findings: high 0, medium 2 (one root cause), low 20, false 10. Patches applied: the `EnsureUnitTestRoot` sentence and its oracle (it also writes the install record); the unfalsifiable self-read Probe A and Probe B assertions (now read the spec's Design Notes headings); a redundant arming assertion, a leftover trivial assertion and an unused export; four AC mutation lines recorded (AC 45.5.1 to 45.5.4). Every rejected finding and its reason is in the Review Triage Log. Deferred this pass: none. DW-786 and DW-787 were harvested by the lead before this run and are not harvested again.
+
+**Follow-up review recommended: false.** Patched entries: medium 1 (one root cause), low 3 groups; none high.
+
+**Verification.** Closed-port env, `IRIS_REQUIRE_LIVE` unset. The full `@iris-mcp/all` suite: 253 files, 6719 passed, 760 skipped (the unarmed live legs). `@iris-mcp/shared`: 97 files, 2903 passed. Lint, type-check, `check:live-guards` (79 armed files, 0 findings), `gen:governance-baseline:check`, `gen:tools-list-snapshot:check` (115), `gen:ipm:check` and `check-epics-sync`: clean. The diff of the fixtures, `bootstrap-classes.ts`, `bootstrap-sequence.json` and `src/` against the story's base: empty. `BOOTSTRAP_VERSION` is `1.2.0+10.109d0129528f`. No old-pointer hit remains. The armed leg passed 21 of 21 on two throwaways (port 52792); `docker ps -a --filter label=iris-mcp.owner=throwaway` prints nothing. Mutations P1 to P6 and the pointer are recorded under `## Verification`.
+
+**Residual risks.**
+- The spec's P4/P5 mutation `%Prepare(.pQuery)` is behavior-equivalent (`checkPriv` defaults to 1). The default-suite P4 pins the literal text, and P5 goes red only with `%Prepare(.pQuery, 0)`.
+- The armed leg fails (does not skip) off-harness against a non-throwaway-shaped target. CI runs it through `throwaway-iris.mjs exec`.
+- The armed CI run URL is not recorded; the lead records it after the push.
+- DW-786 (the `ConfigureMapping` residual) is documented as today's behavior and not fixed; DW-784 is listed as under probe.

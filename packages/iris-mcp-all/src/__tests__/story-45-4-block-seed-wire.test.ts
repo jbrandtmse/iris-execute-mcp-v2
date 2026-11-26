@@ -128,14 +128,14 @@ const WARNING_LEAD =
   "their results are not redacted or withheld: ";
 const WARNING_TAIL =
   ". To turn tools off, set their governance keys to false (IRIS_GOVERNANCE or IRIS_GOVERNANCE_FILE) or set " +
-  'IRIS_DATA_POLICY=block. See "PHI data policy" in the README.';
+  'IRIS_DATA_POLICY=block. See "What the safety settings protect" in the README.';
 /** Only `redact` groups. */
 const warningOf = (groups: string): string => `${WARNING_LEAD}${groups}${WARNING_TAIL}`;
 /** Only `block` groups: no `redact` sentence and no `block` offer. */
 const blockWarningOf = (groups: string): string =>
   '[WARN] Data policy: an explicit governance key re-enabled these raw-read and code-execution tools under "block", ' +
   `so their results are not withheld: ${groups}. To turn them off again, remove those keys or set them to false in ` +
-  'the setting named. See "PHI data policy" in the README.';
+  'the setting named. See "What the safety settings protect" in the README.';
 /** Both: each group carries its own reason. */
 const mixedWarningOf = (groups: string): string =>
   "[WARN] Data policy: these raw-read and code-execution tools are enabled, so their results are not redacted or " +

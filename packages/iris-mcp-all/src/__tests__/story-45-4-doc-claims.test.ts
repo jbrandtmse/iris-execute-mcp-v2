@@ -85,7 +85,7 @@ describe("Story 45.4: the root README (AC 45.4.7)", () => {
       "a `block` group says an explicit governance key re-enabled its tools and names, after each tool, the setting that did (`from IRIS_GOVERNANCE` or `from IRIS_GOVERNANCE_FILE`, as its `configSource` `env` or `file`)",
     );
     expect(text).toContain(
-      '`[WARN] Data policy: an explicit governance key re-enabled these raw-read and code-execution tools under "block", so their results are not withheld: profile "default" (block, re-enabled by an explicit governance key): iris_sql_query from IRIS_GOVERNANCE. To turn them off again, remove those keys or set them to false in the setting named. See "PHI data policy" in the README.`',
+      '`[WARN] Data policy: an explicit governance key re-enabled these raw-read and code-execution tools under "block", so their results are not withheld: profile "default" (block, re-enabled by an explicit governance key): iris_sql_query from IRIS_GOVERNANCE. To turn them off again, remove those keys or set them to false in the setting named. See "What the safety settings protect" in the README.`',
     );
     expect(text).toContain("`allow` is not a way out, because it loosens message bodies.");
   });

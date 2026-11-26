@@ -37,10 +37,12 @@ import {
   type IrisTarget,
 } from "./process-gate-helpers.js";
 import {
+  customRestIn,
   loadEmbedded,
   runServerCalls,
   seedInstance,
   stampedEmbedded,
+  writesIn,
   type EmbeddedBootstrap,
   type ExtraCall,
   type ServerRun,
@@ -90,26 +92,6 @@ afterAll(async () => {
 });
 
 // -- Oracles ------------------------------------------------------------------------------
-
-/** The statements the spec counts as writes besides PUT, DELETE and a compile. */
-const WRITING_STATEMENT = /Setup_(Configure|ConfigureMapping|EnsureUnitTestRoot)\(/;
-
-/** Every write of a window: PUT, DELETE, a compile, or a query naming one of the three `Setup_*` configuration calls. */
-function writesIn(window: readonly FakeRequest[]): string[] {
-  return window
-    .filter((request) => {
-      if (request.method === "PUT" || request.method === "DELETE") return true;
-      const pathname = new URL(request.url, "http://fake.invalid").pathname;
-      if (request.method === "POST" && pathname.endsWith("/action/compile")) return true;
-      return request.method === "POST" && pathname.endsWith("/action/query") && WRITING_STATEMENT.test(request.body);
-    })
-    .map((request) => `${request.method} ${request.url}`);
-}
-
-/** The requests of a window to the custom REST service. */
-function customRestIn(window: readonly FakeRequest[]): string[] {
-  return window.filter((request) => request.url.toLowerCase().startsWith("/api/executemcp/")).map((request) => `${request.method} ${request.url}`);
-}
 
 /** The requests of a window that reach the Atelier work queue, or run `Setup_EnsureUnitTestRoot` (which `iris_execute_tests` sends after its guard read). */
 function workIn(window: readonly FakeRequest[]): string[] {

@@ -126,6 +126,12 @@ const gateTestFiles = [
   // 8e7aad87 baseline fixture. Both refuse to skip under IRIS_REQUIRE_LIVE when a built dist is missing or stale; neither contacts IRIS (local 503 stub).
   "src/__tests__/story-45-4-block-seed-wire.test.ts",
   "src/__tests__/story-45-4-back-compat.test.ts",
+  // Story 45.5: the Epic 45 capstone (issue #1, points 1 to 4) on the BUILT dev, interop and data dists. Its hermetic legs use a local 503
+  // listener and a stateful fake Atelier (no IRIS) and refuse to skip under IRIS_REQUIRE_LIVE when a built dist is stale or missing. Its armed
+  // least-privilege leg writes only the disposable user QaEpic45CapLp, the role QaEpic45CapRole and the tables ExecuteMCPv2_Temp.QaEpic45CapGranted
+  // and ...QaEpic45CapDenied (with the classes IRIS generates for them), runs only against a throwaway that scripts/throwaway-iris.mjs started,
+  // and removes all of them, asserting that nothing named QaEpic45Cap is left.
+  "src/__tests__/epic45-capstone-gate.test.ts",
   // `iris_doc_edit` and the governance parent keys over real stdio JSON-RPC against the BUILT iris-dev-mcp dist:
   // writes only the disposable ExecuteMCPv2.Temp.QaStory384WireEdit.cls and ...WireStore.cls (persistent, compiled) documents.
   "src/__tests__/story-38-4-qa-doc-edit-wire-gate.test.ts",

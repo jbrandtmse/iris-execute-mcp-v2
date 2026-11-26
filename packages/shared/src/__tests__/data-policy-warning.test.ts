@@ -18,25 +18,25 @@ const LEAD =
   "their results are not redacted or withheld: ";
 const TAIL =
   ". To turn tools off, set their governance keys to false (IRIS_GOVERNANCE or IRIS_GOVERNANCE_FILE) or set " +
-  'IRIS_DATA_POLICY=block. See "PHI data policy" in the README.';
+  'IRIS_DATA_POLICY=block. See "What the safety settings protect" in the README.';
 
 /** The three variants of the line, word for word (decision #170 item 2 as amended for #172). */
 const REDACT_ONLY_LINE =
   'Data policy: "redact" covers message bodies only, so these raw-read and code-execution tools are enabled and ' +
   'their results are not redacted or withheld: profile "default" (redact): iris_sql_query, iris_global_get. ' +
   "To turn tools off, set their governance keys to false (IRIS_GOVERNANCE or IRIS_GOVERNANCE_FILE) or set " +
-  'IRIS_DATA_POLICY=block. See "PHI data policy" in the README.';
+  'IRIS_DATA_POLICY=block. See "What the safety settings protect" in the README.';
 const BLOCK_ONLY_LINE =
   'Data policy: an explicit governance key re-enabled these raw-read and code-execution tools under "block", so ' +
   'their results are not withheld: profile "prod" (block, re-enabled by an explicit governance key): ' +
   "iris_sql_query from IRIS_GOVERNANCE, iris_global_get from IRIS_GOVERNANCE_FILE. To turn them off again, remove " +
-  'those keys or set them to false in the setting named. See "PHI data policy" in the README.';
+  'those keys or set them to false in the setting named. See "What the safety settings protect" in the README.';
 const MIXED_LINE =
   "Data policy: these raw-read and code-execution tools are enabled, so their results are not redacted or withheld: " +
   'profile "default" (redact, which covers message bodies only): iris_sql_query, iris_global_get; ' +
   'profile "prod" (block, re-enabled by an explicit governance key): iris_sql_query from IRIS_GOVERNANCE. ' +
   "To turn tools off, set their governance keys to false (IRIS_GOVERNANCE or IRIS_GOVERNANCE_FILE) or set " +
-  'IRIS_DATA_POLICY=block. See "PHI data policy" in the README.';
+  'IRIS_DATA_POLICY=block. See "What the safety settings protect" in the README.';
 
 /** A `reEnabledBy` answer from a table of `profile -> key -> configSource`. */
 const SOURCES = (table: Record<string, Record<string, string>>) => (profile: string, key: string) => table[profile]?.[key];
@@ -137,7 +137,7 @@ describe("buildDataPolicyWarning", () => {
     expect(line).toBe(
       'Data policy: an explicit governance key re-enabled these raw-read and code-execution tools under "block", so ' +
         'their results are not withheld: profile "prod" (block, re-enabled by an explicit governance key): iris_sql_query. ' +
-        'To turn them off again, remove those keys or set them to false in the setting named. See "PHI data policy" in the README.',
+        'To turn them off again, remove those keys or set them to false in the setting named. See "What the safety settings protect" in the README.',
     );
   });
 
@@ -231,7 +231,7 @@ describe("buildDataPolicyWarning", () => {
       () => true,
     ) as string;
     expect(line).toContain("(redact, which covers message bodies only)");
-    expect(line).toContain('See "PHI data policy" in the README.');
+    expect(line).toContain('See "What the safety settings protect" in the README.');
     expect(line).toContain("governance keys");
     expect(line).toContain("IRIS_DATA_POLICY=block");
     // No way out through the loosest policy, in any spelling.

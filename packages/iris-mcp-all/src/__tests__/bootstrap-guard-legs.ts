@@ -36,6 +36,7 @@ import { parseBootstrapMarker, type StampedBootstrapMarker } from "../../../shar
 import { verifyCompiled } from "../../../shared/src/bootstrap.js";
 import { IrisHttpClient } from "../../../shared/src/http-client.js";
 import { isLiveArmed } from "../../../shared/src/test-helpers/live-target.js";
+import type { FakeRequest } from "./stateful-fake-atelier.js";
 
 /** The document that carries the version marker. */
 export const SETUP_DOC = "ExecuteMCPv2.Setup.cls";
@@ -489,6 +490,29 @@ export async function runServer(
   extraEnv: Record<string, string> = {},
 ): Promise<string> {
   return (await runServerCalls(via, ctx, extraEnv)).stderr;
+}
+
+/** The statements the Story 45.2 spec counts as writes besides PUT, DELETE and a compile. */
+const WRITING_STATEMENT = /Setup_(Configure|ConfigureMapping|EnsureUnitTestRoot)\(/;
+
+/**
+ * Every write of a window of the stateful fake's requests: PUT, DELETE, a compile, or a query naming one of the three
+ * `Setup_*` configuration calls. Shared by the Story 45.2 orchestration test and the Epic 45 capstone (one oracle).
+ */
+export function writesIn(window: readonly FakeRequest[]): string[] {
+  return window
+    .filter((request) => {
+      if (request.method === "PUT" || request.method === "DELETE") return true;
+      const pathname = new URL(request.url, "http://fake.invalid").pathname;
+      if (request.method === "POST" && pathname.endsWith("/action/compile")) return true;
+      return request.method === "POST" && pathname.endsWith("/action/query") && WRITING_STATEMENT.test(request.body);
+    })
+    .map((request) => `${request.method} ${request.url}`);
+}
+
+/** The requests of a window of the stateful fake's requests to the custom REST service. */
+export function customRestIn(window: readonly FakeRequest[]): string[] {
+  return window.filter((request) => request.url.toLowerCase().startsWith("/api/executemcp/")).map((request) => `${request.method} ${request.url}`);
 }
 
 /** One extra tool call of {@link runServerCalls}, made after the `iris_server_info` read, with `server` added for the `other` path. */

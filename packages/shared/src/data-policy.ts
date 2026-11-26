@@ -322,7 +322,7 @@ export function buildDataPolicyWarning(
     ? "To turn tools off, set their governance keys to false (IRIS_GOVERNANCE or IRIS_GOVERNANCE_FILE) or set " +
       "IRIS_DATA_POLICY=block."
     : "To turn them off again, remove those keys or set them to false in the setting named.";
-  return `${lead}${parts.join("; ")}. ${wayOut} See "PHI data policy" in the README.`;
+  return `${lead}${parts.join("; ")}. ${wayOut} See "What the safety settings protect" in the README.`;
 }
 
 /** What a policy did over one request: the policy and how many bodies were shown redacted or withheld. */

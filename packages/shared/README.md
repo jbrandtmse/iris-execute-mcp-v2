@@ -22,6 +22,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`RequestOptions`** (type) -- Options for HTTP requests: method, path, body, headers, query parameters, and an optional `signal` (Story 43.3). `RequestOptions.signal` is an `AbortSignal`: an already aborted signal sends no request and rejects with an `IrisConnectionError` of code `CANCELLED`, and an abort while the request is in flight aborts it and rejects with the same code. `McpServerBase` passes the signal of a call off the wire, so a call the client cancels (`notifications/cancelled`) aborts its IRIS requests.
 - **`AtelierEnvelope`** (type) -- Parsed Atelier REST API response envelope with status, result, and console output.
 - **`HeadResponse`** (type) -- Response type for HEAD requests: status code and headers.
+- **`recordSideRefusal()`** / **`SideRefusalRecorder`** (type) -- A view of a client that records, in a per-call recorder, the first `IrisSideNotInstalledError` one of its requests raises, and from then on refuses every later request of the call before it is sent. A handler that catches the error and goes on therefore sends nothing more, and the framework can still answer the call with the `IRIS_SIDE_NOT_INSTALLED` refusal (Story 45.2).
 - **`loadConfig()`** -- Loads connection configuration from environment variables (`IRIS_HOST`, `IRIS_PORT`, etc.).
 
 ### MCP Server Base
@@ -56,6 +57,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`IrisConnectionError`** -- Thrown when the IRIS server cannot be reached (network errors, DNS failures).
 - **`IrisApiError`** -- Thrown when the IRIS server returns an HTTP error (4xx/5xx). Includes statusCode and response body.
 - **`McpProtocolError`** -- Thrown for MCP protocol-level issues (invalid tool calls, schema validation failures).
+- **`IrisSideNotInstalledError`** / **`IrisSideRefusal`** (type) -- Thrown by `IrisHttpClient` for a request to the custom REST service (`/api/executemcp/`) of a profile whose IRIS side is not installed while the automatic install is off (Story 45.2). `IrisSideRefusal` is the refusal's `{text, fields}`. The framework turns the error into the `IRIS_SIDE_NOT_INSTALLED` refusal even when a tool handler caught it.
 
 ### Bootstrap
 
@@ -67,10 +69,21 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`compileAndVerify()`** -- Compiles classes (default: every embedded bootstrap class) and checks that each one compiled, returning `{ notCompiled, irisErrors, envelope? }`: `notCompiled` lists the class documents, in list order, that the check does not confirm. A compile IRIS answered with a status error is not thrown: its texts are `irisErrors`. A non-empty `irisErrors` is a failed compile even when `notCompiled` is empty; the texts are context for a person and never decide which classes failed. A compile request that gets no Atelier answer is rethrown unchanged, and a check that cannot run throws.
 - **`verifyCompiled()`** -- The check: one `action/query` over `%Dictionary.ClassDefinition` joined to `%Dictionary.CompiledClass` and one `docnames` read per package root. A class counts as compiled only with a compiled class, no `ClassCompileError`, and IRIS's own up-to-date flag (`upd`) true. It reads no localized text and refuses a name that does not end in `.cls`.
 - **`configureWebApp()`** -- Creates or updates the web application for the custom REST endpoint.
+- **`buildIrisSideRefusal()`** -- Builds the refusal a profile's client carries after a bootstrap that left the custom REST service unavailable while the automatic install is off: the text and the `structuredContent` fields of `IRIS_SIDE_NOT_INSTALLED` (`profile`, `namespace`, `found`, `deployedVersion` for a `stale` side, `requiredVersion` and `autoInstallSource`). Neither carries a credential.
 - **`MANUAL_INSTRUCTIONS`** -- Instructions for manual bootstrap when auto-bootstrap fails.
 - **`getBootstrapClasses()`** -- Returns the list of ObjectScript classes to deploy.
 - **`BOOTSTRAP_CLASSES`** -- Array of bootstrap class definitions (name + content).
 - **`BootstrapClass`** / **`BootstrapResult`** (types) -- Type definitions for bootstrap operations.
+
+### Automatic Install (Story 45.2)
+
+`auto-install.ts` implements the setting that decides whether a server installs, upgrades and repairs the IRIS side when it connects. Resolution per profile, first match wins: the `IRIS_PROFILES` entry's `autoInstall`, then `IRIS_AUTO_INSTALL`, then the read-only preset (forces it off), then on. See [Installs nothing on IRIS](../../README.md#read-only-mode--point-it-at-production-with-one-environment-variable).
+
+- **`AUTO_INSTALL_ENV_VAR`** -- The variable name, `"IRIS_AUTO_INSTALL"`.
+- **`parseOperatorAutoInstall()`** -- Reads `IRIS_AUTO_INSTALL`: `true` or `false` in any letter case, `undefined` when unset or empty; any other value throws, naming the variable.
+- **`resolveAutoInstall()`** -- Resolves one profile to `{autoInstall, source}` from its own value, the operator value and the preset.
+- **`applyAutoInstall()`** -- Resolves every profile of a registry in place. An explicit "on" together with the read-only preset throws, naming both settings.
+- **`AutoInstallSource`** / **`AutoInstallCarrier`** (types) -- The channel that supplied a profile's value (`IRIS_PROFILES`, `IRIS_AUTO_INSTALL`, `IRIS_GOVERNANCE_PRESET` or `default`), and the part of a profile the resolution reads and writes.
 
 ### Logging
 
@@ -102,7 +115,11 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`decideBodyPolicy()`** / **`BodyPolicyPlan`** -- The policy's decision for one body from its kind, whether it can be read and the policy (`none`, `blocked` with a fixed reason, or `redact`); the resend preview and `iris_message_body` both decide through it.
 - **`redactHl7()`** -- Fail-closed ER7 redaction: keeps only the fields of `HL7_KEEP_FIELDS` and redacts every other field of every segment, preserving segment order, terminators and separators. It refuses a text it cannot read and never throws. `iris_message_body` shows its output under `redact`.
 - **`ToolDefinition.dataPolicy`** (`actions`, `phiInputs`) -- Declares that a tool is under the policy and which of its inputs carry PHI; `McpServerBase` checks the declaration at registration, and the audit log redacts the declared inputs under `redact` and `block`.
+- **`DATA_POLICY_BLOCK_KEYS`** / **`DATA_POLICY_BLOCK_KEYS_AS_OF`** -- The raw-read and code-execution governance keys that `block` seeds disabled (Story 45.4), declared once and in order, and the date the set is exhaustive as of.
+- **`dataPolicySeed()`** -- The `block` seed of one governance key: `false` when the profile's policy is `block` and the key is covered, else `undefined` (pass-through to the next cascade layer, so `redact`, `allow` and an unset policy change nothing).
+- **`buildDataPolicyWarning()`** / **`DataPolicyWarningProfile`** (type) -- The one startup `[WARN]` line that names, per `redact` or `block` profile, the covered tools that are visible and enabled; `undefined` when none qualifies. It never carries a value and never offers `allow`. It ends `See "What the safety settings protect" in the README.`
 - **`REFUSAL_CODES.DATA_POLICY_BLOCKED`** -- The refusal for body data a policy withheld.
+- **`REFUSAL_CODES.IRIS_SIDE_NOT_INSTALLED`** -- The refusal for a custom-REST call to a profile whose IRIS side is missing or older while the automatic install is off, or whose web application answers 404 when the probe read `unconfigured` (Story 45.2). `structuredContent` is `{code, profile, namespace, found, deployedVersion?, requiredVersion, autoInstallSource}` as `buildIrisSideRefusal` builds it. The audit log records it as `error`, not `denied`.
 - **`REFUSAL_CODES.MONITOR_BUSY`** -- The refusal for a run that needs the instance-wide Line-by-Line monitor while a session is active (Story 40.1).
 - **`REFUSAL_CODES.PRODUCTION_BUSY`** -- The refusal for a run that includes `%UnitTest.TestProduction` tests while a different production runs in the namespace, or while its state cannot be read (Story 40.3).
 - **`REFUSAL_CODES.CONFIRMATION_DECLINED`** -- The refusal for a gate whose confirmation dialog the person declined, dismissed, or accepted without ticking Confirm (Story 43.3). `structuredContent` is `{code, action, response}` with `response` `decline`, `cancel` or `unconfirmed`; nothing was changed, and the person is not asked again for that call. The audit entry is `denied` with `denyReason: "CONFIRMATION_DECLINED"`.

@@ -26,8 +26,21 @@ In scope:
 - the IPM package `iris-execute-mcp-v2`.
 
 The authorization model is IRIS's own: the servers act as the IRIS user they connect with, and what that user may do is decided by
-IRIS. A finding that depends on giving a user more privileges than it needs is a configuration question, not a vulnerability, but a
-way around the governance controls of the servers (which actions are enabled, the data policy, the confirmation gates) is in scope.
+IRIS.
+
+The servers' safety settings (governance and the presets, the confirmation dialogs, the audit log and the data policy) guard the agent
+that uses the servers, not the IRIS account. Anyone who holds the account can call IRIS directly, and none of those settings applies to
+that call. [What the safety settings protect](README.md#what-the-safety-settings-protect) says what each one covers and which account
+to connect with.
+
+Also in scope: a way to get past one of those controls through the servers' own tools, for example a tool call that runs an action
+governance turned off, or that returns data the data policy should withhold.
+
+Out of scope:
+
+- using the IRIS account directly (the REST service, the Atelier API or a terminal), which IRIS privileges govern;
+- a finding that depends on giving the account more privileges than it needs;
+- a residual that [What the safety settings protect](README.md#what-the-safety-settings-protect) already documents.
 
 ## How a vulnerability is handled
 
