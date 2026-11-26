@@ -157,6 +157,11 @@ export interface StatefulFakeAtelier {
    */
   isConfiguredReadsFalse: boolean;
   /**
+   * Set to `true` to model an account without `%Admin_Manage` on the install path (Story 45.5 QA, DW-773): `Setup_Configure(...)` answers
+   * an HTTP 500 error envelope (`<PROTECT>`) and leaves `state.configured` as it was. `Setup_ConfigureMapping` is unaffected.
+   */
+  configureFails: boolean;
+  /**
    * Set to `true` to model a web application that is NOT registered: every request under `/api/executemcp/` answers the Web
    * Gateway's HTML 404 page, byte for byte as captured on IRIS for Health 2026.2 with `/api/executemcp/v2` deleted (an
    * installed web application answers an unknown route with the JSON envelope instead, which is what the fake does when this is off).
@@ -265,6 +270,7 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
   let failCompileCheck: StatefulFakeAtelier["failCompileCheck"];
   let failGuardRead = false;
   let isConfiguredReadsFalse = false;
+  let configureFails = false;
   let webAppAbsent = false;
   let versionQueries = 0;
   const visibleClasses = new Set(options.visibleClasses ?? []);
@@ -332,6 +338,8 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
       } else if (statement.includes("Setup_ConfigureMapping")) {
         state.mapped = true;
         reply(res, 200, envelope({ content: [{ MappingResult: 1 }] }));
+      } else if (statement.includes("Setup_Configure") && configureFails) {
+        reply(res, 500, errorEnvelope("ERROR #5002: ObjectScript error: <PROTECT>", 5002));
       } else if (statement.includes("Setup_Configure")) {
         state.configured = true;
         reply(res, 200, envelope({ content: [{ ConfigureResult: 1 }] }));
@@ -574,6 +582,12 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
     },
     set isConfiguredReadsFalse(value) {
       isConfiguredReadsFalse = value;
+    },
+    get configureFails() {
+      return configureFails;
+    },
+    set configureFails(value) {
+      configureFails = value;
     },
     get webAppAbsent() {
       return webAppAbsent;
