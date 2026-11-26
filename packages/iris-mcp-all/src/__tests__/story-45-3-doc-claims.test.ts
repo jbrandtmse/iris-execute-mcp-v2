@@ -125,6 +125,110 @@ describe("Story 45.3: the README section 'Removing the IRIS Side'", () => {
   });
 });
 
+/**
+ * QA pins (Rule #19, #36, #59). Each README sentence below makes a claim about the command's behavior; each is pinned together with the oracle that
+ * can fail it (the gate leg that runs the claim, or the class source), so a sentence cannot drift from what the command does. A pin on a sentence
+ * that a later wording change touches is meant to move with it: the oracle half must still hold.
+ */
+describe("Story 45.3 QA: the README claims against their oracles", () => {
+  const gateSource = read("packages/iris-mcp-all/src/__tests__/story-45-3-uninstall-round-trip-live-gate.test.ts");
+  const removing = squash(section(readme, 3, "Removing the IRIS Side"));
+  const uninstallComment = (() => {
+    const start = setup.indexOf("/// Remove the IRIS side of the suite");
+    const end = setup.indexOf("ClassMethod Uninstall(");
+    return start >= 0 && end > start ? squash(setup.slice(start, end)) : "";
+  })();
+  const changelogEntry = (() => {
+    const start = changelog.indexOf("## [Unreleased] - Story 45.3: Careful Uninstall of the IRIS Side");
+    return squash(changelog.slice(start, changelog.indexOf("\n## ", start + 1)));
+  })();
+  const changeset = existsSync(path.join(REPO_ROOT, changesetPath)) ? squash(read(changesetPath)) : "";
+
+  it("never promises that the command is idempotent: after a full removal the class is gone, so the command cannot run again (the gate pins <CLASS DOES NOT EXIST>)", () => {
+    expect(uninstallComment, "the doc comment of Uninstall was found").toContain("A repeat run removes nothing more");
+    for (const [name, text] of [["README section", removing], ["CHANGELOG entry", changelogEntry], ["changeset", changeset], ["Uninstall doc comment", uninstallComment]] as const) {
+      expect(text, `${name} does not claim idempotence`).not.toMatch(/idempoten/i);
+    }
+    expect(removing).toContain("A repeat run removes nothing more while a copy of the `Setup` class remains (a copy left for IPM, or a foreign one)");
+    expect(removing).toContain("after a full removal the class is gone, so there is nothing to run");
+    expect(uninstallComment).toContain("after a full removal the class is gone, so there is nothing to run");
+    // The oracles: the plain leg's second terminal call raises <CLASS DOES NOT EXIST> and changes nothing; the IPM-owned leg's second run keeps the class
+    // and returns OK while removing nothing more.
+    expect(gateSource).toContain('expect(second).toContain("CLASS DOES NOT EXIST")');
+    expect(gateSource).toMatch(/a second run removes nothing more[\s\S]{0,200}statusOk[\s\S]{0,120}toBe\(true\)/);
+  });
+
+  it("warns that deleting %ALL removes every mapping in it, in the README, the CHANGELOG and the report the command prints", () => {
+    expect(removing).toContain("**Deleting `%ALL` removes every mapping in it, not only ours.**");
+    expect(changelogEntry).toContain("the warning that deleting `%ALL` removes every mapping in it");
+    expect(setup).toContain("This deletes %ALL together with every mapping in it, so check what else is mapped there first");
+    expect(gateSource, "the no-record leg asserts the report line that carries the warning").toContain("This deletes %ALL together with every mapping in it, so check what else is mapped there first");
+  });
+
+  it("never says an EXECUTE grant protects the Setup methods, in the README, the CHANGELOG or the changeset; the boundary is the account's privileges", () => {
+    for (const [name, text] of [["README section", removing], ["CHANGELOG entry", changelogEntry], ["changeset", changeset]] as const) {
+      const claims = text.split(/(?<=[.:;])\s/).filter((sentence) => /EXECUTE/.test(sentence) && /\b(protects?|guards?|restricts?|limits?|secures?|protection)\b/i.test(sentence));
+      expect(
+        claims.filter((sentence) => !/not an `EXECUTE` grant|Do not rely on an SQL `EXECUTE` grant|is not a protection|never a protection|not a protection/.test(sentence)),
+        `${name} has no sentence that says EXECUTE protects the Setup methods`,
+      ).toEqual([]);
+    }
+    expect(changelogEntry).toContain("an `EXECUTE` grant is not a protection for the `Setup` methods");
+  });
+
+  it("says a failure while it reads one namespace does not stop the others, so the running copy can already be deleted and the records stay (the failing-step leg)", () => {
+    expect(removing).toContain("A failure while it reads one namespace does not stop the others, so the command can already have deleted the classes it runs from; the records stay");
+    expect(removing).toContain("put the install back (start a server with the automatic install on, or load the package) and run the command again");
+    expect(gateSource).toContain("the independent steps ran: %ALL and ^UnitTestRoot are gone");
+    expect(gateSource).toContain('"Left: install records (a step failed, so the records stay and the command can run again)"');
+  });
+
+  it("says the last line is the running-server warning, and the source prints it last", () => {
+    expect(removing).toContain("Its last line repeats the warning above about running servers.");
+    const body = setup.slice(setup.indexOf("ClassMethod ReportLines("));
+    expect(body.slice(0, body.indexOf("Quit tLines")).trimEnd().endsWith("Do tLines.%Push(..ServerLine())")).toBe(true);
+    expect(gateSource).toContain("SERVER_LINE,\n    ]");
+  });
+
+  it("says a preset ^UnitTestRoot is not mentioned, and the gate leg pins that report", () => {
+    expect(removing).toContain("except the preset `^UnitTestRoot`, which it does not mention, because the install never touched it");
+    expect(gateSource).toContain("^UnitTestRoot set before the install: the value survives and is not reported");
+  });
+
+  it("says an account without %Admin_Manage gets a Failed: line for each step it cannot do and nothing is removed (the least-privilege leg asserts status, items, text and snapshot)", () => {
+    expect(removing).toContain("an account without `%Admin_Manage` gets a `Failed:` line for each step it cannot do and nothing is removed");
+    // The leg that proves it asserts all four: an error status, the failed items, IRIS's text on each, and an unchanged snapshot (records included).
+    const leg = gateSource.slice(gateSource.indexOf('leg("least privilege:'));
+    expect(leg).toContain("expect(noSys.statusOk).toBe(false)");
+    expect(leg).toContain('expect(noSys.report?.failed.map((entry) => entry["item"]))');
+    expect(leg).toContain('toContain("PROTECT")');
+    expect(leg).toContain('expect(differences(installed, snapshot()), "the instance is unchanged").toEqual([])');
+  });
+
+  it("says its custom-REST tools answer IRIS_SIDE_NOT_INSTALLED after a removal with the automatic install off, a code the server defines", () => {
+    expect(removing).toContain("its custom-REST tools answer `IRIS_SIDE_NOT_INSTALLED` until someone reinstalls");
+    expect(read("packages/shared/src/refusals.ts")).toContain("IRIS_SIDE_NOT_INSTALLED");
+  });
+
+  it("says the record is written from 1.3.0, which is the next minor of the shared package while the changeset is pending", () => {
+    expect(removing).toContain("From `1.3.0` a new install writes down what it created");
+    // The version oracle holds only while the changeset is pending: `changeset version` consumes it and moves the package version (the
+    // story-42-1 "after the release" simulation also rewrites versions), so after the release the sentence alone is pinned.
+    if (existsSync(path.join(REPO_ROOT, changesetPath))) {
+      const [major, minor] = (JSON.parse(read("packages/shared/package.json")) as { version: string }).version.split(".").map(Number) as [number, number];
+      expect(`${major}.${minor + 1}.0`, "the pending minor changeset makes the next release 1.3.0").toBe("1.3.0");
+    }
+  });
+
+  it("gives the manual commands the report prints, character for character (README, source and gate agree)", () => {
+    expect(removing).toContain('Do ##class(Config.Namespaces).Delete("%ALL")');
+    expect(setup).toContain('in %SYS: Do ##class(Config.Namespaces).Delete(""%ALL""). This deletes %ALL together');
+    expect(gateSource).toContain('in %SYS: Do ##class(Config.Namespaces).Delete("%ALL"). This deletes %ALL together');
+    expect(removing).toContain("Kill ^UnitTestRoot");
+    expect(gateSource).toContain("in USER: Kill ^UnitTestRoot");
+  });
+});
+
 describe("Story 45.3: the claims against the class source", () => {
   it("the report lines the README describes are the ones Setup.cls prints, and its running-server line is the one it quotes", () => {
     for (const prefix of ['"Removed: "', '"Left: "', '"Failed: "', '". To remove it by hand: "']) expect(setup, prefix).toContain(prefix);

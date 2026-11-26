@@ -21,7 +21,8 @@
  * namespaces with a shadowed copy, a `dev`-marked copy in a second namespace (ownership), a dev Setup over a recorded install and a
  * marker-less copy (ownership), IPM-owned (the guard stub) with a second
  * run, a failing step (a namespace whose only database is dismounted), the SQL path (`SELECT ExecuteMCPv2.Setup_Uninstall()` through the
- * built server's `iris_sql_query` fails and removes nothing), and an account without `%Admin_Manage`.
+ * built server's `iris_sql_query` fails and removes nothing), an account without `%Admin_Manage`, the return values of the five install
+ * methods through the SQL route (AC 45.3.8), and a failing install step that writes no record node (AC 45.3.2).
  */
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -251,6 +252,17 @@ async function putClass(ns: string, name: string, text: string): Promise<void> {
   if (compiled.status !== 200) throw new Error(`compiling ${name} in ${ns}: HTTP ${compiled.status} ${compiled.text.slice(0, 300)}`);
 }
 
+/** The value of the one column `V` of the one row an Atelier SQL query returns (the route the bootstrap reads the install methods through). */
+async function sqlValue(query: string, parameters: unknown[] = []): Promise<unknown> {
+  const response = await atelier("USER", "POST", "action/query", { query, parameters });
+  expect(response.status, response.text).toBe(200);
+  const body = JSON.parse(response.text) as { status?: { errors?: unknown[] }; result?: { content?: Array<Record<string, unknown>> } };
+  expect(body.status?.errors ?? [], `${query} raised: ${response.text.slice(0, 300)}`).toEqual([]);
+  const row = body.result?.content?.[0];
+  expect(row, `${query} returned a row`).toBeDefined();
+  return (row as Record<string, unknown>)["V"];
+}
+
 beforeAll(async () => {
   if (SKIP_REASON !== undefined) return;
   target = irisTargetFromEnv();
@@ -320,7 +332,10 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     // The call an IPM reinstall makes through the SQL route: a repeated install never turns "created" into "found".
     const again = await atelier("USER", "POST", "action/query", { query: "SELECT ExecuteMCPv2.Setup_ConfigureMapping(?) AS MappingResult", parameters: ["USER"] });
     expect(again.status, again.text).toBe(200);
-    expect(snapshot()["record USER"], "the record still says created").toContain("all=created;");
+    const repeated = snapshot()["record USER"] as string;
+    expect(repeated, "the record still says created").toContain("all=created;");
+    expect(repeated, "the repeated install did not turn the mapping node into found either (its early-exit branch writes found)").toContain("mapping=created;");
+    expect(repeated, "nor did it change the mapping's recorded database").toContain("database=USER");
 
     const run = runOneLiner();
     expect(run.lines).toEqual([WEBAPP_LINE, MAPPING_LINE, classesLine("USER", embedded.classes.size), "Removed: %ALL", "Removed: ^UnitTestRoot (USER)", "Removed: install record (USER)", SERVER_LINE]);
@@ -630,6 +645,67 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     expect(result?.isError, `the SQL tool reports an error: ${JSON.stringify(result)}`).toBe(true);
     expect(differences(installed, snapshot()), "nothing was removed").toEqual([]);
     expect(runOneLiner().lines).toContain(WEBAPP_LINE);
+  });
+
+  leg("back-compat (AC 45.3.8): the five install methods return, through the SQL route the bootstrap uses, what they returned before the record existed, and a repeat call changes nothing", async () => {
+    await install();
+    const installed = snapshot();
+
+    // Every value is read the way the bootstrap reads it: SELECT ExecuteMCPv2.Setup_<Method>(...) through Atelier action/query.
+    // The expected wire values were captured from the live throwaway on the baseline build (Rule #36): an OK %Status arrives as the string "1"
+    // and a %Boolean as `true`. `expect.soft` keeps every method's check running, so a change to one method's return value names that method alone.
+    expect.soft(await sqlValue("SELECT ExecuteMCPv2.Setup_Configure(?) AS V", ["USER"]), "Configure returns an OK status").toBe("1");
+    expect.soft(await sqlValue("SELECT ExecuteMCPv2.Setup_ConfigureMapping(?) AS V", ["USER"]), "ConfigureMapping returns an OK status, also when the mapping exists").toBe("1");
+    expect.soft(await sqlValue("SELECT ExecuteMCPv2.Setup_IsConfigured() AS V"), "IsConfigured returns true while the web application is registered").toBe(true);
+    expect.soft(await sqlValue("SELECT ExecuteMCPv2.Setup_EnsureUnitTestRoot() AS V"), "EnsureUnitTestRoot returns the value already set").toBe(installed["utr USER"]);
+    expect.soft(await sqlValue("SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS V"), "GetBootstrapVersion returns the class's marker").toBe(embedded.marker);
+    expect(differences(installed, snapshot()), "calling the five methods again changes nothing: not the record, not the web application, not ^UnitTestRoot").toEqual([]);
+
+    // EnsureUnitTestRoot on an undefined global sets it, returns what it set, and records the value it set.
+    terminal("USER", ["Kill ^UnitTestRoot"]);
+    const returned = await sqlValue("SELECT ExecuteMCPv2.Setup_EnsureUnitTestRoot() AS V");
+    expect.soft(returned, "EnsureUnitTestRoot returns the value it set").toBe(installed["utr USER"]);
+    expect.soft(snapshot()["utr USER"], "and the global holds it").toBe(returned);
+    expect(differences(installed, snapshot()), "the instance is back to the installed state, record included").toEqual([]);
+  });
+
+  leg("a step that fails writes no record node: an account that cannot register the web application or create %ALL leaves the record empty, and the same calls as the superuser write it", async () => {
+    await install();
+    terminal("%SYS", [
+      'Set $NAMESPACE="%SYS"',
+      'Set sc=##class(Security.Roles).Create("uninstalllprole2","uninstall gate account","%Development:U,%DB_USER:RW,%DB_IRISSYS:R,%DB_IRISLIB:R,%DB_IRISTEMP:RW,%DB_IRISLOCALDATA:RW")',
+      'Set sc=##class(Security.Users).Create("uninstalllp2","uninstalllprole2","Pa55word!lp2")',
+      // Take the install away as the superuser: no web application, no mapping, no %ALL, no record (the classes stay in USER).
+      `Set sc=##class(Security.Applications).Delete("${WEBAPP}")`,
+      'Set sc=##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")',
+      'Set sc=##class(Config.Namespaces).Delete("%ALL")',
+      'Set $NAMESPACE="USER" Kill ^ExecuteMCPv2.InstallRecord',
+    ]);
+    const before = snapshot();
+    expect(before["webapp"]).toBe("0");
+    expect(before["%ALL"]).toBe("0");
+    expect(before["record USER"], "no record before the calls").toMatch(/^0\b/);
+
+    // lp2 reads %SYS but is not allowed to change it: both steps fail with IRIS's own privilege error.
+    const output = terminal("USER", [
+      'Set ok=$System.Security.Login("uninstalllp2","Pa55word!lp2")',
+      'Write "LOGIN-AS=",$Username,!',
+      'Write "CONFIGURE-OK=",$System.Status.IsOK(##class(ExecuteMCPv2.Setup).Configure("USER")),!',
+      'Write "MAPPING-OK=",$System.Status.IsOK(##class(ExecuteMCPv2.Setup).ConfigureMapping("USER")),!',
+    ]);
+    const field = (name: string): string => (outputLines(output).find((line) => line.startsWith(`${name}=`)) ?? "").slice(name.length + 1);
+    expect(field("LOGIN-AS"), "the terminal logged in as the account").toBe("uninstalllp2");
+    expect(field("CONFIGURE-OK"), "Configure failed for the account (the premise of this leg)").toBe("0");
+    expect(field("MAPPING-OK"), "ConfigureMapping failed for the account (the premise of this leg)").toBe("0");
+    const after = snapshot();
+    expect(after["webapp"], "no web application was registered").toBe("0");
+    expect(after["%ALL"], "%ALL was not created").toBe("0");
+    expect(after["record USER"], "a step that failed wrote no node of the record, not even the format version").toMatch(/^0\b/);
+    expect(differences(before, after), "nothing changed").toEqual([]);
+
+    // The oracle can vary: the superuser's Configure succeeds and writes the node.
+    terminal("USER", ['Set sc=##class(ExecuteMCPv2.Setup).Configure("USER")']);
+    expect(snapshot()["record USER"], "a step that succeeded wrote its node").toContain(`deployed=${embedded.marker};`);
   });
 
   leg("least privilege: an account without %Admin_Manage refuses cleanly, each impossible step a failed item with IRIS's text, and nothing is removed", async () => {

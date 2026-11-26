@@ -115,6 +115,11 @@ describe("the workflow: the four steps of the uninstall container, last in the t
     ["the state file not handed to the gate", () => mutate(text, SUITE_STEP, SUITE_STEP.replace(`THROWAWAY_STATE_FILE=${STATE} `, "")), /declared step is not in the workflow.*ci-live-suite\.mjs uninstall-round-trip/],
     ["the container started on another port", () => mutate(text, UP_STEP, UP_STEP.replace("52790", "52791")), /declared step is not in the workflow.*throwaway-uninstall/],
     ["the container started in HSCUSTOM", () => mutate(text, UP_STEP, UP_STEP.replace("--namespace USER", "--namespace HSCUSTOM")), /declared step is not in the workflow.*throwaway-uninstall/],
+    [
+      "the down step removed (QA, Rule #19: the container would outlive the job)",
+      () => mutate(text, `      - name: remove the uninstall throwaway\n        if: "\${{ always() }}"\n        run: node scripts/throwaway-iris.mjs down --state ${STATE}\n`, ""),
+      /declared step is not in the workflow.*throwaway-iris\.mjs down --state .*throwaway-uninstall/,
+    ],
     ["a suite step that renames the suite", () => mutate(text, "ci-live-suite.mjs uninstall-round-trip", "ci-live-suite.mjs uninstall-round-trips"), /suites the throwaway job runs/],
   ] as Array<[string, () => string, RegExp]>)("fails on %s, naming the difference", (_label, apply, expected) => {
     expect(workflowProblems(apply(), context).join("\n")).toMatch(expected);
