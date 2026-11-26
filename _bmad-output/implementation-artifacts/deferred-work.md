@@ -4432,6 +4432,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: med | fix-risk: low | footprint: in-footprint
 - evidence: 45.4 CR (maybe-false): iris_sql_analyze is residual (plans only, never runs the caller's SQL), but its stats and running modes may list other sessions' statement text, which can carry literals (identifiers)
 - 2026-11-26T07:21:11Z status=routed owner=burndown by=cr note=Probe first on a throwaway (Rule #16): run a statement with a literal in one session, read iris_sql_analyze stats and running from another; if literals appear, cover the affected actions under block (a key or action in DATA_POLICY_BLOCK_KEYS) or close with evidence
+- 2026-11-26T07:46:10Z status=routed owner=burndown by=lead note=Planner ruling 2026-11-26 (pre-decided): if the probe shows iris_sql_analyze returns other sessions' statement text with literals, the affected actions join DATA_POLICY_BLOCK_KEYS under block (zero-request wire leg, redact/allow sweep unchanged); if parameterized (no literals), close with that evidence. Docs order: 45.5 (runs first) states it as under probe; the burn-down updates the residual table with the outcome in the same change
 
 ### DW-785: Decision #172 record said insert/update return IDs or status only
 - source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: low | fix-risk: low | footprint: in-footprint
