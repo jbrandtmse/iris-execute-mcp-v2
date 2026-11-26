@@ -4439,3 +4439,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 45.4 QA/CR: httpPostDocument returns the caller's content plus the ID
 - 2026-11-26T07:21:11Z status=wontfix-accepted owner=45-4-block-turns-off-raw-read-and-code-execution-tools by=cr note=Corrected in orchestrator-decisions-wave-10.md row #172 by the lead (2026-11-26); no code change
 - 2026-11-26T07:21:16Z status=resolved-by:45-4-block-turns-off-raw-read-and-code-execution-tools owner=45-4-block-turns-off-raw-read-and-code-execution-tools by=lead note=status corrected: the record was fixed in row #172 (resolved, not wontfix)
+
+### DW-786: ConfigureMapping through iris_sql_query on a read-only server (admin account) recreates %ALL and the ExecuteMCPv2 mapping in iris.cpf despite the rollback; the premise of owner decision #171 point 3 was wrong
+- source: spec-45-5-what-the-safety-settings-protect.md | severity: med | fix-risk: low | footprint: in-footprint
+- evidence: 45.5 plan probe B on a throwaway 2026.2: SELECT ExecuteMCPv2.Setup_ConfigureMapping(...) through iris_sql_query (readOnly:true, rolled back) leaves %ALL and the mapping in iris.cpf and the running configuration while Config.Namespaces/MapPackages.Exists report 0; Configure's web-app change is rolled back; through Atelier action/query (no rollback) Configure moved the web app to another namespace
+- 2026-11-26T08:04:18Z status=decision-pending owner=burndown by=lead note=Back to the owner via the Planner (reopens #171's premise). Lead recommendation: a guard in Configure and ConfigureMapping that refuses when called inside a transaction ($TLEVEL>0), which is exactly iris_sql_query's readOnly path; the bootstrap calls them through Atelier outside a transaction, so it is unaffected (probe first). 45.5 documents today's behavior (A2); the burn-down updates the text if a fix ships
+
+### DW-787: The bootstrap fails to compile ExecuteMCPv2.REST.Interop in a namespace that is not interoperability-enabled
+- source: spec-45-5-what-the-safety-settings-protect.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 45.5 plan probe side finding on IRIS for Health 2026.2; not checked on the iris-community edition
+- 2026-11-26T08:04:18Z status=routed owner=burndown by=cr note=Probe first: confirm on both editions; decide whether the bootstrap should skip or tolerate the Interop handler in a non-interop namespace, and what the docs say
