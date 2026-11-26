@@ -2,7 +2,7 @@
 title: 'Story 45.6: Epic 45 Burn-down, IRIS Side'
 type: 'bugfix'
 created: '2026-11-26'
-status: 'blocked'
+status: 'ready-for-dev'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -109,6 +109,27 @@ deferred:
 - Given no record anywhere, when the uninstall runs, then its lines are byte-identical to today (the L494 leg); and the SqlProc set and signatures pins pass unchanged (AC 45.6.2).
 
 ## Spec Change Log
+
+- 2026-11-26 (lead, spec gate, decisions #176 and #177; BINDING):
+  - **D1 is R10, ruled by the Planner.** The guard refuses when `$TLEVEL>0` AND `$IsObject($Get(%request))`. Never reference a bare `%request`, so the IPM and terminal paths cannot hit `<UNDEFINED>`.
+  - **A1–A4 are applied to `epics.md`.**
+  - **D2–D7 are accepted as recommended:** DW-774 is closed `wontfix-accepted`, and the compile-check finding is DW-788, routed to 45.7.
+  - **Planner conditions for DW-786:**
+    1. **All three paths are pinned both ways (Rule #59):**
+       - a read-only `iris_sql_query` call is refused, and `%ALL` and the mapping stay out of `iris.cpf` (and the same for `Configure`);
+       - the Atelier bootstrap installs on a fresh install, an upgrade and a self-heal;
+       - the IPM install succeeds.
+       - **Mutation A:** drop the `%request` term, and the IPM leg goes red.
+       - **Mutation B:** drop the `$TLEVEL` term, and the bootstrap leg goes red.
+       - Restore every mutation byte-identically (`Setup.cls`, `bootstrap-classes.ts`, `bootstrap-sequence.json`, checked with `cmp`).
+    2. **The IPM leg runs with the NEW classes.** On a throwaway, generate an IPM tree into a scratch directory (never the committed tree; `gen:ipm:check` stays green) and `zpm install` it. Record that in the spec. Also check whether the 1.3.0 release rehearsal installs through IPM from the freshly stamped tree (read `scripts/release*.mjs` and CI's `ipm` job), and report the answer to the lead.
+    3. **The other code-running paths are named.** Under the read-only preset, `iris_execute_command` and `iris_execute_classmethod` are off. The lead confirmed this with the governance CLI (`universe`, source `preset`, `mutates: write`). Add one line to the 45.5 residual text saying so.
+    4. **The refusal text** says the call came from a web request inside a transaction (as a read-only SQL query does), that nothing changed, and to run the configuration from an IRIS terminal, the automatic install or IPM.
+  - **Other conditions:**
+    - **DW-773:** update the 45.5 least-privilege text in the same change.
+    - **DW-787:** show that an interop route still works on IRIS for Health.
+    - **DW-765:** smoke a modify on a throwaway database only, with a least-privilege read as well.
+  - **Status:** `blocked` → `ready-for-dev`.
 
 ## Review Triage Log
 
