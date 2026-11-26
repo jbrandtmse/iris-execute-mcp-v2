@@ -263,12 +263,16 @@ describe("Story 42.9: the corrected facts", () => {
     expect(read("packages/client-config/README.md")).toContain("`claude-code-plugin-duplicates`");
   });
 
-  it("the IPM subsection gives the cleanup after an uninstall, with both calls (DW-690)", () => {
+  it("the IPM subsection says what zpm uninstall leaves and points to Removing the IRIS Side, which gives the cleanup after an uninstall with both calls (DW-690, Story 45.3)", () => {
     const readme = read("README.md");
-    expect(squash(readme)).toContain('`zpm "uninstall iris-execute-mcp-v2"` leaves two things behind, and removes neither.');
-    expect(readme).toContain('Do ##class(Security.Applications).Delete("/api/executemcp/v2")');
-    expect(readme).toContain('Do ##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")');
-    expect(squash(readme)).toContain("Run them only when no other namespace still uses the suite: the instance has one such web application and one such mapping");
+    expect(squash(readme)).toContain('`zpm "uninstall iris-execute-mcp-v2"` removes the classes and nothing else.');
+    expect(squash(readme)).toContain("[Removing the IRIS Side](#removing-the-iris-side)");
+    const removing = squash(sectionsMatching(readme, 3, (title) => title === "Removing the IRIS Side")[0] ?? "");
+    expect(removing).not.toBe("");
+    expect(removing).toContain("If it already ran, the command no longer exists: remove what is left by hand");
+    expect(removing).toContain('Do ##class(Security.Applications).Delete("/api/executemcp/v2")');
+    expect(removing).toContain('Do ##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")');
+    expect(removing).toContain("Run them only when no other namespace still uses the suite: the instance has one such web application and one such mapping");
   });
 
   it("no reader document describes a per-worker message table, and the documents say IRIS chooses the language per request (DW-633)", () => {

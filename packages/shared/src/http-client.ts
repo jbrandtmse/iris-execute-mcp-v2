@@ -6,7 +6,7 @@
  */
 
 import { DEFAULT_ACCEPT_LANGUAGE, IrisConnectionConfig } from "./config.js";
-import { IrisApiError, IrisConnectionError } from "./errors.js";
+import { IrisApiError, IrisConnectionError, IrisSideNotInstalledError, type IrisSideRefusal } from "./errors.js";
 import { logger } from "./logger.js";
 
 /** Response shape from HEAD requests — status code and response headers. */
@@ -27,6 +27,9 @@ export interface RequestOptions {
    */
   signal?: AbortSignal;
 }
+
+/** The path prefix of the custom REST service (`/api/executemcp/v2...`), lowercase. */
+const CUSTOM_REST_PREFIX = "/api/executemcp/";
 
 /** Shape of the Atelier-style JSON response envelope. */
 export interface AtelierEnvelope<T = unknown> {
@@ -55,6 +58,16 @@ export class IrisHttpClient {
   private sessionEstablished = false;
   /** Active AbortControllers for in-flight requests. */
   private activeControllers: Set<AbortController> = new Set();
+  /**
+   * Set when this profile's IRIS side is not installed and its automatic install is off (Story 45.2): every
+   * request to the custom REST service is refused before any I/O.
+   */
+  private sideRefusal: IrisSideRefusal | undefined;
+  /**
+   * Set when this profile's bootstrap could not confirm the web application and its install is off (DW-772): a
+   * request to the custom REST service is sent, and only the answer of an ABSENT web application raises this refusal.
+   */
+  private absentRefusal: IrisSideRefusal | undefined;
 
   constructor(config: IrisConnectionConfig, defaultTimeout = 60_000) {
     this.config = config;
@@ -73,6 +86,46 @@ export class IrisHttpClient {
    */
   get namespace(): string {
     return this.config.namespace;
+  }
+
+  /**
+   * Refuse every request whose path starts with `/api/executemcp/` (case-insensitive) from now on: it throws an
+   * {@link IrisSideNotInstalledError} carrying `refusal` before any I/O (not even the CSRF `HEAD`). Every other
+   * path, the Atelier API included, is unaffected. Called once per profile, from the bootstrap's result (AD-1, AD-14).
+   */
+  refuseCustomRest(refusal: IrisSideRefusal): void {
+    this.sideRefusal = refusal;
+  }
+
+  /**
+   * Arm the refusal for an absent web application (DW-772): requests to `/api/executemcp/` are sent as usual, and a
+   * 404 whose body is not the IRIS JSON envelope (the Web Gateway's HTML page when no web application serves the path,
+   * probed on IRIS 2026.2, or any other page a proxy puts in its place) throws an {@link IrisSideNotInstalledError}
+   * carrying `refusal`. The 404 of an installed web application (an unknown route) carries the envelope and stays an
+   * {@link IrisApiError}. Checked on every request, so a web application registered later needs no restart.
+   */
+  refuseCustomRestWhenAbsent(refusal: IrisSideRefusal): void {
+    this.absentRefusal = refusal;
+  }
+
+  /** Throws the armed refusal when `path` belongs to the custom REST service. */
+  private assertCustomRestAllowed(path: string): void {
+    if (this.sideRefusal !== undefined && path.toLowerCase().startsWith(CUSTOM_REST_PREFIX)) {
+      throw new IrisSideNotInstalledError(this.sideRefusal);
+    }
+  }
+
+  /**
+   * Throws the absent-web-application refusal when it is armed and a 404 under the custom REST prefix did not carry
+   * the IRIS envelope (`body` is the parsed body, or `undefined` when it was not JSON): no installed web application
+   * answered it.
+   */
+  private assertWebAppPresent(status: number, path: string, body: unknown): void {
+    if (this.absentRefusal === undefined || status !== 404 || !path.toLowerCase().startsWith(CUSTOM_REST_PREFIX)) return;
+    const envelopeStatus: unknown = typeof body === "object" && body !== null ? (body as { status?: unknown }).status : undefined;
+    if (typeof envelopeStatus !== "object" || envelopeStatus === null) {
+      throw new IrisSideNotInstalledError(this.absentRefusal);
+    }
   }
 
   // ── Public typed methods ──────────────────────────────────────────
@@ -325,6 +378,8 @@ export class IrisHttpClient {
     options?: RequestOptions,
     isRetry = false,
   ): Promise<AtelierEnvelope<T>> {
+    // A refused profile sends nothing to the custom REST service: the gate comes before any I/O, the CSRF HEAD included.
+    this.assertCustomRestAllowed(path);
     // Ensure CSRF token is available for mutating methods
     if (["POST", "PUT", "DELETE"].includes(method) && !this.csrfToken && !isRetry) {
       await this.ensureCsrfToken(options?.signal);
@@ -369,6 +424,7 @@ export class IrisHttpClient {
       envelope = JSON.parse(rawText) as AtelierEnvelope<T>;
     } catch {
       // IRIS may return non-JSON responses (e.g., HTML error pages)
+      this.assertWebAppPresent(response.status, path, undefined);
       if (!response.ok) {
         throw new IrisApiError(
           response.status,
@@ -405,6 +461,7 @@ export class IrisHttpClient {
     // envelope carries no Atelier-level errors: a valid request that yields no
     // result answers 2xx, so an empty-error 400 is a rejected request.
     if (!response.ok) {
+      this.assertWebAppPresent(response.status, path, envelope);
       const errors = envelope?.status?.errors ?? [];
       // Pass the envelope's `result` through so fields the server placed there
       // (e.g. `truncated`) survive the throw instead of being dropped.
@@ -450,6 +507,7 @@ export class IrisHttpClient {
     options?: RequestOptions,
     isRetry = false,
   ): Promise<HeadResponse> {
+    this.assertCustomRestAllowed(path);
     const response = await this.executeFetch(
       "HEAD",
       path,
@@ -543,6 +601,52 @@ export function bindSignal(client: IrisHttpClient, signal: AbortSignal): IrisHtt
           const method = target[property] as (path: string, body: unknown, options?: RequestOptions) => unknown;
           return (path: string, body: unknown, options?: RequestOptions) =>
             method.call(target, path, body, withSignal(options));
+        }
+        default: {
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+      }
+    },
+  });
+}
+
+/** What one tool call saw of a refused profile (Story 45.2): the first refusal any of its requests raised. */
+export interface SideRefusalRecorder {
+  /** The first {@link IrisSideNotInstalledError} a request of the call raised; absent while none was. */
+  refusal?: IrisSideNotInstalledError;
+}
+
+/**
+ * A view of `client` that records, in `recorder`, the first {@link IrisSideNotInstalledError} one of its requests
+ * raises, and from then on refuses every later request of the call, whatever its path, before it is sent. A handler
+ * that catches the error and goes on therefore sends nothing more, and the framework can still answer the call with
+ * the refusal. Every other member is the client's own. The recorder is per call and shared by every client the
+ * call uses; the client itself is never changed.
+ */
+export function recordSideRefusal(client: IrisHttpClient, recorder: SideRefusalRecorder): IrisHttpClient {
+  const guard = <A extends unknown[], R>(method: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      if (recorder.refusal !== undefined) throw recorder.refusal;
+      try {
+        return await method(...args);
+      } catch (error: unknown) {
+        if (error instanceof IrisSideNotInstalledError && recorder.refusal === undefined) recorder.refusal = error;
+        throw error;
+      }
+    };
+  return new Proxy(client, {
+    get(target, property) {
+      switch (property) {
+        case "get":
+        case "post":
+        case "put":
+        case "delete":
+        case "head": {
+          const method = target[property] as unknown;
+          // A hand-built client (a test double) may not have every method: hand back what it has.
+          if (typeof method !== "function") return method;
+          return guard((method as (...args: unknown[]) => Promise<unknown>).bind(target));
         }
         default: {
           const value: unknown = Reflect.get(target, property, target);

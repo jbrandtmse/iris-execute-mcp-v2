@@ -301,7 +301,7 @@ the policy visually and every MCP client picks it up on next server start.
 - **The governed-key universe is derived, never hand-maintained**: the CLI's `universe` command derives it from
   the five server packages' built dist (the same derivation the suite's own cross-package tests use), grouped
   per package with read/write badges, baseline/post-foundation origin, and each key's effective value with its
-  `configSource` badge (`env` / `file` / `parent` / `preset` / `default`) — the same render a running server's
+  `configSource` badge (`env` / `file` / `parent` / `dataPolicy` / `preset` / `default`) — the same render a running server's
   `iris_server_profiles` reports.
 - **Per-key tri-state toggles** (enabled / disabled / inherit) edit the file's global layer or one profile
   layer (tabs: `global (file)` + `default` + every Server Manager server name + every profile the file names).
@@ -402,7 +402,7 @@ path instead, which does support it.
   leak into every spawned server. `MCP_TRANSPORT` is cleared the same way: the launcher spawns only stdio servers, and
   a server refuses any other configured transport at startup, so an ambient `MCP_TRANSPORT` that names another
   transport would otherwise stop every spawned server. Variables the extension exposes no setting for (`IRIS_TIMEOUT`,
-  `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_SQL_READ_ONLY`, `IRIS_SQL_MAX_ROWS_AFFECTED`, `IRIS_TEST_TIMEOUT`, `IRIS_DATA_POLICY`, `IRIS_ACCEPT_LANGUAGE`) are deliberately left alone and still inherit. `IRIS_SQL_READ_ONLY`, `IRIS_SQL_MAX_ROWS_AFFECTED` and `IRIS_TEST_TIMEOUT` are unset by default, and the two SQL safety variables are global: every profile the launcher writes inherits them. `IRIS_DATA_POLICY` (the PHI data policy) is unset by default, which means `redact`, and is global too: every profile the launcher writes inherits it.
+  `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_SQL_READ_ONLY`, `IRIS_SQL_MAX_ROWS_AFFECTED`, `IRIS_TEST_TIMEOUT`, `IRIS_DATA_POLICY`, `IRIS_AUTO_INSTALL`, `IRIS_ACCEPT_LANGUAGE`) are deliberately left alone and still inherit. `IRIS_AUTO_INSTALL` is unset by default, which means on (except under the read-only preset, which turns it off), and is global: a profile's own `autoInstall` is a field of its `IRIS_PROFILES` entry, and the launcher writes none. `IRIS_SQL_READ_ONLY`, `IRIS_SQL_MAX_ROWS_AFFECTED` and `IRIS_TEST_TIMEOUT` are unset by default, and the two SQL safety variables are global: every profile the launcher writes inherits them. `IRIS_DATA_POLICY` (the PHI data policy) is unset by default, which means `redact`, and is global too: every profile the launcher writes inherits it.
 - User cancellation of the credential prompt is a first-class, expected outcome: the server is reported as not
   started with one clear message. It is never retried automatically and never produces a toast storm. (The real
   `vscode.authentication.getSession({createIfNone:true})` signals cancellation by **rejecting**, not by

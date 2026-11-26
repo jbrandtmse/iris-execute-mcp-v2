@@ -37,6 +37,11 @@ export const REFUSAL_CODES = {
   CONFIRMATION_DECLINED: "CONFIRMATION_DECLINED",
   /** The scope of a confirmation gate changed again after the person was asked again, so the call was not run and nothing was changed. */
   CONFIRMATION_SCOPE_CHANGED: "CONFIRMATION_SCOPE_CHANGED",
+  /**
+   * The profile's IRIS side is missing or older and its automatic install is off, so a custom-REST call was not sent;
+   * or the probe read `unconfigured` with the install off and the web application then answered 404 (`found: "unconfigured"`).
+   */
+  IRIS_SIDE_NOT_INSTALLED: "IRIS_SIDE_NOT_INSTALLED",
 } as const;
 
 /** One of the {@link REFUSAL_CODES} values. */

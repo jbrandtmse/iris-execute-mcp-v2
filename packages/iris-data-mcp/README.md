@@ -32,6 +32,7 @@ All servers use the same environment variables:
 | `IRIS_PASSWORD` | *(required)* | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
+| `IRIS_DATA_POLICY` | *(unset — `redact`)* | **Optional.** `block`, `redact` or `allow`: the PHI data policy (per profile: an `IRIS_PROFILES` entry's `dataPolicy` or the governance file's `dataPolicy` section). `block` turns off the raw-read tools of this server, `iris_docdb_document:get`, `iris_docdb_document:delete` (it returns the document it deletes; the `insert` and `update` actions stay on) and `iris_docdb_find`; an explicit governance key re-enables one (`{"profiles":{"prod":{"iris_docdb_find":true}}}`), and `IRIS_TOOLS_ENABLE` only shows a tool and does not. Under `redact` (the default) nothing changes except one startup `[WARN]` line naming the enabled ones, because `redact` covers message bodies only; under `block` the line names only the ones an explicit key re-enabled. Sanctioned change `S-45.4-block-raw-tools`. See [PHI data policy](../../README.md#phi-data-policy) in the suite README. |
 | `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header sent on every request, pinning `%Status` error text to a predictable language instead of whatever locale an unspecified header resolves to. IRIS also chooses the message language per request, by matching this header against the languages the instance has, so a localized prefix can still appear when the header names one — existing prefix-stripping is unaffected. Details: [suite README](../../README.md#2-set-environment-variables). |
 
 ### Multiple servers & the `server` parameter
@@ -49,6 +50,8 @@ This server's 7 tools are already inside the researched 5-15-tool sweet spot, so
 ### Audit Logging (`IRIS_AUDIT_LOG`)
 
 For regulated deployments, set `IRIS_AUDIT_LOG=/path/to/audit.jsonl` to record **every MCP tool call this server handles** — success, error, or governance denial — as one secrets-free JSON line (session, sequence, tool, action, outcome, redacted parameter keys). It is **off by default** (unset ⇒ a mechanical no-op, zero filesystem writes) and framework-wide — the same interceptor covers every tool on this server. `IRIS_AUDIT_LOG_MAX_MB` (default `50`) sets the single-generation rotation size; `IRIS_AUDIT_LOG_PARAMS=true` additionally records (redacted) parameter *values*. Because it is server-side **configuration** — not a governed tool action — an AI client cannot disable its own audit trail; only an operator with server-environment access can. Full record shape, redaction rules, and how it differs from IRIS's own security-audit tools: [Compliance & Auditability](../../README.md#compliance--auditability).
+
+> **What the safety settings protect:** the safety settings (governance, the presets, the confirmation dialogs, the audit log, the data policy, the SQL safety settings and the document write guards) guard the agent that uses this server, not the IRIS account, whose privileges are the boundary. See [What the safety settings protect](../../README.md#what-the-safety-settings-protect).
 
 ### Server Manager connections (`IRIS_SERVER_MANAGER`)
 

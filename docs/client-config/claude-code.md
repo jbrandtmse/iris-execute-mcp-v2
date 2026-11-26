@@ -309,6 +309,8 @@ Point a server at production in **read-only mode** with one environment variable
 
 All five are **optional** and apply to every server the same way (`IRIS_GOVERNANCE_PRESET` is framework configuration, not a tool; the four `IRIS_SQL_*` variables govern the SQL tools `iris_sql_execute` and `iris_sql_query`, which ship on `@iris-mcp/dev`). Under the read-only preset `iris_sql_execute` is blocked, so run queries through `iris_sql_query`: a read tool, enabled by default, that stays available. See the [suite README](../../README.md#read-only-mode--point-it-at-production-with-one-environment-variable) for the full model.
 
+The read-only preset also turns the automatic install off. The servers install the IRIS side (the `ExecuteMCPv2` classes, the web application, the `%ALL` mapping) when they connect: `IRIS_AUTO_INSTALL` is on by default, and a profile can set its own `autoInstall` in `IRIS_PROFILES`. With the install off, a missing or older IRIS side makes the custom-REST tools answer `IRIS_SIDE_NOT_INSTALLED`, while the Atelier-only tools keep working. An explicit `IRIS_AUTO_INSTALL=true` (or `autoInstall: true`) together with the read-only preset fails startup. These settings guard the agent, not the IRIS account: see [What the safety settings protect](../../README.md#what-the-safety-settings-protect).
+
 ---
 
 ## Tool Visibility Presets (optional)

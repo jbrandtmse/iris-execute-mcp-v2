@@ -111,6 +111,38 @@ function formatIrisErrors(errors: unknown[]): string {
 }
 
 /**
+ * What a client armed with a refusal carries (Story 45.2): the refusal's text and its
+ * `structuredContent` fields (everything after `code`).
+ */
+export interface IrisSideRefusal {
+  /** The one text block: what happened, and what to do about it. */
+  text: string;
+  /** `profile`, `namespace`, `found`, `deployedVersion?`, `requiredVersion`, `autoInstallSource`. */
+  fields: Record<string, unknown>;
+}
+
+/**
+ * Thrown by {@link import("./http-client.js").IrisHttpClient} for a request to the custom REST service
+ * (`/api/executemcp/`) of a profile whose IRIS side is not installed while the automatic install is off
+ * (Story 45.2). For a `missing` or `stale` side no request is sent; for an `unconfigured` one it is thrown when the
+ * request is answered with the 404 of an absent web application. The framework turns it into the
+ * `IRIS_SIDE_NOT_INSTALLED` refusal even when a tool handler caught it.
+ */
+export class IrisSideNotInstalledError extends Error {
+  /** The refusal's text (also the error's message). */
+  readonly refusalText: string;
+  /** The refusal's `structuredContent` fields after `code`. */
+  readonly fields: Record<string, unknown>;
+
+  constructor(refusal: IrisSideRefusal) {
+    super(refusal.text);
+    this.name = "IrisSideNotInstalledError";
+    this.refusalText = refusal.text;
+    this.fields = refusal.fields;
+  }
+}
+
+/**
  * Thrown for MCP-level protocol violations (unknown tool, malformed arguments).
  */
 export class McpProtocolError extends Error {

@@ -31,6 +31,7 @@ import {
   getEffectiveConfigSources,
   getEffectivePolicy,
 } from "../governance.js";
+import { DATA_POLICY_BLOCK_KEYS } from "../data-policy.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 import { BASELINE_ACTION_CLASSIFICATIONS } from "../baseline-classifications.js";
 import { SERVER_PACKAGES } from "../governance-baseline-derivation.js";
@@ -527,5 +528,95 @@ describe("universe — usage errors and text mode", () => {
     expect(stdout.text).toContain(SERVER_DISCOVERY_TOOL_NAME);
     expect(stdout.text).toContain("(source: default, mutates:");
     expect(stdout.text).toContain("Note: ");
+  });
+});
+
+// ── Story 45.4: the block data-policy seed (decision #169, D5) ──────────
+
+describe("universe — the block data-policy seed", { timeout: 60_000 }, () => {
+  it("IRIS_DATA_POLICY=block: all 15 covered keys are false with source dataPolicy, over the real built universe", async () => {
+    const { code, json } = await runUniverseJson([], { IRIS_DATA_POLICY: "block" });
+    expect(code).toBe(0);
+    expect((json as UniverseJson & { dataPolicy?: string }).dataPolicy).toBe("block");
+    expect(DATA_POLICY_BLOCK_KEYS).toHaveLength(15);
+    for (const key of DATA_POLICY_BLOCK_KEYS) {
+      expect(json.keys, `universe holds ${key}`).toContain(key);
+      expect(json.policy[key], key).toBe(false);
+      expect(json.configSource[key], key).toBe("dataPolicy");
+    }
+  });
+
+  it("an explicit true re-enables one key; the parent enable is not inherited; a parent disable is", async () => {
+    const reEnabled = await runUniverseJson([], {
+      IRIS_DATA_POLICY: "block",
+      IRIS_GOVERNANCE: JSON.stringify({ global: { iris_sql_query: true } }),
+    });
+    expect(reEnabled.json.policy["iris_sql_query"]).toBe(true);
+    expect(reEnabled.json.configSource["iris_sql_query"]).toBe("env");
+    expect(reEnabled.json.configSource["iris_sql_execute"]).toBe("dataPolicy");
+
+    const parentEnabled = await runUniverseJson([], {
+      IRIS_DATA_POLICY: "block",
+      IRIS_GOVERNANCE: JSON.stringify({ global: { iris_sql_execute: true } }),
+    });
+    expect(parentEnabled.json.policy["iris_sql_execute"]).toBe(true);
+    expect(parentEnabled.json.policy["iris_sql_query"]).toBe(false);
+    expect(parentEnabled.json.configSource["iris_sql_query"]).toBe("dataPolicy");
+
+    const parentDisabled = await runUniverseJson([], {
+      IRIS_DATA_POLICY: "block",
+      IRIS_GOVERNANCE: JSON.stringify({ global: { iris_sql_execute: false } }),
+    });
+    expect(parentDisabled.json.configSource["iris_sql_query"]).toBe("parent");
+    expect(parentDisabled.json.configSource["iris_sql_execute"]).toBe("env");
+  });
+
+  it("block with the read-only preset: covered keys report dataPolicy, a non-covered write reports preset", async () => {
+    const { json } = await runUniverseJson([], { IRIS_DATA_POLICY: "block", IRIS_GOVERNANCE_PRESET: "read-only" });
+    expect(json.configSource["iris_global_get"]).toBe("dataPolicy");
+    expect(json.configSource["iris_global_set"]).toBe("preset");
+    expect(json.policy["iris_global_set"]).toBe(false);
+  });
+
+  it("takes the profile's own policy: an IRIS_PROFILES entry and the file section", async () => {
+    const profiles = JSON.stringify({ prod: { dataPolicy: "block" } });
+    const prod = await runUniverseJson(["--profile", "prod"], { IRIS_PROFILES: profiles });
+    expect(prod.json.configSource["iris_global_get"]).toBe("dataPolicy");
+    const other = await runUniverseJson([], { IRIS_PROFILES: profiles });
+    expect(other.json.configSource["iris_global_get"]).toBe("default");
+
+    const file = path.join(dir, "governance.json");
+    writeFileSync(file, JSON.stringify({ dataPolicy: { profiles: { stage: "block" } } }), "utf8");
+    const stage = await runUniverseJson(["--file", file, "--profile", "stage"]);
+    expect(stage.json.configSource["iris_docdb_find"]).toBe("dataPolicy");
+  });
+
+  it("under redact, allow and no policy the JSON and the text are byte-identical", async () => {
+    const plain = baseDeps({});
+    await runCli(["universe", "--json"], plain.deps);
+    const plainText = baseDeps({});
+    await runCli(["universe"], plainText.deps);
+    for (const policy of ["redact", "allow"]) {
+      const json = baseDeps({ IRIS_DATA_POLICY: policy });
+      await runCli(["universe", "--json"], json.deps);
+      expect(json.stdout.text, policy).toBe(plain.stdout.text);
+      const text = baseDeps({ IRIS_DATA_POLICY: policy });
+      await runCli(["universe"], text.deps);
+      expect(text.stdout.text, policy).toBe(plainText.stdout.text);
+    }
+  });
+
+  it("a malformed IRIS_DATA_POLICY exits 1 with the servers' text", async () => {
+    const { code, json, stderr } = await runUniverseJson([], { IRIS_DATA_POLICY: "open" });
+    expect(code).toBe(1);
+    expect(json.error).toContain('IRIS_DATA_POLICY must be "block", "redact" or "allow". Received: "open".');
+    expect(stderr).toContain("IRIS_DATA_POLICY must be");
+  });
+
+  it("the text render names the policy in its header", async () => {
+    const { deps, stdout } = baseDeps({ IRIS_DATA_POLICY: "block" });
+    expect(await runCli(["universe"], deps)).toBe(0);
+    expect(stdout.text).toContain('Governance universe for profile "default" (data policy: block):');
+    expect(stdout.text).toContain("iris_sql_query = false   (source: dataPolicy, mutates: read)");
   });
 });

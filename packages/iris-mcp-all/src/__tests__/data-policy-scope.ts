@@ -11,12 +11,21 @@
  * One row per tool name of the suite, the framework's `iris_server_profiles` included. A new tool adds its
  * row in the story that adds it, and `data-policy-scope.test.ts` fails until it does (Rule #56).
  * `tool_support.md` carries the same governed and residual rows for readers.
+ *
+ * Every residual row also carries a `block` verdict (Story 45.4, decision #169): `"off"` when
+ * `IRIS_DATA_POLICY=block` seeds the tool's governance key disabled (an explicit governance key re-enables it),
+ * `"on"` when the tool stays on under `block`. An `"off"` row may name the actions it covers
+ * (`blockActions`), when only some of the tool's actions are raw reads. The `"off"` rows are exactly the keys of
+ * `DATA_POLICY_BLOCK_KEYS`, and `data-policy-scope.test.ts` checks it (Rule #44).
  */
 
 /** The date the classification is exhaustive as of. */
-export const DATA_POLICY_SCOPE_DATE = "2026-10-17";
+export const DATA_POLICY_SCOPE_DATE = "2026-11-26";
 
 export type DataPolicyScope = "governed" | "residual" | "notApplicable";
+
+/** What `IRIS_DATA_POLICY=block` does to a residual tool. */
+export type BlockVerdict = "off" | "on";
 
 export interface DataPolicyScopeRow {
   scope: DataPolicyScope;
@@ -24,9 +33,18 @@ export interface DataPolicyScopeRow {
   governedActions?: readonly string[];
   /** One line: why the tool has this scope. */
   reason: string;
+  /** For a residual row: whether `block` turns the tool (or the actions in {@link blockActions}) off. */
+  block?: BlockVerdict;
+  /** For a residual row that `block` turns off for some actions only: those actions. */
+  blockActions?: readonly string[];
 }
 
-const residual = (reason: string): DataPolicyScopeRow => ({ scope: "residual", reason });
+const residual = (reason: string, block: BlockVerdict = "on", blockActions?: readonly string[]): DataPolicyScopeRow => ({
+  scope: "residual",
+  reason,
+  block,
+  ...(blockActions !== undefined ? { blockActions } : {}),
+});
 
 /** Rows for tools that share one reason. */
 function notApplicable(reason: string, names: readonly string[]): Array<[string, DataPolicyScopeRow]> {
@@ -77,15 +95,29 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
     },
   ],
 
-  ["iris_sql_execute", residual("Runs caller-supplied SQL, which can select message-body columns. Restrict it with its governance key or IRIS_SQL_READ_ONLY.")],
-  ["iris_sql_query", residual("Runs caller-supplied SELECTs, which can select message-body columns. Restrict it with its governance key.")],
-  ["iris_sql_analyze", residual("Returns plans and statistics for caller-supplied SQL, which can echo literals. Restrict it with its governance key.")],
-  ["iris_global_get", residual("Reads any global node, message bodies included. Restrict it with its governance key.")],
-  ["iris_execute_command", residual("Runs caller code whose output is unrestricted. Restrict it with its governance key.")],
-  ["iris_execute_classmethod", residual("Calls any class method, whose result and output are unrestricted. Restrict it with its governance key.")],
-  ["iris_execute_tests", residual("Returns the text of unit-test results, which can quote data. Restrict it with its governance key.")],
+  ["iris_sql_execute", residual("Runs caller-supplied SQL, which can select message-body columns. Restrict it with its governance key or IRIS_SQL_READ_ONLY.", "off")],
+  ["iris_sql_query", residual("Runs caller-supplied SELECTs, which can select message-body columns. Restrict it with its governance key.", "off")],
+  [
+    "iris_sql_analyze",
+    residual(
+      "Returns plans and statistics for caller-supplied SQL, which can echo literals; stats returns the statement text of other sessions' statements, running their bound parameters, and advise in workload mode quotes retained literals (plan probe P-784, Story 45.7). Block turns those three actions off; explain and indexUsage stay on. Restrict it with its governance key.",
+      "off",
+      ["stats", "running", "advise"],
+    ),
+  ],
+  ["iris_global_get", residual("Reads any global node, message bodies included. Restrict it with its governance key.", "off")],
+  [
+    "iris_global_list",
+    residual(
+      "Lists the names of the globals of a namespace and no values. It is in the raw-read floor of the owner decision, so block turns it off (Story 45.4).",
+      "off",
+    ),
+  ],
+  ["iris_execute_command", residual("Runs caller code whose output is unrestricted. Restrict it with its governance key.", "off")],
+  ["iris_execute_classmethod", residual("Calls any class method, whose result and output are unrestricted. Restrict it with its governance key.", "off")],
+  ["iris_execute_tests", residual("Returns the text of unit-test results, which can quote data. Restrict it with its governance key.", "off")],
   ["iris_test_status", residual("Returns the text of unit-test results, which can quote data. Restrict it with its governance key.")],
-  ["iris_test_coverage", residual("Returns the text of unit-test results, which can quote data. Restrict it with its governance key.")],
+  ["iris_test_coverage", residual("Returns the text of unit-test results, which can quote data. Restrict it with its governance key.", "off")],
   ["iris_doc_get", residual("Returns the source of a document, which can hold message text. Restrict it with its governance key.")],
   ["iris_doc_search", residual("Returns matching lines of document source, which can hold message text. Restrict it with its governance key.")],
   ["iris_doc_convert", residual("Returns document source, which can hold message text. Restrict it with its governance key.")],
@@ -105,12 +137,25 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
   ],
   ["iris_env_diff", residual("Compares configuration values across profiles, lookup values included. Restrict it with its governance key.")],
   ["iris_env_promote", residual("Copies configuration values across profiles, lookup values included. Restrict it with its governance key.")],
-  ["iris_transform_test", residual("Returns the output of a transformation run on a caller-supplied message. Restrict it with its governance key.")],
-  ["iris_docdb_document", residual("Returns the content of DocDB documents. Restrict it with its governance key.")],
-  ["iris_docdb_find", residual("Returns the content of DocDB documents that match. Restrict it with its governance key.")],
+  ["iris_transform_test", residual("Returns the output of a transformation run on a caller-supplied message. Restrict it with its governance key.", "off")],
+  [
+    "iris_docdb_document",
+    residual(
+      "Returns the content of DocDB documents: get reads one, and delete returns the document it deletes. Restrict it with its governance key.",
+      "off",
+      ["get", "delete"],
+    ),
+  ],
+  ["iris_docdb_find", residual("Returns the content of DocDB documents that match. Restrict it with its governance key.", "off")],
   ["iris_analytics_mdx", residual("Returns the result data of an MDX query. Restrict it with its governance key.")],
   ["iris_audit_manage", residual("Returns audit configuration and event data, whose descriptions can carry request text. Restrict it with its governance key.")],
   ["iris_audit_events", residual("Returns audit events, whose descriptions can carry request text. Restrict it with its governance key.")],
+  [
+    "iris_locks_list",
+    residual(
+      "Returns lock references, whose subscripts can be identifiers (Rule #56, Story 45.4). A monitoring read, so it stays on under block. Restrict it with its governance key.",
+    ),
+  ],
 
   ...notApplicable("Returns metadata of documents, routines, packages or the server, or changes a document or global without returning its content.", [
     "iris_doc_put",
@@ -123,7 +168,6 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
     "iris_server_namespace",
     "iris_global_set",
     "iris_global_kill",
-    "iris_global_list",
     "iris_package_list",
     "iris_loc_count",
   ]),
@@ -176,7 +220,6 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
     "iris_metrics_interop",
     "iris_alerts_manage",
     "iris_jobs_list",
-    "iris_locks_list",
     "iris_process_manage",
     "iris_journal_info",
     "iris_mirror_status",

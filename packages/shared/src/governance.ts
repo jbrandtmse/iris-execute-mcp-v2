@@ -24,10 +24,10 @@
  *   capability opt-in while guaranteeing no pre-existing action is disabled by
  *   default (the back-compat gate).
  *
- * **Cascade (D4, extended by Epic 32 / AC 32.0.2 and by Story 38.4 / AD-6).**
+ * **Cascade (D4, extended by Epic 32 / AC 32.0.2, by Story 38.4 and by Story 45.4 / AD-6).**
  *   `effective(key, profile) = env.profile(key) ?? env.global(key) ??
  *   file.profile(key) ?? file.global(key) ?? inheritedDisable(key) ??
- *   presetSeed(key) ?? defaultSeed(key)` - ALL env layers sit above ALL file
+ *   dataPolicySeed(key) ?? presetSeed(key) ?? defaultSeed(key)` - ALL env layers sit above ALL file
  *   layers (no interleaving; Project Lead decision 2026-07-26: no pre-existing
  *   `IRIS_GOVERNANCE` setting may be overridden by a governance file introduced
  *   later). The nullish-coalescing is load-bearing: an explicit `false` override
@@ -37,6 +37,12 @@
  *   layer order, is `false`; otherwise it is "unset". It sits below every
  *   explicit layer of the key itself and above the preset, and with no parent
  *   keys it is always "unset".
+ *   `dataPolicySeed` (Story 45.4) is `false` for a key of `DATA_POLICY_BLOCK_KEYS`
+ *   when the profile's data policy is `block`, and "unset" otherwise. It sits below
+ *   the explicit layers and the inherited disable and above the preset: an explicit
+ *   `true` re-enables a covered key, and a seeded disable is never inherited by a
+ *   child key. The policy is passed in (the profile's resolved `dataPolicy`); with
+ *   none, or under `redact` or `allow`, the cascade is byte-for-byte the one without it.
  *
  * **File channel (Epic 32, Story 32.0, architecture decision J1).**
  * {@link loadGovernanceFile} reads a JSON file at the explicit operator-supplied
@@ -54,7 +60,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { parseDataPolicyValue, type DataPolicy } from "./data-policy.js";
+import { DATA_POLICY_BLOCK_KEYS, dataPolicySeed, parseDataPolicyValue, type DataPolicy } from "./data-policy.js";
 import type { ToolDefinition } from "./tool-types.js";
 import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
 
@@ -1116,8 +1122,8 @@ export function defaultSeed(
  * 24.1, spec 02 §2.2). Sits BETWEEN the explicit layers (env, then file —
  * Story 32.0) with a parent key's inherited disable (Story 38.4) and
  * {@link defaultSeed} in the cascade: `env.profile ?? env.global ??
- * file.profile ?? file.global ?? inheritedDisable(...) ?? presetSeed(...) ??
- * defaultSeed(...)`.
+ * file.profile ?? file.global ?? inheritedDisable(...) ??
+ * {@link dataPolicySeed}(...) (Story 45.4) ?? presetSeed(...) ?? defaultSeed(...)`.
  *
  * - `preset` is `undefined` or `"full"` ⇒ pass-through (`undefined` — falls
  *   through to {@link defaultSeed}). This is what makes an unset (or `"full"`)
@@ -1254,6 +1260,9 @@ export function inheritedParentDisable(
  *   `undefined` (no file) — byte-for-byte the pre-Epic-32 cascade (AC 32.0.1).
  * @param parentKeys         - Child key to parent key map (Story 38.4); default empty - with no
  *   parent keys the cascade is byte-for-byte the one without the inherited-disable step.
+ * @param dataPolicy         - The profile's resolved data policy (Story 45.4); default `undefined`.
+ *   Only `block` has an effect: it seeds every key of `blockKeys` disabled (see {@link dataPolicySeed}).
+ * @param blockKeys          - The keys `block` seeds disabled; default {@link DATA_POLICY_BLOCK_KEYS}.
  * @returns `true` if the action is enabled for the profile, else `false`.
  */
 export function effective(
@@ -1267,6 +1276,8 @@ export function effective(
   classifications: Readonly<Record<string, MutationClass>> = {},
   fileConfig?: GovernanceConfig,
   parentKeys: ParentKeys = new Map(),
+  dataPolicy?: DataPolicy,
+  blockKeys: readonly string[] = DATA_POLICY_BLOCK_KEYS,
 ): boolean {
   // Read each layer via ownBool so the `??` cascade only ever sees
   // `boolean | undefined`, never a leaked non-boolean prototype value.
@@ -1282,6 +1293,9 @@ export function effective(
     return false;
   }
   return (
+    // The `block` data-policy seed (Story 45.4, AD-6): above the preset, below every explicit layer
+    // and the inherited disable. `undefined` unless the profile's policy is `block` and `key` is covered.
+    dataPolicySeed(key, dataPolicy, blockKeys) ??
     presetSeed(key, preset, mutatesLookup, classifications) ??
     defaultSeed(key, mutatesLookup, baseline, defaultEnabledWrites)
   );
@@ -1328,12 +1342,14 @@ export function hasExplicitOverride(
  * Story 32.0, AC 32.0.3): the first cascade layer that carries the key —
  * `"env"` (either `IRIS_GOVERNANCE` layer), `"file"` (either
  * `IRIS_GOVERNANCE_FILE` layer), `"parent"` (Story 38.4: the key inherits a
- * disable from its parent key, see {@link inheritedParentDisable}), `"preset"`
- * (the `presetSeed` layer - a `read-only` preset resolves every key), or
+ * disable from its parent key, see {@link inheritedParentDisable}), `"dataPolicy"`
+ * (Story 45.4: the `block` data policy seeds the key disabled, see {@link dataPolicySeed}),
+ * `"preset"` (the `presetSeed` layer - a `read-only` preset resolves every key), or
  * `"default"` (the seed). Emitted unconditionally: with no file set, keys simply
- * never report `"file"`, and with no parent keys they never report `"parent"`.
+ * never report `"file"`, with no parent keys they never report `"parent"`, and
+ * outside the `block` policy they never report `"dataPolicy"`.
  */
-export type GovernanceConfigSource = "env" | "file" | "parent" | "preset" | "default";
+export type GovernanceConfigSource = "env" | "file" | "parent" | "dataPolicy" | "preset" | "default";
 
 /**
  * Resolve the {@link GovernanceConfigSource} for one key — walks the SAME
@@ -1350,6 +1366,8 @@ export type GovernanceConfigSource = "env" | "file" | "parent" | "preset" | "def
  * @param classifications - Key → mutation class for frozen-baseline actions; default empty.
  * @param fileConfig      - Parsed FILE channel; default `undefined` (no file).
  * @param parentKeys      - Child key to parent key map (Story 38.4); default empty.
+ * @param dataPolicy      - The profile's resolved data policy (Story 45.4); default `undefined`.
+ * @param blockKeys       - The keys `block` seeds disabled; default {@link DATA_POLICY_BLOCK_KEYS}.
  */
 export function configSource(
   key: string,
@@ -1360,6 +1378,8 @@ export function configSource(
   classifications: Readonly<Record<string, MutationClass>> = {},
   fileConfig?: GovernanceConfig,
   parentKeys: ParentKeys = new Map(),
+  dataPolicy?: DataPolicy,
+  blockKeys: readonly string[] = DATA_POLICY_BLOCK_KEYS,
 ): GovernanceConfigSource {
   if (
     ownBool(ownProfileLayer(config, profile), key) !== undefined ||
@@ -1376,6 +1396,9 @@ export function configSource(
   }
   if (inheritedParentDisable(key, profile, config, parentKeys, fileConfig) !== undefined) {
     return "parent";
+  }
+  if (dataPolicySeed(key, dataPolicy, blockKeys) !== undefined) {
+    return "dataPolicy";
   }
   if (presetSeed(key, preset, mutatesLookup, classifications) !== undefined) {
     return "preset";
@@ -1400,6 +1423,8 @@ export function configSource(
  * @param classifications - Key → mutation class for frozen-baseline actions; default empty.
  * @param fileConfig      - Parsed FILE channel; default `undefined` (no file).
  * @param parentKeys      - Child key to parent key map (Story 38.4); default empty.
+ * @param dataPolicy      - The profile's resolved data policy (Story 45.4); default `undefined`.
+ * @param blockKeys       - The keys `block` seeds disabled; default {@link DATA_POLICY_BLOCK_KEYS}.
  * @returns A `Record<key, GovernanceConfigSource>` for the profile.
  */
 export function getEffectiveConfigSources(
@@ -1411,6 +1436,8 @@ export function getEffectiveConfigSources(
   classifications: Readonly<Record<string, MutationClass>> = {},
   fileConfig?: GovernanceConfig,
   parentKeys: ParentKeys = new Map(),
+  dataPolicy?: DataPolicy,
+  blockKeys: readonly string[] = DATA_POLICY_BLOCK_KEYS,
 ): Record<string, GovernanceConfigSource> {
   const sources: Record<string, GovernanceConfigSource> = {};
   for (const key of allKeys) {
@@ -1427,6 +1454,8 @@ export function getEffectiveConfigSources(
         classifications,
         fileConfig,
         parentKeys,
+        dataPolicy,
+        blockKeys,
       ),
       enumerable: true,
       writable: true,
@@ -1456,6 +1485,8 @@ export function getEffectiveConfigSources(
  * @param fileConfig     - Parsed FILE channel ({@link loadGovernanceFile}); default
  *   `undefined` (no file) — byte-for-byte the pre-Epic-32 policy map (AC 32.0.1).
  * @param parentKeys     - Child key to parent key map (Story 38.4); default empty.
+ * @param dataPolicy     - The profile's resolved data policy (Story 45.4); default `undefined`.
+ * @param blockKeys      - The keys `block` seeds disabled; default {@link DATA_POLICY_BLOCK_KEYS}.
  * @returns A `Record<key, boolean>` of effective enablement for the profile.
  */
 export function getEffectivePolicy(
@@ -1469,6 +1500,8 @@ export function getEffectivePolicy(
   classifications: Readonly<Record<string, MutationClass>> = {},
   fileConfig?: GovernanceConfig,
   parentKeys: ParentKeys = new Map(),
+  dataPolicy?: DataPolicy,
+  blockKeys: readonly string[] = DATA_POLICY_BLOCK_KEYS,
 ): Record<string, boolean> {
   const policy: Record<string, boolean> = {};
   for (const key of allKeys) {
@@ -1488,6 +1521,8 @@ export function getEffectivePolicy(
         classifications,
         fileConfig,
         parentKeys,
+        dataPolicy,
+        blockKeys,
       ),
       enumerable: true,
       writable: true,

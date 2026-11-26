@@ -10,6 +10,8 @@
 //     `{ kind, cwd, command, expectedFiles(), allowedSkips }`:
 //       kind 'vitest'   a vitest run that gets the JSON reporter; its report is classified (nothing may skip unlisted);
 //       kind 'harness'  the same, started through `scripts/throwaway-iris.mjs run`, which makes its own container;
+//       kind 'own-container'  the same as 'vitest', but in a container of its own that the workflow's own steps start (`up`), run
+//                       through `exec` (with `THROWAWAY_STATE_FILE`, so the gate can drive a terminal), and remove (`down`);
 //       kind 'plain'    a command whose exit code is the whole verdict (no vitest report).
 //     `cwd` and every file name are relative to the repository root; `expectedFiles()` are the test files that must appear
 //     in the report; `allowedSkips` are `{ file, test, reason }` entries naming a test that always skips, by its full name.
@@ -152,6 +154,9 @@ export function reporterArgs(reportFile) {
   return ['--reporter=default', '--reporter=json', `--outputFile.json=${reportFile}`];
 }
 
+/** The uninstall round-trip gate (Story 45.3), relative to the repository root: it drives a terminal, so it runs in a container of its own. */
+export const UNINSTALL_GATE_FILE = 'packages/iris-mcp-all/src/__tests__/story-45-3-uninstall-round-trip-live-gate.test.ts';
+
 /** The `*.integration.test.ts` files under a package's `src`, relative to the repository root, sorted. */
 function integrationFiles(dir) {
   return walk(path.join(PACKAGES_DIR, dir, 'src'), ['.integration.test.ts']).map(relativeToRepo).sort();
@@ -174,6 +179,15 @@ function buildLiveSuites() {
     cwd: '.',
     command: ['node', 'scripts/throwaway-iris.mjs', 'run', '--image', OLDEST_IRIS_COMMUNITY_IMAGE, '--host-port', CI_HOST_PORTS.guard, '--', ...guardCommand],
     expectedFiles: guardFile,
+    allowedSkips: [],
+  };
+  // Story 45.3: the uninstall round trip installs through the built server and removes the IRIS side again, so it needs a container
+  // nothing else touches, and the state file of that container (the gate runs the terminal through `throwaway-iris.mjs session`).
+  suites['uninstall-round-trip'] = {
+    kind: 'own-container',
+    cwd: 'packages/iris-mcp-all',
+    command: ['pnpm', 'exec', 'vitest', 'run', UNINSTALL_GATE_FILE.replace('packages/iris-mcp-all/', '')],
+    expectedFiles: () => [UNINSTALL_GATE_FILE],
     allowedSkips: [],
   };
 
@@ -218,11 +232,14 @@ function buildLiveSuites() {
 /** Every armed suite, by id. */
 export const LIVE_SUITES = Object.freeze(buildLiveSuites());
 
-/** The ids of the suites that run inside the seeded throwaway (everything but the two that make their own container), in workflow order. */
-export const SEEDED_SUITE_IDS = Object.freeze(Object.keys(LIVE_SUITES).filter((id) => LIVE_SUITES[id].kind !== 'harness'));
+/** The ids of the suites that run inside the seeded throwaway (everything but the suites that make their own container), in workflow order. */
+export const SEEDED_SUITE_IDS = Object.freeze(Object.keys(LIVE_SUITES).filter((id) => LIVE_SUITES[id].kind !== 'harness' && LIVE_SUITES[id].kind !== 'own-container'));
 
 /** The ids of the two bootstrap-guard suites, which start their own container. */
 export const HARNESS_SUITE_IDS = Object.freeze(Object.keys(LIVE_SUITES).filter((id) => LIVE_SUITES[id].kind === 'harness'));
+
+/** The ids of the suites whose container the workflow's own steps start and remove (Story 45.3), in workflow order. */
+export const OWN_CONTAINER_SUITE_IDS = Object.freeze(Object.keys(LIVE_SUITES).filter((id) => LIVE_SUITES[id].kind === 'own-container'));
 
 /** Every test file a suite expects in its report, relative to the repository root, sorted. */
 export function coveredTestFiles() {
@@ -265,7 +282,9 @@ export const CI_LIVE_EXEMPTIONS = Object.freeze(
 const IF_SETUP = "${{ !cancelled() && steps.setup.outcome == 'success' }}";
 const IF_UP = "${{ !cancelled() && steps.up.outcome == 'success' }}";
 const IF_SEED = "${{ !cancelled() && steps.seed.outcome == 'success' }}";
+const IF_UNINSTALL_UP = "${{ !cancelled() && steps.uninstall.outcome == 'success' }}";
 const STATE_FILE = '${{ runner.temp }}/throwaway-live.json';
+const UNINSTALL_STATE_FILE = '${{ runner.temp }}/throwaway-uninstall.json';
 const HARNESS = 'node scripts/throwaway-iris.mjs';
 
 /** The session script that enables `%Service_DocDB` on the throwaway (Story 44.5), and the suite it runs immediately before. */
@@ -323,6 +342,14 @@ function buildDeclaredSteps() {
     ]),
     { run: `${HARNESS} logs --state ${STATE_FILE}`, if: '${{ failure() || cancelled() }}' },
     { run: `${HARNESS} down --state ${STATE_FILE}`, if: '${{ always() }}' },
+    // Story 45.3: the uninstall round trip has a container of its own, on the port the two guard suites used (their containers are gone),
+    // and runs through `exec` with the state file in its environment, because the gate drives an IRIS terminal through `session --state`.
+    ...OWN_CONTAINER_SUITE_IDS.flatMap((id) => [
+      { run: `${HARNESS} up --image ${IRISHEALTH_COMMUNITY_IMAGE} --namespace USER --host-port ${CI_HOST_PORTS.guard} --state ${UNINSTALL_STATE_FILE}`, id: 'uninstall', if: IF_SETUP },
+      { run: `THROWAWAY_STATE_FILE=${UNINSTALL_STATE_FILE} ${HARNESS} exec --state ${UNINSTALL_STATE_FILE} -- node scripts/ci-live-suite.mjs ${id}`, if: IF_UNINSTALL_UP },
+      { run: `${HARNESS} logs --state ${UNINSTALL_STATE_FILE}`, if: '${{ failure() || cancelled() }}' },
+      { run: `${HARNESS} down --state ${UNINSTALL_STATE_FILE}`, if: '${{ always() }}' },
+    ]),
   ];
 
   // Story 42.7 (DW-532): the launcher's whole suite on each runner of LAUNCHER_RUNNERS. It builds every package, because its real-CLI

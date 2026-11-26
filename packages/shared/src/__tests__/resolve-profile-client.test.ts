@@ -283,8 +283,14 @@ describe("resolveProfileClient — second-profile establishment + isolation (AC 
 
     // Also reachable through the server's own getOrCreateClient — same cache
     // (proves resolveProfileClient did not spin up a parallel/duplicate pool).
+    // (`ctx` hands out a per-call view of the cached client — Story 45.2 — so compare through the server's own cache.)
     const viaServer = await server.getOrCreateClient("second", true);
-    expect(viaServer.client).toBe(secondClient);
+    // The view reads every non-request member from the client it wraps, so a marker set on the server's cached client shows through
+    // the view only when the view wraps THAT client (a client that resolveProfileClient built for itself would not carry it).
+    const marker = "story-45-2-same-client";
+    (viaServer.client as unknown as Record<string, unknown>)["probe452"] = marker;
+    expect((secondClient as unknown as Record<string, unknown>)["probe452"]).toBe(marker);
+    expect(env.fetchMock.mock.calls.length).toBe(callsBeforeRepeat);
   });
 
   it("resolving the SAME name as the calling profile hits the fast path and returns the identical client", async () => {

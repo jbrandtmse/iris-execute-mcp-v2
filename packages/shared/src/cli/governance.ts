@@ -18,8 +18,8 @@
  *   deliberately the file's OWN value, not the cascade — the cascade view is
  *   `effective`.
  * - Analysis: `validate` (fail-fast parity with server startup), `effective`
- *   (the full 6-layer cascade for the CLI's own environment + the resolved
- *   file), `diff` (every file-layer entry compared against the default seed),
+ *   (the servers' cascade with the Story 45.4 `block` data-policy seed but without parent keys, over the frozen
+ *   baseline's keys plus, under `block`, the covered keys, for the CLI's own environment + the resolved file), `diff` (every file-layer entry compared against the default seed),
  *   `universe` (Story 32.2 — the FULL governed-key universe render: baseline ∪
  *   the five server packages' registered keys derived from built dist ∪ the
  *   framework discovery tool, with the REAL mutates/default-enabled
@@ -108,6 +108,13 @@ import {
   type ParentKeys,
   type UnmatchedGovernanceKey,
 } from "../governance.js";
+import {
+  DATA_POLICY_BLOCK_KEYS,
+  parseDataPolicyValue,
+  parseOperatorDataPolicy,
+  resolveDataPolicy,
+  type DataPolicy,
+} from "../data-policy.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 import { BASELINE_ACTION_CLASSIFICATIONS } from "../baseline-classifications.js";
 import { DEFAULT_PROFILE_NAME } from "../profiles.js";
@@ -560,11 +567,14 @@ Commands:
       never from a governance file.
   effective [--profile <name>] [--file <path>] [--json]
       Render the SAME cascade the servers compute — env.profile ??
-      env.global ?? file.profile ?? file.global ?? presetSeed ?? defaultSeed —
-      for the CLI's own environment plus the resolved file, with the per-key
-      configSource (env|file|preset|default). It is baseline-scoped and has no
-      tool list, so it never applies a parent key's inherited disable; only
-      "universe" does. Profile defaults to "default".
+      env.global ?? file.profile ?? file.global ?? dataPolicySeed ?? presetSeed
+      ?? defaultSeed — for the CLI's own environment plus the resolved file,
+      with the per-key configSource (env|file|dataPolicy|preset|default). It is
+      baseline-scoped and has no tool list, so it never applies a parent key's
+      inherited disable; only "universe" does. When the profile's data policy
+      resolves to block (IRIS_PROFILES entry, IRIS_DATA_POLICY, the file's
+      dataPolicy section), the covered raw-read and code-execution keys render
+      disabled with source dataPolicy. Profile defaults to "default".
   diff [--file <path>] [--json]
       Compare every key the file sets against its default-seed value.
   universe [--profile <name>] [--file <path>] [--root <path>] [--json]
@@ -574,8 +584,9 @@ Commands:
       baseline generator use) ∪ the framework iris_server_profiles tool —
       with the REAL mutates/default-enabled classifications, grouped per
       package, with each key's effective value and configSource (env|file|
-      parent|preset|default; "parent" marks a key that inherits a disable from
-      its parent key). This is the
+      parent|dataPolicy|preset|default; "parent" marks a key that inherits a
+      disable from its parent key, "dataPolicy" a key the block data policy
+      seeds disabled). This is the
       render iris_server_profiles computes on a running server over its own
       registered subset (post-foundation write keys seed default-DISABLED
       here, unlike "effective"/"diff", which stay baseline-scoped). The
@@ -987,6 +998,48 @@ async function cmdPreset(args: string[], deps: ResolvedDeps): Promise<number> {
 
 const EFFECTIVE_USAGE = "iris-mcp-governance effective [--profile <name>] [--file <path>] [--json]";
 
+/**
+ * The data policy a server would resolve for `profile` (Story 45.4, decision #169; AD-26), from the CLI's own
+ * environment and the resolved file: the `IRIS_PROFILES` entry's `dataPolicy`, then `IRIS_DATA_POLICY`, then
+ * the file's `dataPolicy` section, then `redact` - the servers' own resolution, through `resolveDataPolicy`.
+ * The `block` seed of the cascade reads it.
+ *
+ * @throws {Error} With the servers' own text when `IRIS_DATA_POLICY`, or the `dataPolicy` of an `IRIS_PROFILES`
+ *   entry, is not `block`, `redact` or `allow`. A `IRIS_PROFILES` value that is not JSON is not this command's
+ *   to judge (the servers refuse it at startup), so it counts as no entry.
+ */
+function resolveCliDataPolicy(
+  profile: string,
+  env: Record<string, string | undefined>,
+  fileConfig: GovernanceConfig | undefined,
+): DataPolicy {
+  const operator = parseOperatorDataPolicy(env);
+  let own: DataPolicy | undefined;
+  const raw = env.IRIS_PROFILES;
+  if (raw !== undefined && raw !== "") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = undefined;
+    }
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [name, entry] of Object.entries(parsed as Record<string, unknown>)) {
+        if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+        const value = (entry as { dataPolicy?: unknown }).dataPolicy;
+        if (value === undefined) continue;
+        const policy = parseDataPolicyValue(value);
+        if (policy === undefined) {
+          throw new Error(`IRIS_PROFILES is invalid: profile "${name}": "dataPolicy" must be "block", "redact" or "allow".`);
+        }
+        if (name === profile) own = policy;
+      }
+    }
+  }
+  const carrier = own === undefined ? { name: profile } : { name: profile, dataPolicy: own, dataPolicySource: "IRIS_PROFILES" as const };
+  return resolveDataPolicy(carrier, operator, fileConfig).policy;
+}
+
 /** Collect every key mentioned in any layer of a config (global + all profiles). */
 function mentionedKeys(config: GovernanceConfig | undefined, into: Set<string>): void {
   if (config === undefined) return;
@@ -1021,10 +1074,13 @@ async function cmdEffective(args: string[], deps: ResolvedDeps): Promise<number>
   let envConfig: GovernanceConfig;
   let preset: ReturnType<typeof parseGovernancePreset>;
   let fileConfig: GovernanceConfig | undefined;
+  let dataPolicy: DataPolicy;
   try {
     envConfig = parseGovernanceConfig(deps.env);
     preset = parseGovernancePreset(deps.env);
     fileConfig = file === undefined ? undefined : loadFileOrThrow(file);
+    // Story 45.4 (D5): the profile's data policy feeds the `block` seed, as it does on a server.
+    dataPolicy = resolveCliDataPolicy(profile, deps.env, fileConfig);
   } catch (e: unknown) {
     const message = errorMessage(e);
     deps.stderr.write(`Error: ${message}\n`);
@@ -1037,9 +1093,11 @@ async function cmdEffective(args: string[], deps: ResolvedDeps): Promise<number>
   // Key universe: frozen baseline ∪ keys mentioned in any config layer. The
   // servers ALSO union each registered tool's keys; a standalone CLI cannot
   // (Rule #45) — the post-foundation caveat is carried in the output `note`.
+  // Under `block` the covered keys are rendered too, so every one of them shows its seed.
   const keys = new Set<string>(GOVERNANCE_BASELINE);
   mentionedKeys(envConfig, keys);
   mentionedKeys(fileConfig, keys);
+  if (dataPolicy === "block") for (const key of DATA_POLICY_BLOCK_KEYS) keys.add(key);
   const sortedKeys = [...keys].sort();
 
   // SINGLE-SOURCED cascade render: the shared effective()/configSource()
@@ -1062,6 +1120,8 @@ async function cmdEffective(args: string[], deps: ResolvedDeps): Promise<number>
         preset,
         BASELINE_ACTION_CLASSIFICATIONS,
         fileConfig,
+        undefined,
+        dataPolicy,
       ),
     );
     Object.defineProperty(sources, key, {
@@ -1073,6 +1133,8 @@ async function cmdEffective(args: string[], deps: ResolvedDeps): Promise<number>
         preset,
         BASELINE_ACTION_CLASSIFICATIONS,
         fileConfig,
+        undefined,
+        dataPolicy,
       ),
       enumerable: true,
       writable: true,
@@ -1086,6 +1148,8 @@ async function cmdEffective(args: string[], deps: ResolvedDeps): Promise<number>
         profile,
         file: file ?? null,
         preset: preset ?? null,
+        // Present only under `block` (Story 45.4), so the output under `redact` and `allow` is byte-identical.
+        ...(dataPolicy === "block" ? { dataPolicy } : {}),
         policy,
         configSource: sources,
         note: POST_FOUNDATION_NOTE,
@@ -1095,7 +1159,8 @@ async function cmdEffective(args: string[], deps: ResolvedDeps): Promise<number>
     deps.stdout.write(
       `Effective governance policy for profile "${profile}"` +
         `${file === undefined ? "" : ` (file: ${file})`}` +
-        `${preset === undefined ? "" : ` (preset: ${preset})`}:\n`,
+        `${preset === undefined ? "" : ` (preset: ${preset})`}` +
+        `${dataPolicy === "block" ? " (data policy: block)" : ""}:\n`,
     );
     for (const key of sortedKeys) {
       deps.stdout.write(`  ${key} = ${policy[key]}   (source: ${sources[key]})\n`);
@@ -1403,10 +1468,13 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
   let envConfig: GovernanceConfig;
   let preset: ReturnType<typeof parseGovernancePreset>;
   let fileConfig: GovernanceConfig | undefined;
+  let dataPolicy: DataPolicy;
   try {
     envConfig = parseGovernanceConfig(deps.env);
     preset = parseGovernancePreset(deps.env);
     fileConfig = file === undefined ? undefined : loadFileOrThrow(file);
+    // Story 45.4 (D5): the profile's data policy feeds the `block` seed, as it does on a server.
+    dataPolicy = resolveCliDataPolicy(profile, deps.env, fileConfig);
   } catch (e: unknown) {
     return failOperational(errorMessage(e));
   }
@@ -1450,6 +1518,7 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
     BASELINE_ACTION_CLASSIFICATIONS,
     fileConfig,
     parentKeys,
+    dataPolicy,
   );
   const sources = getEffectiveConfigSources(
     profile,
@@ -1460,6 +1529,7 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
     BASELINE_ACTION_CLASSIFICATIONS,
     fileConfig,
     parentKeys,
+    dataPolicy,
   );
 
   // Per-key mutates classification for display (baseline classifications win,
@@ -1486,6 +1556,8 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
         profile,
         file: file ?? null,
         preset: preset ?? null,
+        // Present only under `block` (Story 45.4), so the output under `redact` and `allow` is byte-identical.
+        ...(dataPolicy === "block" ? { dataPolicy } : {}),
         universeSource: containerDir,
         packages: packagesOut,
         frameworkTool: { name: SERVER_DISCOVERY_TOOL_NAME, keys: frameworkKeys },
@@ -1502,7 +1574,8 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
     deps.stdout.write(
       `Governance universe for profile "${profile}"` +
         `${file === undefined ? "" : ` (file: ${file})`}` +
-        `${preset === undefined ? "" : ` (preset: ${preset})`}:\n` +
+        `${preset === undefined ? "" : ` (preset: ${preset})`}` +
+        `${dataPolicy === "block" ? " (data policy: block)" : ""}:\n` +
         `  derived from: ${containerDir} (${loaded.length} server packages + the framework tool)\n`,
     );
     const emitKey = (key: string): void => {

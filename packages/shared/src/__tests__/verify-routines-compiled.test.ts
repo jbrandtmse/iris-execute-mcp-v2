@@ -50,7 +50,10 @@ describe("verifyRoutinesCompiled (DW-759)", () => {
   });
 
   it("one docnames/RTN read per package root, filtered by the root, in the namespace and version asked", async () => {
-    const { http, get, post } = fakeHttp({ routines: [{ name: "A.One.mac", upd: true }, { name: "B.Two.mac", upd: true }] });
+    // Every asked name is listed, so the filtered list answers all of them and no index request is sent (DW-788).
+    const { http, get, post } = fakeHttp({
+      routines: [{ name: "A.One.mac", upd: true }, { name: "A.Three.mac", upd: true }, { name: "B.Two.mac", upd: true }],
+    });
 
     await verifyRoutinesCompiled(http, "HSCUSTOM", 8, ["A.One.mac", "A.Three.mac", "B.Two.mac"]);
 
@@ -125,12 +128,109 @@ describe("verifyCompiled batches its dictionary query (Story 44.7 review)", () =
 
   it("exactly 100 names is one query, and COMPILE_CHECK_BATCH is 100", async () => {
     const names = Array.from({ length: 100 }, (_, index) => `Big.C${index}.cls`);
-    const { http, post } = fakeHttp({});
+    // The list names every class, so only the dictionary query is a POST.
+    const { http, post } = fakeHttp({ classes: names.map((name) => ({ name, upd: true })) });
 
     await verifyCompiled(http, "HSCUSTOM", 8, names);
 
     expect(post).toHaveBeenCalledTimes(1);
     expect(COMPILE_CHECK_BATCH).toBe(100);
+  });
+});
+
+describe("DW-788: the documents the filtered list leaves out are read through action/index", () => {
+  // Plan probe P-788 (2026-11-26, IRIS Community 2026.2 Build 221U, throwaway 127.0.0.1:52792): `GET docnames/CLS?filter=ExecuteMCPv2.`
+  // answered 101 entries for `_SYSTEM` and 0 entries (HTTP 200, no error) for an account without SQL privileges, and `POST action/index`
+  // answered the same `upd` flag for both. Shape re-captured 2026-11-26 on irishealth-community 2026.2 (HSCUSTOM) with
+  // `client.post(".../action/index", ["ExecuteMCPv2.Setup.cls","ExecuteMCPv2.NoSuchClass.cls","ExecuteMCPv2.Utils.cls"])`: entries come back ordered
+  // by name, each `{name, db, ts, upd, cat, gen, others, status, content}`; a document that does not exist has `status`
+  // "ERROR #16005: Document 'ExecuteMCPv2.NoSuchClass.cls' does NOT exist", an empty `ts` and NO `upd` key.
+  const indexEntry = (name: string, upd: boolean | undefined) => ({
+    name,
+    db: upd === undefined ? "" : "HSCUSTOM",
+    ts: upd === undefined ? "" : "2026-11-26 16:16:55.415",
+    ...(upd === undefined ? {} : { upd }),
+    cat: "CLS",
+    status: upd === undefined ? `ERROR #16005: Document '${name}' does NOT exist` : "",
+  });
+
+  /** A fake whose `docnames` list is empty (the account has no SQL privileges) and whose `action/index` answers per name. */
+  function leastPrivilegeHttp(verdicts: Record<string, boolean | undefined>, compiledRows = true) {
+    const get = vi.fn(async (_path: string) => ({ result: { content: [] } }));
+    const post = vi.fn(async (path: string, body?: unknown) => {
+      if (path.endsWith("/action/index")) {
+        return { result: { content: (body as string[]).map((name) => indexEntry(name, verdicts[name])).sort((a, b) => a.name.localeCompare(b.name)) } };
+      }
+      const { parameters } = body as { parameters: string[] };
+      return { result: { content: parameters.map((ID) => ({ ID, Compiled: compiledRows ? 1 : 0, CompileError: 0 })) } };
+    });
+    return { http: { get, post } as unknown as IrisHttpClient, get, post };
+  }
+
+  it("an empty filtered list: one action/index with the names, and the classes it confirms are compiled", async () => {
+    const { http, get, post } = leastPrivilegeHttp({ "Pkg.A.cls": true, "Pkg.B.cls": true });
+
+    expect(await verifyCompiled(http, "HSCUSTOM", 8, ["Pkg.A.cls", "Pkg.B.cls"])).toEqual([]);
+
+    expect(get.mock.calls.map((call) => call[0])).toEqual(["/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=Pkg."]);
+    expect(post.mock.calls.map((call) => call[0])).toEqual([
+      "/api/atelier/v8/HSCUSTOM/action/query",
+      "/api/atelier/v8/HSCUSTOM/action/index",
+    ]);
+    expect(post.mock.calls[1]?.[1]).toEqual(["Pkg.A.cls", "Pkg.B.cls"]);
+  });
+
+  it("an uncompiled edit (upd false) and a missing document (no upd, an error status) are still named", async () => {
+    const { http } = leastPrivilegeHttp({ "Pkg.A.cls": true, "Pkg.Edited.cls": false, "Pkg.Gone.cls": undefined });
+
+    expect(await verifyCompiled(http, "HSCUSTOM", 8, ["Pkg.A.cls", "Pkg.Edited.cls", "Pkg.Gone.cls"])).toEqual([
+      "Pkg.Edited.cls",
+      "Pkg.Gone.cls",
+    ]);
+  });
+
+  it("the dictionary still decides: a class with no compiled class is named although the index says upd true", async () => {
+    const { http } = leastPrivilegeHttp({ "Pkg.A.cls": true }, false);
+
+    expect(await verifyCompiled(http, "HSCUSTOM", 8, ["Pkg.A.cls"])).toEqual(["Pkg.A.cls"]);
+  });
+
+  it("only the names the list left out are indexed, in batches of COMPILE_CHECK_BATCH", async () => {
+    const names = Array.from({ length: 250 }, (_, index) => `Big.C${index}.cls`);
+    const listed = names.slice(0, 5);
+    const get = vi.fn(async () => ({ result: { content: listed.map((name) => ({ name, cat: "CLS", ts: "x", upd: true, gen: false })) } }));
+    const post = vi.fn(async (path: string, body?: unknown) => {
+      if (path.endsWith("/action/index")) return { result: { content: (body as string[]).map((name) => indexEntry(name, true)) } };
+      return { result: { content: (body as { parameters: string[] }).parameters.map((ID) => ({ ID, Compiled: 1, CompileError: 0 })) } };
+    });
+
+    expect(await verifyCompiled({ get, post } as unknown as IrisHttpClient, "HSCUSTOM", 8, names)).toEqual([]);
+
+    const indexed = post.mock.calls.filter((call) => String(call[0]).endsWith("/action/index")).map((call) => call[1] as string[]);
+    expect(indexed.map((batch) => batch.length)).toEqual([100, 100, 45]);
+    expect(indexed.flat()).toEqual(names.slice(5));
+  });
+
+  it("a routine the RTN list left out is read through action/index with the .mac name", async () => {
+    const get = vi.fn(async () => ({ result: { content: [] } }));
+    const post = vi.fn(async (_path: string, body?: unknown) => ({
+      result: { content: (body as string[]).map((name) => ({ name, cat: "RTN", upd: name !== "Pkg.Bad.mac" })) },
+    }));
+
+    expect(await verifyRoutinesCompiled({ get, post } as unknown as IrisHttpClient, "HSCUSTOM", 8, ["Pkg.Good.mac", "Pkg.Bad.mac"])).toEqual([
+      "Pkg.Bad.mac",
+    ]);
+    expect(post.mock.calls).toEqual([["/api/atelier/v8/HSCUSTOM/action/index", ["Pkg.Good.mac", "Pkg.Bad.mac"]]]);
+  });
+
+  it("a failing index request throws: a check that cannot run is never a pass", async () => {
+    const get = vi.fn(async () => ({ result: { content: [] } }));
+    const post = vi.fn(async (path: string) => {
+      if (path.endsWith("/action/index")) throw new Error("ECONNRESET");
+      return { result: { content: [] } };
+    });
+
+    await expect(verifyCompiled({ get, post } as unknown as IrisHttpClient, "HSCUSTOM", 8, ["Pkg.A.cls"])).rejects.toThrow("ECONNRESET");
   });
 });
 

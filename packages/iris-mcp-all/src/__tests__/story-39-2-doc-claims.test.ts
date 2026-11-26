@@ -170,7 +170,7 @@ describe("Story 39.2: the root README states the variable, the refusal code, the
     expect(policy).toContain("`dataPolicy.profiles.<name>`");
     expect(policy).toContain("`IRIS_GOVERNANCE` rejects the key");
     expect(policy).toContain("`dataPolicySource`");
-    expect(policy).toContain("tool_support.md#phi-data-policy-scope-as-of-2026-10-17");
+    expect(policy).toContain("tool_support.md#phi-data-policy-scope-as-of-2026-11-26");
   });
 
   it("describes the preview as built: the class name for an HL7 v2 body, every other body withheld", () => {
@@ -195,8 +195,8 @@ describe("Story 39.2: tool_support.md and the interop README state the scope and
   const toolSupport = read("tool_support.md");
   const interopReadme = read("packages/iris-interop-mcp/README.md");
 
-  it("tool_support.md has the scope section, as of 2026-10-17 (moved from 2026-10-16 by Story 40.1), and the Story 39.2 note", () => {
-    expect(toolSupport).toContain("## PHI data policy scope (as of 2026-10-17)");
+  it("tool_support.md has the scope section, as of 2026-11-26 (moved from 2026-11-25 by Story 45.7, from 2026-10-17 by Story 45.4, and from 2026-10-16 by Story 40.1), and the Story 39.2 note", () => {
+    expect(toolSupport).toContain("## PHI data policy scope (as of 2026-11-26)");
     const note = squash(toolSupport.split("\n").find((line) => line.startsWith("> **Story 39.2")) ?? "");
     expect(note, "tool_support.md has the Story 39.2 note").not.toBe("");
     expect(note).toContain("No tool, action or governance key is added, so no default state and no tool count moves");

@@ -51,6 +51,33 @@ function versionReply(version: string): Response {
   return mockResponse(envelope({ content: [{ Version: version }] }));
 }
 
+/**
+ * The Atelier reply to the `Setup_Configure` / `Setup_ConfigureMapping` query when the procedure succeeded (DW-790). The queries wrap the
+ * call in `%ODBCOUT(...)`, which renders a success status as the string "1". Captured 2026-11-26 on a throwaway IRIS Community 2026.2
+ * (Build 221U): `POST action/query {"query":"SELECT %ODBCOUT(ExecuteMCPv2.Setup_Configure(?)) AS ConfigureResult","parameters":["USER"]}` as
+ * `_SYSTEM` answered `{"ConfigureResult":"1"}` (and `{"MappingResult":"1"}` for the mapping).
+ */
+function configureOkReply(): Response {
+  return mockResponse(envelope({ content: [{ ConfigureResult: "1" }] }));
+}
+
+/** See {@link configureOkReply}: the mapping's own column. */
+function mappingOkReply(): Response {
+  return mockResponse(envelope({ content: [{ MappingResult: "1" }] }));
+}
+
+/**
+ * The reply of a procedure that returned a failure status: HTTP 200 and the status's own text in the row. Plan probe P-X (2026-11-26, IRIS
+ * Community 2026.2 Build 221U), account `probelp` (role `%Development:U,%DB_USER:RW`, no `%Admin_Manage`), web application deleted:
+ * `SELECT %ODBCOUT(ExecuteMCPv2.Setup_Configure(?)) AS R` answered, in that image's Arabic message table,
+ * `"خطأ #5002: ObjectScript error: <PROTECT>Configure+9^ExecuteMCPv2.Setup.1 *\/usr/irissys/mgr/"`; the text below is that capture with the
+ * English prefix. The armed gate (`story-45-3-uninstall-round-trip-live-gate.test.ts`, DW-788 and DW-790 leg) reads the same row live.
+ */
+const PROTECT_TEXT = "ERROR #5002: ObjectScript error: <PROTECT>Configure+9^ExecuteMCPv2.Setup.1 */usr/irissys/mgr/";
+function configureFailureReply(column: "ConfigureResult" | "MappingResult", text: string = PROTECT_TEXT): Response {
+  return mockResponse(envelope({ content: [{ [column]: text }] }));
+}
+
 /** An Atelier reply to a query whose method does not exist, as a missing deployment answers it. */
 function missingMethodReply(): Response {
   return mockResponse(
@@ -687,7 +714,7 @@ describe("bootstrap", () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
-      setupCsrfThenRequest(envelope({ content: [] }));
+      setupCsrfThenRequest(envelope({ content: [{ ConfigureResult: "1" }] }));
 
       await configureWebApp(http, config, 7);
 
@@ -705,8 +732,9 @@ describe("bootstrap", () => {
       const body = JSON.parse(
         postCalls[0]![1].body as string,
       ) as { query: string; parameters?: string[] };
-      expect(body.query).toContain("ExecuteMCPv2.Setup_Configure");
-      expect(body.parameters).toContain("USER");
+      // DW-790: the status is rendered by %ODBCOUT, so a failure carries IRIS's own text in the row.
+      expect(body.query).toBe("SELECT %ODBCOUT(ExecuteMCPv2.Setup_Configure(?)) AS ConfigureResult");
+      expect(body.parameters).toEqual(["USER"]);
 
       http.destroy();
     });
@@ -814,9 +842,9 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       queueCompileCheck(fetchMock);
       // Configure: POST response
-      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      fetchMock.mockResolvedValueOnce(configureOkReply());
       // Package mapping: POST response
-      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      fetchMock.mockResolvedValueOnce(mappingOkReply());
       // EnsureUnitTestRoot: POST response
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })),
@@ -897,7 +925,7 @@ describe("bootstrap", () => {
         ),
       );
       // Package mapping: still attempted after configure failure
-      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      fetchMock.mockResolvedValueOnce(mappingOkReply());
       // EnsureUnitTestRoot: still attempted
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })),
@@ -919,6 +947,104 @@ describe("bootstrap", () => {
       );
 
       http.destroy();
+    });
+
+    // DW-790: Atelier answers HTTP 200 for a Setup procedure that returned a failure status, with the status's own text in the row
+    // (probe P-790: an account without %Admin_Manage, web application deleted). The old code ignored the row and reported success.
+    describe("the status row of Configure and ConfigureMapping (DW-790)", () => {
+      /** An unconfigured start whose Configure and mapping replies are the two given. */
+      async function unconfiguredStart(configureReply: Response, mappingReply: Response) {
+        const config = makeConfig();
+        const http = new IrisHttpClient(config);
+        setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
+        fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 0 }] })));
+        fetchMock.mockResolvedValueOnce(guardAbsentReply());
+        fetchMock.mockResolvedValueOnce(versionReply(BOOTSTRAP_VERSION));
+        fetchMock.mockResolvedValueOnce(guardAbsentReply());
+        fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+        queueCompileCheck(fetchMock);
+        fetchMock.mockResolvedValueOnce(configureReply);
+        fetchMock.mockResolvedValueOnce(mappingReply);
+        fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
+        const result = await bootstrap(http, config, 7);
+        http.destroy();
+        return result;
+      }
+
+      it('"1" in both rows: configured and mapped, no error (the success path is unchanged)', async () => {
+        const result = await unconfiguredStart(configureOkReply(), mappingOkReply());
+
+        expect(result).toMatchObject({ configured: true, mapped: true, errors: [] });
+        expect(result.manualInstructions).toBeUndefined();
+      });
+
+      it("the number 1 in a row is a success too", async () => {
+        const result = await unconfiguredStart(
+          mockResponse(envelope({ content: [{ ConfigureResult: 1 }] })),
+          mockResponse(envelope({ content: [{ MappingResult: 1 }] })),
+        );
+
+        expect(result).toMatchObject({ configured: true, mapped: true, errors: [] });
+      });
+
+      it("a refused Configure (HTTP 200, the status text in the row): configured false, the text in errors, manual instructions set", async () => {
+        const result = await unconfiguredStart(configureFailureReply("ConfigureResult"), mappingOkReply());
+
+        expect(result.configured).toBe(false);
+        expect(result.errors).toEqual([`Configure failed: ${PROTECT_TEXT}`]);
+        expect(result.manualInstructions).toContain("Terminal");
+        expect(result.mapped, "the mapping is a separate step").toBe(true);
+        // mutation: the row ignored (the code before Story 45.7) -> `configured` reads true and `errors` is empty.
+      });
+
+      it("a refused mapping: mapped false and `Package mapping failed: <row text>`; Configure is still judged on its own row", async () => {
+        const result = await unconfiguredStart(configureOkReply(), configureFailureReply("MappingResult"));
+
+        expect(result.configured).toBe(true);
+        expect(result.mapped).toBe(false);
+        expect(result.errors).toEqual([`Package mapping failed: ${PROTECT_TEXT}`]);
+      });
+
+      it("a localized prefix is carried as IRIS wrote it (Rule #13): no stripping, no rewording", async () => {
+        const arabic = "خطأ #5002: ObjectScript error: <PROTECT>Configure+9^ExecuteMCPv2.Setup.1";
+        const result = await unconfiguredStart(configureFailureReply("ConfigureResult", arabic), mappingOkReply());
+
+        expect(result.errors).toEqual([`Configure failed: ${arabic}`]);
+      });
+
+      it("the row text is one line of at most 300 characters", async () => {
+        const result = await unconfiguredStart(configureFailureReply("ConfigureResult", `ERROR #5001:\n${"x".repeat(900)}`), mappingOkReply());
+
+        const text = (result.errors[0] as string).slice("Configure failed: ".length);
+        expect(text).not.toContain("\n");
+        expect(text.length).toBeLessThanOrEqual(303);
+        expect(text.endsWith("...")).toBe(true);
+      });
+
+      it.each([
+        ["no row", mockResponse(envelope({ content: [] }))],
+        ["a row without the column", mockResponse(envelope({ content: [{ Other: "1" }] }))],
+        ["an empty value", mockResponse(envelope({ content: [{ ConfigureResult: "" }] }))],
+        ["a null value", mockResponse(envelope({ content: [{ ConfigureResult: null }] }))],
+      ])("%s: a failure that says it returned no status", async (_name, reply) => {
+        const result = await unconfiguredStart(reply, mappingOkReply());
+
+        expect(result.configured).toBe(false);
+        expect(result.errors).toEqual(["Configure failed: returned no status"]);
+      });
+
+      it("the queries are the %ODBCOUT forms, each in its own column", async () => {
+        await unconfiguredStart(configureOkReply(), mappingOkReply());
+
+        const queries = fetchMock.mock.calls
+          .filter((call: unknown[]) => (call[1] as { method?: string }).method === "POST")
+          .map((call: unknown[]) => (JSON.parse((call[1] as { body: string }).body) as { query?: string }).query)
+          .filter((query): query is string => typeof query === "string" && query.includes("Setup_Configure"));
+        expect(queries).toEqual([
+          "SELECT %ODBCOUT(ExecuteMCPv2.Setup_Configure(?)) AS ConfigureResult",
+          "SELECT %ODBCOUT(ExecuteMCPv2.Setup_ConfigureMapping(?)) AS MappingResult",
+        ]);
+      });
     });
 
     it("should run full install when probe is missing", async () => {
@@ -969,14 +1095,10 @@ describe("bootstrap", () => {
       queueCompileCheck(fetchMock);
 
       // Configure: POST response
-      fetchMock.mockResolvedValueOnce(
-        mockResponse(envelope({ content: [] })),
-      );
+      fetchMock.mockResolvedValueOnce(configureOkReply());
 
       // Package mapping: POST response
-      fetchMock.mockResolvedValueOnce(
-        mockResponse(envelope({ content: [] })),
-      );
+      fetchMock.mockResolvedValueOnce(mappingOkReply());
 
       // EnsureUnitTestRoot: SQL POST returning the resulting global value
       fetchMock.mockResolvedValueOnce(
@@ -1114,9 +1236,9 @@ describe("bootstrap", () => {
         mockResponse(envelope({ content: [{ Configured: 0 }] })),
       );
       // Configure: POST response (self-heal)
-      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      fetchMock.mockResolvedValueOnce(configureOkReply());
       // Package mapping: POST response (self-heal)
-      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      fetchMock.mockResolvedValueOnce(mappingOkReply());
       // EnsureUnitTestRoot: POST response
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })),
@@ -1216,9 +1338,7 @@ describe("bootstrap", () => {
       );
 
       // Package mapping: POST response (still attempted after configure failure)
-      fetchMock.mockResolvedValueOnce(
-        mockResponse(envelope({ content: [] })),
-      );
+      fetchMock.mockResolvedValueOnce(mappingOkReply());
 
       // EnsureUnitTestRoot: still attempted after configure failure (independent step)
       fetchMock.mockResolvedValueOnce(
@@ -1673,8 +1793,8 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(guardAbsentReply());
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       queueCompileCheck(fetchMock);
-      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
-      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      fetchMock.mockResolvedValueOnce(configureOkReply());
+      fetchMock.mockResolvedValueOnce(mappingOkReply());
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
 
       const result = await bootstrap(http, config, 7);
