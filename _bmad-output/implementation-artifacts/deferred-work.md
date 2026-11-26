@@ -4479,3 +4479,4 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-45-6-epic-45-burn-down-iris-side.md | severity: med | fix-risk: low | footprint: in-footprint
 - evidence: 45.6 mutation B exposed it: packages/shared/src/bootstrap.ts configureWebApp/configurePackageMapping read the SQL call's success, not the %Status value in the result row
 - 2026-11-26T13:13:59Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=harvest note=45.7 (TypeScript): read the returned %Status and report the step failed with its text; mutation-prove
+- 2026-11-26T13:16:44Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=lead note=Planner 2026-11-26: accepted for 45.7 and it matters (hides real failures from every user): read the %Status row of both calls, report the failure text, pin with the live refusal path (an account without %Admin_Manage), mutation-verify
