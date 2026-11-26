@@ -4504,3 +4504,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-45-7-epic-45-burn-down-typescript-and-docs.md | severity: low | fix-risk: low | footprint: in-footprint
 - evidence: 45.7 plan probe P-784 on a throwaway Community 2026.2: %Development:U + %DB_USER:RW, no SQL grants, through the built dev server; _SYSTEM analyzed 1 of 20; cause not investigated (likely the 45.1 privilege check on the advise-data route)
 - 2026-11-26T15:57:54Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=harvest note=Routed into 45.7 (it touches iris_sql_analyze for DW-784): probe the cause; if it is the account's own privileges refusing (45.1's checkPriv), close as by-design with the error text naming the reason; if it is a defect, fix it with a live proof
+
+### DW-794: iris_sql_analyze advise in workload mode mostly analyzes its own earlier EXPLAIN statements on a quiet instance (each run adds SELECT %SYSTEM.QUERY_PLAN rows to the statement index)
+- source: spec-45-7-epic-45-burn-down-typescript-and-docs.md | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: 45.7 build (after the DW-793 fix), on a Community throwaway
+- 2026-11-26T18:12:08Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=harvest note=Fix in this story (cheap, the epic's last story): exclude the tool's own QUERY_PLAN/EXPLAIN statements from the workload candidates; pin with a unit test and a mutation
