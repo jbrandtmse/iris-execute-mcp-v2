@@ -4449,3 +4449,4 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-45-5-what-the-safety-settings-protect.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: 45.5 plan probe side finding on IRIS for Health 2026.2; not checked on the iris-community edition
 - 2026-11-26T08:04:18Z status=routed owner=burndown by=cr note=Probe first: confirm on both editions; decide whether the bootstrap should skip or tolerate the Interop handler in a non-interop namespace, and what the docs say
+- 2026-11-26T08:05:09Z status=routed owner=burndown by=lead note=Planner 2026-11-26: probe first on both editions; if it reproduces, the fix keeps a non-interop namespace installing cleanly (skip REST.Interop there with a clear report, or make it compile), never a half-compiled package
