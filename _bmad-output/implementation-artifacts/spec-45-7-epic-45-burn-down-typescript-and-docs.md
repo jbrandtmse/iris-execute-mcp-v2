@@ -114,6 +114,13 @@ deferred:
 
 ## Spec Change Log
 
+- 2026-11-26 (lead, after QA; BINDING directives for code review, decision #181):
+  1. **DW-794.** Workload `advise` must exclude the tool's own earlier `EXPLAIN`/`%SYSTEM.QUERY_PLAN` statements from its candidates. Pin with a unit test and a mutation.
+  2. **R10 on Community (the Planner).** QA proved on a Community throwaway that the real route is refused: `iris_sql_query` → `Setup_ConfigureMapping`/`Setup_Configure` refused, `%ALL`, the mapping and `iris.cpf` unchanged, and the namespace table works. Record that in Verification as the evidence. Make `SetupTest.TestGuardRefusesInTransactionDuringWebRequest` edition-independent: when no second namespace exists, create a disposable one over its own database and drop it in `OnAfterOneTest`, so the test never stays in a broken state. It must pass on both editions; run it on a Community throwaway and on IRIS for Health.
+  3. **Community CI leg (the Planner).** If it is cheap, add the R10 route-refusal leg to CI on the Community image. The throwaway job already pulls Community images for `bootstrap-guard-oldest` and `ci-ipm-archive`, so look at `.github/workflows/ci.yml` and `scripts/lib/ci-checks.mjs`. Keep its wiring tests in step. If it is not cheap, say why; the lead smoke then records the Community leg as the evidence.
+  4. **CHANGELOG consistency.** The 45.5 bullet still says `block` turns off 12 keys and lists `iris_sql_analyze` as "under probe". Make the unreleased 1.3.0 notes agree with 45.7 (15 keys, outcome known), and keep the pins in step.
+  5. **README.** The sentence "Under `redact`, the dev server's startup warning also names those three SQL analyzer keys" holds only when the tool is visible (the default `full` preset). Qualify it.
+
 - 2026-11-26 (lead, spec gate, decisions #179 and #180; BINDING):
   - **D1 is prevention, ruled by the Planner.** `BOOTSTRAP_VERSION` moves once, `+12` → `+13`.
   - **D2–D5 and A1–A4 are accepted.** A1–A4 are applied to `epics.md`.
