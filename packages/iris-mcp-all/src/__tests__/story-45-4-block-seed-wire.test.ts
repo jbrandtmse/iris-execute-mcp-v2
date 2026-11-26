@@ -293,6 +293,24 @@ describe("Story 45.4: block denies every covered key before IRIS (AC 45.4.2, AC 
     });
   });
 
+  // Story 45.7 QA (DW-784, decision D2 and the residual row): the documents say `explain` and `indexUsage` stay on under block and that `advise`
+  // goes off in BOTH modes (the key is the action). Neither claim had a wire case: the covered list above calls `advise` with `workload: true` only.
+  // mutation: `iris_sql_analyze:explain` added to DATA_POLICY_BLOCK_KEYS -> the explain call is denied; `advise` dropped -> the query-mode call reaches IRIS.
+  it("dev: under block iris_sql_analyze explain and indexUsage are not denied and reach IRIS (the residual), and advise with a query is denied like the workload mode", async (ctx) => {
+    if (skipIfReason(skipReason, ctx)) return;
+    await serve("dev", { IRIS_DATA_POLICY: "block" }, async (served) => {
+      for (const action of ["explain", "indexUsage"]) {
+        const open = await callCounted(served, { key: `iris_sql_analyze:${action}`, tool: "iris_sql_analyze", args: { action, query: "SELECT 1" } });
+        expect(isDenied(open.result), `${action} is not denied by the data policy`).toBe(false);
+        expect(open.requests, `${action} reaches IRIS`).toBeGreaterThan(0);
+      }
+      const advise = await callCounted(served, { key: "iris_sql_analyze:advise", tool: "iris_sql_analyze", args: { action: "advise", query: "SELECT 1" } });
+      expect(advise.result.isError).toBe(true);
+      expect(advise.result.structuredContent).toEqual(governanceDenial("iris_sql_analyze:advise", { dataPolicyApplied: "block" }));
+      expect(advise.requests, "a denied advise (query mode) sends nothing to IRIS").toBe(0);
+    });
+  });
+
   it("interop and data: the covered keys (docdb delete included) are denied the same way; the docdb insert action is not covered", async (ctx) => {
     if (skipIfReason(skipReason, ctx)) return;
     await serve("interop", { IRIS_DATA_POLICY: "block" }, async (served) => {

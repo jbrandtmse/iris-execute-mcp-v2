@@ -852,6 +852,87 @@ describe("Story 45.3: the careful uninstall round trip on a throwaway IRIS for H
     }
   });
 
+  // Story 45.7 QA (DW-792, Planner binding 1 and 2): the failed-IPM-install shape, repeatably. IPM runs `ConfigureMapping` inside a
+  // transaction with no web request and rolls it back when a LATER step fails, after our last invoke has returned. A terminal
+  // `TSTART` ... `TROLLBACK` around `Configure` and `ConfigureMapping` is that transaction (plan probe P-792 measured `$TLEVEL=1`
+  // and no `%request` inside IPM's phase). The real IPM leg (`zpm "load <dir>"` of a module whose last Invoke fails, on this image
+  // with the IPM that ships in /usr/irissys/dist/install/misc/zpm.xml) was run by hand in the QA pass: see the story's QA record.
+  // mutation: the suspension removed from `ConfigureMapping` (`Setup.cls`, regenerated, redeployed) -> this leg is red at "%ALL
+  // survives the rollback" (and the namespace table then refuses a new namespace).
+  leg("DW-792: after a rolled-back install transaction (the shape of a failed IPM install) %ALL, the mapping and their record survive, the namespace table works, a new namespace can be entered over iris session and Atelier, nothing stays suspended, and the uninstall removes and reports both", async () => {
+    await install("USER");
+    // %ALL, the mapping and their record nodes removed, so the transactional ConfigureMapping below has to create them.
+    terminal("%SYS", ['Set sc=##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")', 'Set sc=##class(Config.Namespaces).Delete("%ALL")']);
+    terminal("USER", ['Kill ^ExecuteMCPv2.InstallRecord("all")', 'Kill ^ExecuteMCPv2.InstallRecord("mapping")']);
+    const cpfAllLines = (): number => {
+      const printed = terminal("%SYS", [
+        `Set f=##class(%Stream.FileCharacter).%New() Set sc=f.LinkToFile($System.Util.InstallDirectory()_"iris.cpf") Set n=0 While 'f.AtEnd { Set l=f.ReadLine() If l["%ALL" Set n=n+1 } Write "CPFALL=",n,!`,
+      ]);
+      const line = outputLines(printed).find((entry) => entry.startsWith("CPFALL="));
+      if (line === undefined) throw new Error(`the iris.cpf read printed no count: ${printed.slice(-400)}`);
+      return Number(line.slice("CPFALL=".length));
+    };
+    try {
+      const before = snapshot();
+      expect(before["%ALL"], "precondition: %ALL is absent").toBe("0");
+      expect(before["record USER"], "precondition: the record holds no all or mapping node").not.toContain("all=");
+      expect(cpfAllLines(), "precondition: iris.cpf holds no %ALL line").toBe(0);
+
+      const phase = outputLines(
+        terminal("USER", [
+          "TSTART",
+          'Write "TLEVEL=",$TLevel,!',
+          'Write "REQUEST=",$IsObject($Get(%request)),!',
+          'Write "SUSPENDED-BEFORE=",##class(%SYSTEM.Process).TransactionsSuspended(),!',
+          'Write "CONFIGURE-OK=",$System.Status.IsOK(##class(ExecuteMCPv2.Setup).Configure("USER")),!',
+          'Write "MAPPING-OK=",$System.Status.IsOK(##class(ExecuteMCPv2.Setup).ConfigureMapping("USER")),!',
+          'Write "SUSPENDED-AFTER-CALL=",##class(%SYSTEM.Process).TransactionsSuspended(),!',
+          // The later step of the install fails: the transaction is rolled back after the Setup calls have returned.
+          "TROLLBACK",
+          'Write "TLEVEL-AFTER=",$TLevel,!',
+          'Write "SUSPENDED-AFTER-ROLLBACK=",##class(%SYSTEM.Process).TransactionsSuspended(),!',
+        ]),
+      );
+      const field = (name: string): string => (phase.find((line) => line.startsWith(`${name}=`)) ?? "").slice(name.length + 1);
+      expect(field("TLEVEL"), "the phase runs inside a transaction").toBe("1");
+      expect(field("REQUEST"), "and with no web request").toBe("0");
+      expect(field("CONFIGURE-OK")).toBe("1");
+      expect(field("MAPPING-OK")).toBe("1");
+      expect(field("SUSPENDED-BEFORE"), "transactions are not suspended when the install calls in").toBe("0");
+      expect(field("SUSPENDED-AFTER-CALL"), "the suspension is undone before ConfigureMapping returns, so IPM's later steps run transactionally").toBe("0");
+      expect(field("TLEVEL-AFTER")).toBe("0");
+      expect(field("SUSPENDED-AFTER-ROLLBACK"), "the process is not suspended afterwards").toBe("0");
+
+      const after = snapshot();
+      expect(after["%ALL"], "%ALL survives the rollback").toBe("1");
+      expect(after["map Config.MapPackages:List"], "and so does the ExecuteMCPv2 mapping").toMatch(/^1 ExecuteMCPv2;/);
+      expect(after["record USER"], "the install record keeps %ALL as created").toContain("all=created;");
+      expect(after["record USER"], "and the mapping as created").toContain("mapping=created;");
+      expect(cpfAllLines(), "iris.cpf and the configuration agree: %ALL is in the configuration file").toBeGreaterThan(0);
+
+      // The namespace table works: the list reads, and a namespace created now is entered from a terminal and over Atelier.
+      const listed = terminal("%SYS", ['Set rs=##class(%ResultSet).%New("Config.Namespaces:List") Set sc=rs.Execute("*") Write "NSLIST-SC=",sc,!']);
+      expect(outputLines(listed), "Config.Namespaces:List reads").toContain("NSLIST-SC=1");
+      terminal("%SYS", SCRATCH_NAMESPACE_SCRIPT);
+      expect(outputLines(terminal("UNINSTALLNS", ['Write "ENTERED=",$NAMESPACE,!'])), "iris session -U <new namespace> exits 0 and enters it").toContain("ENTERED=UNINSTALLNS");
+      const entered = await fetch(`http://${target.host}:${target.port}/api/atelier/v8/UNINSTALLNS`, {
+        headers: { Accept: "application/json", Authorization: `Basic ${Buffer.from(`${target.username}:${target.password}`).toString("base64")}` },
+        signal: AbortSignal.timeout(60_000),
+      });
+      expect(entered.status, "Atelier GET /api/atelier/v8/<new namespace> answers 200").toBe(200);
+
+      // The uninstall removes what the failed install left, and the report names both.
+      const run = runUninstall("USER");
+      expect(run.statusOk, `the uninstall returns OK: ${run.statusText}`).toBe(true);
+      expect(run.lines, "the report names the mapping").toContain(MAPPING_LINE);
+      expect(run.lines, "and %ALL as removed").toContain("Removed: %ALL");
+    } finally {
+      // A rollback that had taken %ALL out of the configuration leaves a namespace table that refuses new namespaces, which would fail
+      // the legs that follow for this leg's reason (the DW-786 leg does the same).
+      terminal("%SYS", ["Set sc=##class(Config.Namespaces).ActivateAll()"]);
+    }
+  });
+
   leg("DW-787: the real bootstrap into a namespace that is not interoperability-enabled compiles every class, ExecuteMCPv2.REST.Interop included, and configures the web application and the mapping", async () => {
     terminal("%SYS", SCRATCH_NAMESPACE_SCRIPT);
     // Precondition: UNINSTALLNS cannot see the interoperability classes, so a compile-time Ens reference would fail there.
