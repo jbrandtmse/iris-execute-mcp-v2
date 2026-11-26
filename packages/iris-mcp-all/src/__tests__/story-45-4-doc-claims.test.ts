@@ -77,10 +77,36 @@ describe("Story 45.4: the root README (AC 45.4.7)", () => {
     expect(text).toContain("A call's own arguments can never re-enable a tool.");
   });
 
-  it("describes the startup warning, and says allow is not a way out", () => {
+  it("describes the startup warning, its reason per policy, and says allow is not a way out", () => {
     expect(text).toContain("**The startup warning.**");
     expect(text).toContain("at most one `[WARN]` line at startup, from configuration alone and before any request to IRIS");
+    expect(text).toContain("a `redact` group says that `redact` covers message bodies only;");
+    expect(text).toContain(
+      "a `block` group says an explicit governance key re-enabled its tools and names, after each tool, the setting that did (`from IRIS_GOVERNANCE` or `from IRIS_GOVERNANCE_FILE`, as its `configSource` `env` or `file`)",
+    );
+    expect(text).toContain(
+      '`[WARN] Data policy: an explicit governance key re-enabled these raw-read and code-execution tools under "block", so their results are not withheld: profile "default" (block, re-enabled by an explicit governance key): iris_sql_query from IRIS_GOVERNANCE. To turn them off again, remove those keys or set them to false in the setting named. See "PHI data policy" in the README.`',
+    );
     expect(text).toContain("`allow` is not a way out, because it loosens message bodies.");
+  });
+
+  it("decision #172: delete is covered with get, and insert and update stay on (DW-782)", () => {
+    expect(text).toContain(
+      "`iris_docdb_document:delete` is a write, enabled by default, but it returns the document it deletes, so it reads a stored document by its ID, and `block` turns it off with `get`.",
+    );
+    expect(text).toContain("The insert and update actions stay on: they return the content the caller sent.");
+    expect(text).not.toContain("the insert, update and delete actions of `iris_docdb_document` stay on");
+  });
+
+  it("names dataPolicyApplied among the audit entry's denial fields", () => {
+    expect(text).toContain('or `dataPolicyApplied: "block"` when the [`block` data policy](#phi-data-policy) seeded the key off');
+  });
+
+  it("documents the CLI's block-only additions (the header and the --json dataPolicy member)", () => {
+    const effective = lineStarting(readme, "| `effective [--profile <name>] [--json]` |");
+    expect(effective).toContain('the text header then adds ` (data policy: block)` and the `--json` object gains `"dataPolicy": "block"`');
+    const universe = lineStarting(readme, "| `universe [--profile <name>] [--root <path>] [--json]` |");
+    expect(universe).toContain('the `--json` object gains `"dataPolicy": "block"` (absent under `redact` and `allow`)');
   });
 
   it("states what block does not cover, and the advice to pair it with the read-only preset", () => {
@@ -114,6 +140,8 @@ describe("Story 45.4: the server READMEs and the shared README", () => {
     expect(row).toContain('{"profiles":{"prod":{"iris_sql_query":true}}}');
     expect(row).toContain("`IRIS_TOOLS_ENABLE` only shows a tool and does not.");
     expect(row).toContain("one startup `[WARN]` line");
+    expect(row).toContain("under `block` the line names only the ones an explicit key re-enabled, and the setting that did");
+    expect(row).toContain(SANCTION);
   });
 
   it("interop: the row and the section name iris_transform_test, its re-enable and the warning", () => {
@@ -127,12 +155,15 @@ describe("Story 45.4: the server READMEs and the shared README", () => {
     expect(text).toContain("`IRIS_TOOLS_ENABLE` only shows a tool and does not.");
   });
 
-  it("data: the row names both docdb keys, the actions that stay on and the warning", () => {
+  it("data: the row names the three docdb keys, the actions that stay on, the warning and the sanction id", () => {
     const row = lineStarting(read("packages/iris-data-mcp/README.md"), "| `IRIS_DATA_POLICY` |");
     expect(row).toContain("`iris_docdb_document:get`");
+    expect(row).toContain("`iris_docdb_document:delete` (it returns the document it deletes; the `insert` and `update` actions stay on)");
     expect(row).toContain("`iris_docdb_find`");
-    expect(row).toContain("the `insert`, `update` and `delete` actions stay on");
+    expect(row).not.toContain("`delete` actions stay on");
     expect(row).toContain("one startup `[WARN]` line");
+    expect(row).toContain("under `block` the line names only the ones an explicit key re-enabled");
+    expect(row).toContain(SANCTION);
   });
 
   it("the shared README describes the 8-step cascade with the block seed", () => {
@@ -145,10 +176,11 @@ describe("Story 45.4: the server READMEs and the shared README", () => {
 describe("Story 45.4: tool_support.md", () => {
   const toolSupport = read("tool_support.md");
 
-  it("has the dated note: no key, tool or default moves under redact or allow; block seeds the 11 keys off and an explicit key re-enables", () => {
+  it("has the dated note: no key, tool or default moves under redact or allow; block seeds the 12 keys off and an explicit key re-enables", () => {
     const note = lineStarting(toolSupport, "> **Story 45.4 (2026-11-25)");
     expect(note, "tool_support.md has the Story 45.4 note").not.toBe("");
     expect(note).toContain("governance defaults under block:");
+    expect(note).toContain("`iris_docdb_document:get`, `iris_docdb_document:delete` and `iris_docdb_find`, 12 keys;");
     expect(note).toContain("no tool, action or governance key is added, so no default state and no tool count moves");
     expect(note).toContain("Under `redact` and `allow` and with no policy set, no key's enabled state and no `configSource` changes on any server.");
     expect(note).toContain('`GOVERNANCE_DISABLED` plus `dataPolicyApplied: "block"`');

@@ -857,7 +857,7 @@ describe("Story 39.2: the governance file's dataPolicy section", () => {
 });
 
 describe("Story 45.4: effective applies the block data-policy seed (decision #169, D5)", () => {
-  /** The covered keys that `effective` renders: the 11 of the declaration, all of them under block. */
+  /** The covered keys that `effective` renders: the 12 of the declaration, all of them under block. */
   const COVERED = DATA_POLICY_BLOCK_KEYS;
 
   async function renderEffective(

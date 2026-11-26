@@ -112,13 +112,16 @@ const INTEROP_COVERED: Covered[] = [
 ];
 const DATA_COVERED: Covered[] = [
   { key: "iris_docdb_document:get", tool: "iris_docdb_document", args: { action: "get", database: "Story454", id: "1" } },
+  // Decision #172 (DW-782): delete returns the document it deletes, so block covers it with get.
+  { key: "iris_docdb_document:delete", tool: "iris_docdb_document", args: { action: "delete", database: "Story454", id: "1" } },
   { key: "iris_docdb_find", tool: "iris_docdb_find", args: { database: "Story454", filter: {} } },
 ];
 
 /** The keys the default (redact) dev server lists in its warning: `iris_test_coverage` is a disabled write. */
 const DEV_WARNED = DEV_COVERED.map((entry) => entry.key).filter((key) => key !== "iris_test_coverage");
 
-// -- The hand-written warning text (decision #170 item 2; the unit test pins the same wording) ----------------
+// -- The hand-written warning text (decision #170 item 2, amended for #172: one wording per policy mix; the unit
+// -- test pins the same three variants) -------------------------------------------------------------------------
 
 const WARNING_LEAD =
   '[WARN] Data policy: "redact" covers message bodies only, so these raw-read and code-execution tools are enabled and ' +
@@ -126,8 +129,21 @@ const WARNING_LEAD =
 const WARNING_TAIL =
   ". To turn tools off, set their governance keys to false (IRIS_GOVERNANCE or IRIS_GOVERNANCE_FILE) or set " +
   'IRIS_DATA_POLICY=block. See "PHI data policy" in the README.';
+/** Only `redact` groups. */
 const warningOf = (groups: string): string => `${WARNING_LEAD}${groups}${WARNING_TAIL}`;
+/** Only `block` groups: no `redact` sentence and no `block` offer. */
+const blockWarningOf = (groups: string): string =>
+  '[WARN] Data policy: an explicit governance key re-enabled these raw-read and code-execution tools under "block", ' +
+  `so their results are not withheld: ${groups}. To turn them off again, remove those keys or set them to false in ` +
+  'the setting named. See "PHI data policy" in the README.';
+/** Both: each group carries its own reason. */
+const mixedWarningOf = (groups: string): string =>
+  "[WARN] Data policy: these raw-read and code-execution tools are enabled, so their results are not redacted or " +
+  `withheld: ${groups}${WARNING_TAIL}`;
 const REENABLED = "block, re-enabled by an explicit governance key";
+const REDACT_MIXED = "redact, which covers message bodies only";
+/** How the line names the setting behind a re-enabled key, by its `configSource`. */
+const FROM = { env: "from IRIS_GOVERNANCE", file: "from IRIS_GOVERNANCE_FILE" } as const;
 
 // -- The harness -------------------------------------------------------------------------------------------
 
@@ -215,13 +231,15 @@ describe("Story 45.4: the default install (redact) keeps every tool and names th
     });
   });
 
-  it("interop names iris_transform_test, data names both docdb keys, admin and ops write no line", async (ctx) => {
+  it("interop names iris_transform_test, data names the three docdb keys, admin and ops write no line", async (ctx) => {
     if (skipIfReason(skipReason, ctx)) return;
     await serve("interop", {}, async (served) => {
       expect(warningLines(served)).toEqual([warningOf('profile "default" (redact): iris_transform_test')]);
     });
     await serve("data", {}, async (served) => {
-      expect(warningLines(served)).toEqual([warningOf('profile "default" (redact): iris_docdb_document:get, iris_docdb_find')]);
+      expect(warningLines(served)).toEqual([
+        warningOf('profile "default" (redact): iris_docdb_document:get, iris_docdb_document:delete, iris_docdb_find'),
+      ]);
     });
     for (const server of ["admin", "ops"] as const) {
       await serve(server, {}, async (served) => {
@@ -270,7 +288,7 @@ describe("Story 45.4: block denies every covered key before IRIS (AC 45.4.2, AC 
     });
   });
 
-  it("interop and data: the covered keys are denied the same way; a docdb write action is not covered", async (ctx) => {
+  it("interop and data: the covered keys (docdb delete included) are denied the same way; the docdb insert action is not covered", async (ctx) => {
     if (skipIfReason(skipReason, ctx)) return;
     await serve("interop", { IRIS_DATA_POLICY: "block" }, async (served) => {
       expect(warningLines(served)).toEqual([]);
@@ -301,7 +319,7 @@ describe("Story 45.4: an explicit governance key re-enables a covered key, and i
     if (skipIfReason(skipReason, ctx)) return;
     const env = { IRIS_DATA_POLICY: "block", IRIS_GOVERNANCE: JSON.stringify({ global: { iris_sql_query: true } }) };
     await serve("dev", env, async (served) => {
-      expect(warningLines(served)).toEqual([warningOf(`profile "default" (${REENABLED}): iris_sql_query`)]);
+      expect(warningLines(served)).toEqual([blockWarningOf(`profile "default" (${REENABLED}): iris_sql_query ${FROM.env}`)]);
       const report = await governanceReport(served.session);
       expect(report.policy["iris_sql_query"]).toBe(true);
       expect(report.configSource["iris_sql_query"]).toBe("env");
@@ -320,7 +338,7 @@ describe("Story 45.4: an explicit governance key re-enables a covered key, and i
     if (skipIfReason(skipReason, ctx)) return;
     const governanceFile = writeJson(fixtureDir, "governance.json", { profiles: { default: { iris_global_get: true } } });
     await serve("dev", { IRIS_DATA_POLICY: "block", IRIS_GOVERNANCE_FILE: governanceFile }, async (served) => {
-      expect(warningLines(served)).toEqual([warningOf(`profile "default" (${REENABLED}): iris_global_get`)]);
+      expect(warningLines(served)).toEqual([blockWarningOf(`profile "default" (${REENABLED}): iris_global_get ${FROM.file}`)]);
       const report = await governanceReport(served.session);
       expect(report.configSource["iris_global_get"]).toBe("file");
       expect(report.policy["iris_global_get"]).toBe(true);
@@ -375,7 +393,7 @@ describe("Story 45.4: the block seed and the parent keys (AD-6)", () => {
       const query = await callCounted(served, DEV_COVERED[0] as Covered);
       expect(query.result.structuredContent).toEqual(governanceDenial("iris_sql_query", { dataPolicyApplied: "block" }));
       expect(query.requests).toBe(0);
-      expect(warningLines(served)).toEqual([warningOf(`profile "default" (${REENABLED}): iris_sql_execute`)]);
+      expect(warningLines(served)).toEqual([blockWarningOf(`profile "default" (${REENABLED}): iris_sql_execute ${FROM.env}`)]);
     });
   });
 
@@ -419,6 +437,14 @@ describe("Story 45.4: block together with the read-only preset", () => {
       const [audit] = await pollAuditEntries(served.auditFile, { tool: "iris_sql_query", count: 1, intervalMs: 50, timeoutMs: 15000, excerpt: 300 });
       expect(audit).toMatchObject({ outcome: "denied", dataPolicyApplied: "block" });
       expect(audit).not.toHaveProperty("presetApplied");
+      // A covered WRITE is one the preset would deny too: the seed decides first, so presetApplied never joins it.
+      const coveredWrite = await callCounted(served, DEV_COVERED[1] as Covered);
+      expect(coveredWrite.result.structuredContent).toEqual(governanceDenial("iris_sql_execute", { dataPolicyApplied: "block" }));
+      expect(coveredWrite.requests).toBe(0);
+      expect(report.configSource["iris_sql_execute"]).toBe("dataPolicy");
+      const [writeAudit] = await pollAuditEntries(served.auditFile, { tool: "iris_sql_execute", count: 1, intervalMs: 50, timeoutMs: 15000, excerpt: 300 });
+      expect(writeAudit).toMatchObject({ outcome: "denied", dataPolicyApplied: "block" });
+      expect(writeAudit).not.toHaveProperty("presetApplied");
     });
   });
 });
@@ -461,8 +487,8 @@ describe("Story 45.4: the policy is per profile", () => {
     };
     await serve("dev", env, async (served) => {
       expect(warningLines(served)).toEqual([
-        warningOf(
-          `profiles "default", "a", "b" (redact): ${DEV_WARNED.join(", ")}; profile "c" (${REENABLED}): iris_sql_query`,
+        mixedWarningOf(
+          `profiles "default", "a", "b" (${REDACT_MIXED}): ${DEV_WARNED.join(", ")}; profile "c" (${REENABLED}): iris_sql_query ${FROM.env}`,
         ),
       ]);
     });
@@ -492,6 +518,17 @@ describe("Story 45.4: allow, and a hidden tool, write no warning for what is not
     });
     await serve("interop", { IRIS_TOOLS_DISABLE: "iris_transform_test" }, async (served) => {
       expect(warningLines(served)).toEqual([]);
+    });
+  });
+
+  it("the line follows the preset and the parent keys: read-only leaves only the covered reads, a parent false drops its child", async (ctx) => {
+    if (skipIfReason(skipReason, ctx)) return;
+    await serve("dev", { IRIS_GOVERNANCE_PRESET: "read-only" }, async (served) => {
+      expect(warningLines(served)).toEqual([warningOf('profile "default" (redact): iris_sql_query, iris_global_get, iris_global_list')]);
+    });
+    await serve("dev", { IRIS_GOVERNANCE: JSON.stringify({ global: { iris_sql_execute: false } }) }, async (served) => {
+      const rest = DEV_WARNED.filter((key) => key !== "iris_sql_query" && key !== "iris_sql_execute");
+      expect(warningLines(served)).toEqual([warningOf(`profile "default" (redact): ${rest.join(", ")}`)]);
     });
   });
 
@@ -544,7 +581,7 @@ describe("QA 45.4: the wire cases cover the whole declaration, and a request rec
     expect(ALL_COVERED.map((entry) => entry.key).sort()).toEqual([...(await declaredBlockKeys())].sort());
   });
 
-  it("positive control: under allow each of the 11 covered keys reaches the listener, so a zero count under block means something", async (ctx) => {
+  it("positive control: under allow each of the 12 covered keys reaches the listener, so a zero count under block means something", async (ctx) => {
     if (skipIfReason(skipReason, ctx)) return;
     const env = { IRIS_DATA_POLICY: "allow", IRIS_GOVERNANCE: JSON.stringify({ global: { iris_test_coverage: true } }) };
     for (const [server, entries] of [["dev", DEV_COVERED], ["interop", INTEROP_COVERED], ["data", DATA_COVERED]] as const) {
@@ -585,7 +622,7 @@ describe("QA 45.4: each explicit layer re-enables a covered key, and nothing els
       IRIS_GOVERNANCE: JSON.stringify({ profiles: { prod: { iris_global_get: true } } }),
     };
     await serve("dev", env, async (served) => {
-      expect(warningLines(served)).toEqual([warningOf(`profile "prod" (${REENABLED}): iris_global_get`)]);
+      expect(warningLines(served)).toEqual([blockWarningOf(`profile "prod" (${REENABLED}): iris_global_get ${FROM.env}`)]);
       const run = await callCounted(served, DEV_COVERED[2] as Covered, "prod");
       expect(isDenied(run.result)).toBe(false);
       expect(run.requests, "the re-enabled call on prod reached IRIS").toBeGreaterThan(0);
@@ -608,7 +645,7 @@ describe("QA 45.4: each explicit layer re-enables a covered key, and nothing els
     if (skipIfReason(skipReason, ctx)) return;
     const governanceFile = writeJson(fixtureDir, "governance-global.json", { global: { iris_execute_command: true } });
     await serve("dev", { IRIS_DATA_POLICY: "block", IRIS_GOVERNANCE_FILE: governanceFile }, async (served) => {
-      expect(warningLines(served)).toEqual([warningOf(`profile "default" (${REENABLED}): iris_execute_command`)]);
+      expect(warningLines(served)).toEqual([blockWarningOf(`profile "default" (${REENABLED}): iris_execute_command ${FROM.file}`)]);
       const run = await callCounted(served, DEV_COVERED[4] as Covered);
       expect(isDenied(run.result)).toBe(false);
       expect(run.requests, "the re-enabled call reached IRIS").toBeGreaterThan(0);
@@ -726,7 +763,7 @@ describe("QA 45.4 (e): after a re-enable, the warning, iris_server_profiles, the
       key: "iris_global_list",
       source: "file",
       // Only prod is block; the default profile stays redact and is named in its own group.
-      groups: `profile "default" (redact): ${DEV_WARNED.join(", ")}; profile "prod" (${REENABLED}): iris_global_list`,
+      groups: `profile "default" (${REDACT_MIXED}): ${DEV_WARNED.join(", ")}; profile "prod" (${REENABLED}): iris_global_list ${FROM.file}`,
       env: () => ({
         IRIS_PROFILES: JSON.stringify({ prod: { dataPolicy: "block" } }),
         IRIS_GOVERNANCE_FILE: writeJson(fixtureDir, "agree-file-profile.json", { profiles: { prod: { iris_global_list: true } } }),
@@ -762,7 +799,9 @@ describe("QA 45.4 (e): after a re-enable, the warning, iris_server_profiles, the
       await serve(scenario.server, env, async (served) => {
         // 1. The warning names the re-enabled key, for the re-enabling profile only.
         expect(warningLines(served)).toEqual([
-          warningOf(scenario.groups ?? `profile "${scenario.profile}" (${REENABLED}): ${scenario.key}`),
+          scenario.groups !== undefined
+            ? mixedWarningOf(scenario.groups)
+            : blockWarningOf(`profile "${scenario.profile}" (${REENABLED}): ${scenario.key} ${FROM[scenario.source]}`),
         ]);
 
         // 2. iris_server_profiles (both branches) and the resource.
@@ -816,9 +855,17 @@ describe("QA 45.4 (e): after a re-enable, the warning, iris_server_profiles, the
 });
 
 describe("QA 45.4: parent keys (AD-6) on the wire", () => {
-  it("data README claim: under block the docdb insert and update actions stay on and reach IRIS (the delete action is the open DW-782 call, not pinned here)", async (ctx) => {
+  it("decision #172 (DW-782): under block the docdb delete action is denied before IRIS, and insert and update stay on and reach IRIS", async (ctx) => {
     if (skipIfReason(skipReason, ctx)) return;
     await serve("data", { IRIS_DATA_POLICY: "block" }, async (served) => {
+      const deleteEntry = DATA_COVERED.find((entry) => entry.key === "iris_docdb_document:delete") as Covered;
+      const deleted = await callCounted(served, deleteEntry);
+      expect(deleted.result.isError).toBe(true);
+      expect(deleted.result.structuredContent).toEqual(governanceDenial("iris_docdb_document:delete", { dataPolicyApplied: "block" }));
+      expect(firstText(deleted.result)).toBe(blockText("iris_docdb_document:delete"));
+      expect(deleted.requests, "a denied delete sends nothing to IRIS").toBe(0);
+      const [audit] = await pollAuditEntries(served.auditFile, { tool: "iris_docdb_document", count: 1, intervalMs: 50, timeoutMs: 15000, excerpt: 300 });
+      expect(audit).toMatchObject({ outcome: "denied", denyReason: "GOVERNANCE_DISABLED", dataPolicyApplied: "block" });
       for (const args of [
         { action: "insert", database: "Story454", document: { a: 1 } },
         { action: "update", database: "Story454", id: "1", document: { a: 2 } },
@@ -832,6 +879,8 @@ describe("QA 45.4: parent keys (AD-6) on the wire", () => {
       expect(report.policy["iris_docdb_document:update"]).toBe(true);
       expect(report.configSource["iris_docdb_document:insert"]).toBe("default");
       expect(report.configSource["iris_docdb_document:update"]).toBe("default");
+      expect(report.policy["iris_docdb_document:delete"]).toBe(false);
+      expect(report.configSource["iris_docdb_document:delete"]).toBe("dataPolicy");
     });
   });
 
@@ -880,7 +929,9 @@ describe("QA 45.4: the warning's edge rows on the wire (AC 45.4.4)", () => {
     };
     await serve("dev", env, async (served) => {
       const lines = warningLines(served);
-      expect(lines).toEqual([warningOf(`profile "default" (redact): ${DEV_WARNED.join(", ")}; profile "c" (${REENABLED}): iris_sql_query`)]);
+      expect(lines).toEqual([
+        mixedWarningOf(`profile "default" (${REDACT_MIXED}): ${DEV_WARNED.join(", ")}; profile "c" (${REENABLED}): iris_sql_query ${FROM.env}`),
+      ]);
       expect(lines[0]).not.toContain('"open"');
       expect(lines[0]?.replace(/IRIS_DATA_POLICY=block/g, "")).not.toMatch(/allow/i);
       expect(served.stderr().split("\n").filter((line) => line.includes("[WARN]") && line.includes("Data policy:"))).toHaveLength(1);

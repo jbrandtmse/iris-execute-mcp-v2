@@ -24,6 +24,8 @@ deferred:
       `iris_docdb_document:delete` stays on under `block` and returns the deleted document, so it reads one stored document (and destroys it) by a known ID. The plan's table said insert/update/delete return IDs or status only; that claim was wrong for delete.
     evidence: |-
       Review (edge-case layer), verified in irislib/%Api/DocDB/v1.cls: `httpDeleteDocument` renders the result of `database.%DeleteDocument(documentID)` (the deleted document) with 200. `iris_docdb_document:delete` is a write, enabled by default (`iris-mcp-governance universe`). `insert` and `update` echo the content the caller sent. The README sentence is corrected in this story; adding `iris_docdb_document:delete` to the covered set changes the lead's 11-key decision (#169), so it is left as a product call.
+
+      RESOLVED at code review (2026-11-26) by decision #172: `iris_docdb_document:delete` joined `DATA_POLICY_BLOCK_KEYS` (12 keys), with the scope row, docs, spine AD-26 and a wire leg (denied under `block`, zero IRIS requests). The lead closes DW-782 as resolved-by this story.
     location: >-
       packages/shared/src/data-policy.ts (DATA_POLICY_BLOCK_KEYS); README.md "PHI data policy"
     severity: med
@@ -33,6 +35,20 @@ deferred:
       Code read: src/ExecuteMCPv2/REST/Analytics.cls:52-91 reads %GetOrdinalLabel and %GetValue only and never %GetListingResultSet, so a DRILLTHROUGH listing is not returned. Documented as residual in the scope table; reopen if a cube definition review shows identifying dimensions are common.
     location: >-
       packages/iris-mcp-all/src/__tests__/data-policy-scope.ts (iris_analytics_mdx row)
+    severity: low
+  - summary: >-
+      UNVERIFIED (maybe-false; medium if true): `iris_sql_analyze` stays on under `block`, but its `stats` action returns the `Statement` text of `INFORMATION_SCHEMA.STATEMENTS` and `running` returns every column of `INFORMATION_SCHEMA.CURRENT_STATEMENTS`, which hold other sessions' statement text. If a literal (for example a record number in a WHERE clause) survives in that text, `block` leaves a raw read of other sessions' query values open.
+    evidence: |-
+      Code review (blind layer), 2026-11-26: `packages/iris-dev-mcp/src/tools/sqlAnalyze.ts` around L560-575. Decision #169 classed the tool residual as "plans only". Settle with a Rule #16 probe on a throwaway: run a query with a literal in its WHERE clause from another session, then read both views and check whether the literal appears or is parameterized. Covered-set changes are the owner's (decision #169 delegation), so this goes to the epic-close decision sheet if the probe shows literals.
+    location: >-
+      packages/shared/src/data-policy.ts (DATA_POLICY_BLOCK_KEYS); packages/iris-mcp-all/src/__tests__/data-policy-scope.ts (iris_sql_analyze row)
+    severity: med
+  - summary: >-
+      Decision #172's rationale in orchestrator-decisions-wave-10.md says `insert` and `update` "return IDs or status only"; this story's docs (and irislib/%Api/DocDB/v1.cls) say they return the content the caller sent.
+    evidence: |-
+      Code review (acceptance and blind layers), 2026-11-26. The shipped docs carry the correct claim; only the lead's decision record repeats the wrong one. A one-line wording fix in the lead's record, which this review does not edit.
+    location: >-
+      _bmad-output/implementation-artifacts/orchestrator-decisions-wave-10.md (row 172)
     severity: low
 ---
 
@@ -120,6 +136,38 @@ deferred:
 - Given any configuration, when a server starts, then stderr holds at most one data-policy `[WARN]` line, naming only visible, enabled covered keys of `redact`/`block` profiles, and none under `allow` or when nothing qualifies (AC 45.4.4).
 - Given the seed term is removed from `effective()`, when the wire test runs, then the `block` denial legs go red (AC 45.4.5, Rule #59; the path is the stdio `tools/call` through `handleToolCall`).
 - Given the docs, when read, then the README `IRIS_DATA_POLICY` row and "PHI data policy" section, `tool_support.md` (with the column and the dated note), the three server READMEs, `CHANGELOG.md` and the changeset state each covered key's state under `block` (off, re-enabled by an explicit governance key), the warning, and `S-45.4-block-raw-tools` (AC 45.4.7).
+
+### Review Findings
+
+Code review 2026-11-26 (`bmad-code-review`, full mode; frozen diff `git diff c9324423..c9d9773a` minus the generated back-compat fixture and three bookkeeping files). All four layers delivered (Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor); review outcome CLEAN. 30 raw findings: 15 entries after grouping (13 patch, 2 defer, 0 decision-needed) and 10 rejected. Lead directives #172 (DW-782) and the per-policy warning wording were applied as patches.
+
+- [x] [Review][Patch] (high) Decision #172 / DW-782: `iris_docdb_document:delete` joins `DATA_POLICY_BLOCK_KEYS` (12 keys), with the scope row `off (get, delete)`, the README list and paragraph, the data README, `tool_support.md` (column and note), CHANGELOG, changeset, spine AD-26, the 11→12 wording in the tests, and a wire leg (denied under `block`, zero IRIS requests, audit `dataPolicyApplied`). `insert`/`update` stay residual; the back-compat fixture is unedited and green [packages/shared/src/data-policy.ts:196]
+- [x] [Review][Patch] (medium) Warning wording per policy (Planner condition on #172): `buildDataPolicyWarning` gains `reEnabledBy`; a `block`-only line no longer says "`redact` covers message bodies only" or offers `block`, and names each re-enabled key's setting (`from IRIS_GOVERNANCE` / `from IRIS_GOVERNANCE_FILE`, from `configSource`); a mixed line gives each group its own reason; the three variants are pinned word for word in `data-policy-warning.test.ts` and on the wire [packages/shared/src/data-policy.ts:274]
+- [x] [Review][Patch] (medium) The `!dataPolicyCaused` guard on `presetApplied` had no test for a covered write; the `block`+read-only wire leg now deep-equals `iris_sql_execute`'s denial and audit entry [packages/iris-mcp-all/src/__tests__/story-45-4-block-seed-wire.test.ts]
+- [x] [Review][Patch] (medium) The warning's `effective()` filter had no test for the preset or the parent keys; new wire leg (`read-only` names only the covered reads; a parent `false` drops its child) [packages/iris-mcp-all/src/__tests__/story-45-4-block-seed-wire.test.ts]
+- [x] [Review][Patch] (medium) The back-compat fixture had no documented refresh path once it runs on the publish gate; the test header now says how a later sanctioned change re-captures (on its own baseline build, never on its changed build) [packages/iris-mcp-all/src/__tests__/story-45-4-back-compat.test.ts:16]
+- [x] [Review][Patch] (low) CHANGELOG and changeset said only a stock dev server logs the line; interop and data do too [CHANGELOG.md:16]
+- [x] [Review][Patch] (low) The dev and data READMEs lacked `S-45.4-block-raw-tools` and the `block` warning behaviour; added and pinned [packages/iris-dev-mcp/README.md:35]
+- [x] [Review][Patch] (low) The CLI header comment called `effective` "the full 8-step cascade" though it passes no parent keys; reworded [packages/shared/src/cli/governance.ts:20]
+- [x] [Review][Patch] (low) The README audit-field paragraph did not name `dataPolicyApplied`; added and pinned [README.md]
+- [x] [Review][Patch] (low) The `DataPolicyWarningProfile` doc comment described keys the interface does not hold [packages/shared/src/data-policy.ts:236]
+- [x] [Review][Patch] (low) The launcher real-CLI test's `configSource` closed set and the badge comment lacked `dataPolicy` [extensions/iris-mcp-launcher/src/__tests__/governanceEngineRealCli.test.ts:193]
+- [x] [Review][Patch] (low) Spec bookkeeping: the `deferred:` DocDB-delete entry is marked resolved by #172. (The Auto Run Result's "Rejected: 22" over-states nothing material but miscounts: the triage log holds 23 rejects; left as the implement pass's record.) [spec frontmatter]
+- [x] [Review][Patch] (low) Rule 19: mutation lines for the new legs are recorded under `## Verification` (review pass 2) [spec]
+- [x] [Review][Defer] `iris_sql_analyze` `stats`/`running` may return other sessions' statement literals under `block` [packages/iris-dev-mcp/src/tools/sqlAnalyze.ts] — deferred: maybe-false (medium if true); settle with a throwaway probe of literal parameterization in `INFORMATION_SCHEMA.STATEMENTS`/`CURRENT_STATEMENTS` (spec `deferred:`)
+- [x] [Review][Defer] Decision #172's rationale repeats the "insert/update return IDs or status only" claim this story corrected [_bmad-output/implementation-artifacts/orchestrator-decisions-wave-10.md] — deferred: the lead's record (spec `deferred:`)
+
+Rejected:
+- `false` epics.md edited in the story range: the hunk is the lead's decision #171 bookkeeping commit `e64005ea`, not implementation work.
+- `false` CLI exits 1 when another `IRIS_PROFILES` entry has a malformed `dataPolicy`: the servers refuse the same environment at startup, which is the spec's CLI matrix row (parity, not a regression of a working setup).
+- `false` "Reached IRIS" in the positive legs means "passed the gate": that is the property those legs pin; the zero-request denial oracle stays sound.
+- `false` `iris_test_status` is on while `iris_execute_tests` is off: decision #169 (it reads recorded results and runs no code); spec-bound.
+- `low` The launcher governance view scrubs `IRIS_DATA_POLICY`, so an ambient `block` in the editor host shows covered keys as enabled: display-only and fail-safe (the server still denies), needs an ambient variable the launcher does not own; wontfix-accepted, reopen_if a user reports the view disagreeing with `iris_server_profiles` under `block`.
+- `low` The `deploy-and-test-class` prompt does not mention `block`: under `block` the refusal carries `dataPolicyApplied` and its own text; a prompt-text change is a sanctioned golden change beyond this story; wontfix-accepted, reopen_if an agent is observed misreading that refusal.
+- `low` "set IRIS_DATA_POLICY=block" does not help a profile whose `IRIS_PROFILES` entry sets `dataPolicy`: rare (the operator wrote that entry), and the fix lengthens a pinned line; wontfix-accepted, reopen_if a field report.
+- `low` `residual()` defaults the verdict to `on`: removing the default touches about 30 rows; every new row is a reviewed Rule #56 addition; wontfix-accepted, reopen_if a residual row is added after 45.4 without a stated verdict.
+- `low` The wire test reads startup stderr without a readiness wait: the line is written before the server reads its first request, and the positive legs read the same stream; wontfix-accepted, reopen_if a negative leg flakes.
+- `low` (theoretical) A future tool whose parent is a covered key but which is not covered itself: no such tool exists (`iris_sql_query`'s parent `iris_sql_execute` is covered); wontfix-theoretical, real when a story adds a parent key to a covered key.
 
 ## Spec Change Log
 
@@ -319,6 +367,11 @@ Rule #56 sweep (as of 2026-11-25; source: the `universe` render of all 110 packa
   - mutation: dropped the policy argument from `effective()` in `cmdEffective` -> `governance-cli.test.ts` (3 tests: the covered keys under `IRIS_DATA_POLICY=block`, the text render, the shared-engine single-sourcing proof) red (unit path: `runCli`, not the built bin).
   - mutation (review pass): passed `undefined` instead of `dataPolicy` to `getEffectivePolicy` and `getEffectiveConfigSources` in `cmdUniverse` -> `governance-cli-universe.test.ts` 5 of 29 tests red (restored).
   - mutation (review pass): disabled the audit copy of `dataPolicyApplied` in `handleToolCall` (`&& false`, shared rebuilt) -> `story-45-4-block-seed-wire.test.ts` 2 of 16 red (the dev audit leg and the `block`+read-only audit leg); restored and rebuilt.
+  - mutation (code review, #172): dropped `iris_docdb_document:delete` from `DATA_POLICY_BLOCK_KEYS` (shared rebuilt) -> 9 red: the wire DW-782 leg ("under block the docdb delete action is denied before IRIS"), the data default line, the interop/data denial leg, the declaration-equals-wire-cases test, the non-default-profile and `IRIS_TOOLS_ENABLE` legs, the data re-enable scenario, and the scope test's off-rows and README-list checks; `story-45-4-back-compat.test.ts` stayed green (the `redact`/`allow` sweep is unchanged). Restored, `cmp` identical.
+  - mutation (code review, warning wording): forced the `redact` lead sentence for every line (`!hasBlock || true`) -> `data-policy-warning.test.ts` 5 of 22 red and the wire test 13 of 38 red (every `block`-only and mixed line). Restored, `cmp` identical.
+  - mutation (code review, warning source): the server passed no `configSource` to the builder (`undefined && configSource(...)` in `dataPolicyStartupWarning`, confirmed in the built dist) -> wire 13 of 38 red. Restored, `cmp` identical.
+  - mutation (code review): removed `!dataPolicyCaused &&` from `presetCaused` -> wire "a covered key carries dataPolicyApplied, a non-covered write keeps presetApplied" red (the `iris_sql_execute` deep-equal gained `presetApplied`). Restored, `cmp` identical.
+  - mutation (code review): passed `undefined` for the preset in the warning's `effective()` -> wire "the line follows the preset and the parent keys" red at the read-only leg; passed an empty parent-key map instead -> the same test red at the parent leg (line 531). Restored, `cmp` identical.
   - AC 45.4.7 (docs) is pinned by source-text tests (`story-45-4-doc-claims.test.ts`, the scope test's README and `tool_support.md` equality) and cannot be mutation-verified beyond a text change; the remaining sub-claims (resource and single-profile discovery threading, the `presetCaused` guard) are covered by wire assertions without a recorded mutation of their own.
 - Left for the lead smoke: the least-privilege legs on a throwaway IRIS (the wire legs prove the denial sends zero requests to a local listener and that a passing call reaches it, but no IRIS privilege was exercised).
 

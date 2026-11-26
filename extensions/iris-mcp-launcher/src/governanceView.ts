@@ -347,7 +347,7 @@ export function buildGroups(state: GovernanceViewState): PackageGroup[] {
 
 // ── Badges ─────────────────────────────────────────────────────────────
 
-/** The configSource badge text — the cascade channel that resolved the key (`env`/`file`/`parent`/`preset`/`default`). */
+/** The configSource badge text — the cascade channel that resolved the key (`env`/`file`/`parent`/`dataPolicy`/`preset`/`default`). */
 export function configSourceBadge(source: KeyRow["source"]): string {
   return source;
 }

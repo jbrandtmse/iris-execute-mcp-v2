@@ -184,13 +184,14 @@ export function tightenDataPolicy(
 }
 
 /**
- * The raw-read and code-execution governance keys that `block` seeds disabled (Story 45.4; AD-6, decision #169),
- * declared once, in this order. Each key belongs to exactly one server of the suite.
+ * The raw-read and code-execution governance keys that `block` seeds disabled (Story 45.4; AD-6, decisions #169
+ * and #172), declared once, in this order. Each key belongs to exactly one server of the suite.
  *
  * The set is exhaustive as of {@link DATA_POLICY_BLOCK_KEYS_AS_OF}. Its source is the PHI scope table of
  * `tool_support.md` plus the Rule #56 sweep of the 110 package tools. The tools it leaves out are residual
- * rows of that table, each with its reason. The write tools that run code (compile, load, production start,
- * cube build, task run) are not in it: the `read-only` preset covers them.
+ * rows of that table, each with its reason. `iris_docdb_document:delete` is a write, but it returns the
+ * document it deletes, so it reads a stored document. The other write tools that run code (compile, load,
+ * production start, cube build, task run) are not in it: the `read-only` preset covers them.
  */
 export const DATA_POLICY_BLOCK_KEYS: readonly string[] = Object.freeze([
   "iris_sql_query",
@@ -203,6 +204,7 @@ export const DATA_POLICY_BLOCK_KEYS: readonly string[] = Object.freeze([
   "iris_test_coverage",
   "iris_transform_test",
   "iris_docdb_document:get",
+  "iris_docdb_document:delete",
   "iris_docdb_find",
 ]);
 
@@ -231,54 +233,96 @@ export function dataPolicySeed(
   return covered ? false : undefined;
 }
 
-/** One profile of the startup warning: its name, its policy, and the covered keys that are visible and enabled for it. */
+/** One profile of the startup warning: its name and its resolved policy (the caller answers which keys are open). */
 export interface DataPolicyWarningProfile {
   name: string;
   policy: DataPolicy;
 }
+
+/** The setting a `configSource` of `env` or `file` names in the startup warning. */
+const RE_ENABLE_SOURCE_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  env: "IRIS_GOVERNANCE",
+  file: "IRIS_GOVERNANCE_FILE",
+});
 
 /**
  * The text of the startup `[WARN]` line of Story 45.4 (AD-26), or `undefined` when no profile has a key to list.
  *
  * For each `redact` or `block` profile, in the order given, it lists the keys of `blockKeys` for which
  * `isCallable(profile, key)` is `true` (the caller answers: the tool is visible on this server and the key is
- * enabled for the profile). Under `block` such a key is enabled only by an explicit governance key. A profile
- * under `allow` is never named. Profiles with the same policy and the same key list share one group, and the
- * groups are written in the order of their first profile. Keys are listed in declaration order and names are
- * written with `JSON.stringify`. The line never carries a value, and never offers `allow` as a way out
- * (decision #170): the ways out are the governance keys, or `block`.
+ * enabled for the profile). Under `block` such a key is enabled only by an explicit governance key, and each
+ * such key is followed by the setting that re-enabled it (`from IRIS_GOVERNANCE` for a `configSource` of `env`,
+ * `from IRIS_GOVERNANCE_FILE` for `file`), as `reEnabledBy` reports it. A profile under `allow` is never named.
+ * Profiles with the same policy and the same list share one group, and the groups are written in the order of
+ * their first profile. Keys are listed in declaration order and names are written with `JSON.stringify`.
+ *
+ * The wording depends on the policies named (decision #170 item 2, as the Planner amended it for #172):
+ *  - only `redact` groups: the line says `redact` covers message bodies only, and offers `block` as a way out;
+ *  - only `block` groups: it says an explicit governance key re-enabled the tools, never says `redact`, and
+ *    says to remove those keys or set them to `false` in the setting named;
+ *  - both: one line in which each group carries its own reason, with the `redact` ways out.
+ *
+ * The line never carries a value, and never offers `allow` as a way out: the ways out are the governance keys,
+ * or `block` when a `redact` group is named.
  *
  * @param profiles - Every profile of the server, in registry order, with its resolved policy.
  * @param isCallable - Whether `key` is visible on this server and enabled for the profile named `profile`.
  * @param blockKeys - The covered keys; defaults to {@link DATA_POLICY_BLOCK_KEYS}.
+ * @param reEnabledBy - The `configSource` of `key` for the profile named `profile` (`env` or `file` for a
+ *   re-enabled key under `block`); asked only for the keys of a `block` group. Absent, no source is named.
  */
 export function buildDataPolicyWarning(
   profiles: readonly DataPolicyWarningProfile[],
   isCallable: (profile: string, key: string) => boolean,
   blockKeys: readonly string[] = DATA_POLICY_BLOCK_KEYS,
+  reEnabledBy?: (profile: string, key: string) => string | undefined,
 ): string | undefined {
-  const groups = new Map<string, { label: string; names: string[]; keys: string[] }>();
+  const groups = new Map<string, { policy: "redact" | "block"; names: string[]; items: string[] }>();
   for (const profile of profiles) {
     if (profile.policy === "allow") continue;
     const keys = blockKeys.filter((key) => isCallable(profile.name, key));
     if (keys.length === 0) continue;
-    const label = profile.policy === "block" ? "block, re-enabled by an explicit governance key" : "redact";
-    const id = `${label}|${keys.join(",")}`;
+    const policy = profile.policy;
+    const items =
+      policy === "block"
+        ? keys.map((key) => {
+            const source = reEnabledBy?.(profile.name, key);
+            const setting = source === undefined ? undefined : RE_ENABLE_SOURCE_NAMES[source];
+            return setting === undefined ? key : `${key} from ${setting}`;
+          })
+        : keys;
+    const id = `${policy}|${items.join(",")}`;
     const group = groups.get(id);
-    if (group === undefined) groups.set(id, { label, names: [profile.name], keys });
+    if (group === undefined) groups.set(id, { policy, names: [profile.name], items });
     else group.names.push(profile.name);
   }
   if (groups.size === 0) return undefined;
-  const parts = [...groups.values()].map((group) => {
+  const all = [...groups.values()];
+  const hasRedact = all.some((group) => group.policy === "redact");
+  const hasBlock = all.some((group) => group.policy === "block");
+  const parts = all.map((group) => {
     const names = group.names.map((name) => JSON.stringify(name)).join(", ");
-    return `${group.names.length === 1 ? "profile" : "profiles"} ${names} (${group.label}): ${group.keys.join(", ")}`;
+    const reason =
+      group.policy === "block"
+        ? "block, re-enabled by an explicit governance key"
+        : hasBlock
+          ? "redact, which covers message bodies only"
+          : "redact";
+    return `${group.names.length === 1 ? "profile" : "profiles"} ${names} (${reason}): ${group.items.join(", ")}`;
   });
-  return (
-    `Data policy: "redact" covers message bodies only, so these raw-read and code-execution tools are enabled and ` +
-    `their results are not redacted or withheld: ${parts.join("; ")}. ` +
-    `To turn tools off, set their governance keys to false (IRIS_GOVERNANCE or IRIS_GOVERNANCE_FILE) or set ` +
-    `IRIS_DATA_POLICY=block. See "PHI data policy" in the README.`
-  );
+  const lead = !hasBlock
+    ? `Data policy: "redact" covers message bodies only, so these raw-read and code-execution tools are enabled and ` +
+      `their results are not redacted or withheld: `
+    : !hasRedact
+      ? `Data policy: an explicit governance key re-enabled these raw-read and code-execution tools under "block", ` +
+        `so their results are not withheld: `
+      : `Data policy: these raw-read and code-execution tools are enabled, so their results are not redacted or ` +
+        `withheld: `;
+  const wayOut = hasRedact
+    ? "To turn tools off, set their governance keys to false (IRIS_GOVERNANCE or IRIS_GOVERNANCE_FILE) or set " +
+      "IRIS_DATA_POLICY=block."
+    : "To turn them off again, remove those keys or set them to false in the setting named.";
+  return `${lead}${parts.join("; ")}. ${wayOut} See "PHI data policy" in the README.`;
 }
 
 /** What a policy did over one request: the policy and how many bodies were shown redacted or withheld. */

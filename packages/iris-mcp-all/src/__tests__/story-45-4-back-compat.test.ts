@@ -15,7 +15,10 @@
  *     pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-45-4-back-compat.test.ts
  *
  * Re-capturing on a build that carries the Story 45.4 code would encode the story's own behaviour (Rule #49), so
- * the capture variable is for the baseline build only. The path this test guards is the stdio `tools/call` and
+ * the capture variable is for the baseline build only. A later story that changes, under its own sanction, a
+ * governance key, a default or a field this replay covers re-captures the fixture the same way on the build of
+ * ITS baseline revision (before its own change), then shows the replay red on its change and names the sanction;
+ * it never re-captures on a build that carries its own change. The path this test guards is the stdio `tools/call` and
  * `resources/read` of the built server (Rule #59). A stale or missing dist skips each test with the reason, or
  * fails it when `IRIS_REQUIRE_LIVE` is armed.
  */

@@ -163,9 +163,9 @@ describe("what block turns off (Story 45.4, AC 45.4.1; decision #169; Rules #44 
     }
   });
 
-  it("the off rows, with their actions, are exactly DATA_POLICY_BLOCK_KEYS: the same 11 keys", async () => {
+  it("the off rows, with their actions, are exactly DATA_POLICY_BLOCK_KEYS: the same 12 keys", async () => {
     const declared = await declaredBlockKeys();
-    expect(declared).toHaveLength(11);
+    expect(declared).toHaveLength(12);
     expect(offKeys().sort()).toEqual([...declared].sort());
   });
 

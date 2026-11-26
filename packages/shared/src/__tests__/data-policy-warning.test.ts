@@ -20,6 +20,89 @@ const TAIL =
   ". To turn tools off, set their governance keys to false (IRIS_GOVERNANCE or IRIS_GOVERNANCE_FILE) or set " +
   'IRIS_DATA_POLICY=block. See "PHI data policy" in the README.';
 
+/** The three variants of the line, word for word (decision #170 item 2 as amended for #172). */
+const REDACT_ONLY_LINE =
+  'Data policy: "redact" covers message bodies only, so these raw-read and code-execution tools are enabled and ' +
+  'their results are not redacted or withheld: profile "default" (redact): iris_sql_query, iris_global_get. ' +
+  "To turn tools off, set their governance keys to false (IRIS_GOVERNANCE or IRIS_GOVERNANCE_FILE) or set " +
+  'IRIS_DATA_POLICY=block. See "PHI data policy" in the README.';
+const BLOCK_ONLY_LINE =
+  'Data policy: an explicit governance key re-enabled these raw-read and code-execution tools under "block", so ' +
+  'their results are not withheld: profile "prod" (block, re-enabled by an explicit governance key): ' +
+  "iris_sql_query from IRIS_GOVERNANCE, iris_global_get from IRIS_GOVERNANCE_FILE. To turn them off again, remove " +
+  'those keys or set them to false in the setting named. See "PHI data policy" in the README.';
+const MIXED_LINE =
+  "Data policy: these raw-read and code-execution tools are enabled, so their results are not redacted or withheld: " +
+  'profile "default" (redact, which covers message bodies only): iris_sql_query, iris_global_get; ' +
+  'profile "prod" (block, re-enabled by an explicit governance key): iris_sql_query from IRIS_GOVERNANCE. ' +
+  "To turn tools off, set their governance keys to false (IRIS_GOVERNANCE or IRIS_GOVERNANCE_FILE) or set " +
+  'IRIS_DATA_POLICY=block. See "PHI data policy" in the README.';
+
+/** A `reEnabledBy` answer from a table of `profile -> key -> configSource`. */
+const SOURCES = (table: Record<string, Record<string, string>>) => (profile: string, key: string) => table[profile]?.[key];
+
+describe("buildDataPolicyWarning: the three variants, word for word (decision #170 item 2, amended for #172)", () => {
+  it("only redact profiles: redact covers message bodies only, and block is a way out", () => {
+    const line = buildDataPolicyWarning([{ name: "default", policy: "redact" }], ON({ default: ["iris_sql_query", "iris_global_get"] }));
+    expect(line).toBe(REDACT_ONLY_LINE);
+  });
+
+  it("only block profiles with re-enabled keys: an explicit key re-enabled them, each named with its source; no redact sentence, no block offer", () => {
+    const line = buildDataPolicyWarning(
+      [{ name: "prod", policy: "block" }],
+      ON({ prod: ["iris_global_get", "iris_sql_query"] }),
+      undefined,
+      SOURCES({ prod: { iris_sql_query: "env", iris_global_get: "file" } }),
+    );
+    expect(line).toBe(BLOCK_ONLY_LINE);
+    expect(line).not.toMatch(/redact/i);
+    expect(line).not.toContain("IRIS_DATA_POLICY=");
+  });
+
+  it("mixed: one line, each group with its own reason", () => {
+    const line = buildDataPolicyWarning(
+      [{ name: "default", policy: "redact" }, { name: "prod", policy: "block" }],
+      ON({ default: ["iris_sql_query", "iris_global_get"], prod: ["iris_sql_query"] }),
+      undefined,
+      SOURCES({ default: { iris_sql_query: "default", iris_global_get: "default" }, prod: { iris_sql_query: "env" } }),
+    );
+    expect(line).toBe(MIXED_LINE);
+    expect(line?.split("\n")).toHaveLength(1);
+  });
+
+  it("no variant offers allow as a way out", () => {
+    for (const line of [REDACT_ONLY_LINE, BLOCK_ONLY_LINE, MIXED_LINE]) expect(line).not.toMatch(/allow/i);
+  });
+
+  it("two block profiles that re-enable the same key from different settings are two groups", () => {
+    const line = buildDataPolicyWarning(
+      [{ name: "a", policy: "block" }, { name: "b", policy: "block" }, { name: "c", policy: "block" }],
+      () => true,
+      ["iris_sql_query"],
+      SOURCES({ a: { iris_sql_query: "env" }, b: { iris_sql_query: "file" }, c: { iris_sql_query: "env" } }),
+    );
+    expect(line).toContain(
+      'profiles "a", "c" (block, re-enabled by an explicit governance key): iris_sql_query from IRIS_GOVERNANCE; ' +
+        'profile "b" (block, re-enabled by an explicit governance key): iris_sql_query from IRIS_GOVERNANCE_FILE.',
+    );
+  });
+
+  it("the source is asked for block keys only, and an unknown source names none", () => {
+    const asked: string[] = [];
+    const line = buildDataPolicyWarning(
+      [{ name: "default", policy: "redact" }, { name: "prod", policy: "block" }],
+      () => true,
+      ["iris_sql_query"],
+      (profile, key) => {
+        asked.push(`${profile}:${key}`);
+        return "parent";
+      },
+    );
+    expect(asked).toEqual(["prod:iris_sql_query"]);
+    expect(line).toContain('profile "prod" (block, re-enabled by an explicit governance key): iris_sql_query.');
+  });
+});
+
 describe("buildDataPolicyWarning", () => {
   it("names a redact profile's callable keys, in declaration order, whatever order the caller found them", () => {
     const profiles: DataPolicyWarningProfile[] = [{ name: "default", policy: "redact" }];
@@ -49,9 +132,13 @@ describe("buildDataPolicyWarning", () => {
     expect(buildDataPolicyWarning([{ name: "prod", policy: "block" }], () => false)).toBeUndefined();
   });
 
-  it("marks a block profile's key as re-enabled by an explicit governance key", () => {
+  it("marks a block profile's key as re-enabled by an explicit governance key, with no redact sentence", () => {
     const line = buildDataPolicyWarning([{ name: "prod", policy: "block" }], ON({ prod: ["iris_sql_query"] }));
-    expect(line).toBe(`${LEAD}profile "prod" (block, re-enabled by an explicit governance key): iris_sql_query${TAIL}`);
+    expect(line).toBe(
+      'Data policy: an explicit governance key re-enabled these raw-read and code-execution tools under "block", so ' +
+        'their results are not withheld: profile "prod" (block, re-enabled by an explicit governance key): iris_sql_query. ' +
+        'To turn them off again, remove those keys or set them to false in the setting named. See "PHI data policy" in the README.',
+    );
   });
 
   it("groups profiles with the same policy and key list, in registry order (the Grouping row)", () => {
@@ -63,10 +150,13 @@ describe("buildDataPolicyWarning", () => {
     const line = buildDataPolicyWarning(
       profiles,
       ON({ a: ["iris_sql_query", "iris_global_get"], b: ["iris_sql_query", "iris_global_get"], c: ["iris_sql_query"] }),
+      undefined,
+      SOURCES({ c: { iris_sql_query: "env" } }),
     );
     expect(line).toBe(
-      `${LEAD}profiles "a", "b" (redact): iris_sql_query, iris_global_get; ` +
-        `profile "c" (block, re-enabled by an explicit governance key): iris_sql_query${TAIL}`,
+      "Data policy: these raw-read and code-execution tools are enabled, so their results are not redacted or withheld: " +
+        'profiles "a", "b" (redact, which covers message bodies only): iris_sql_query, iris_global_get; ' +
+        `profile "c" (block, re-enabled by an explicit governance key): iris_sql_query from IRIS_GOVERNANCE${TAIL}`,
     );
   });
 
@@ -79,7 +169,8 @@ describe("buildDataPolicyWarning", () => {
     ];
     const line = buildDataPolicyWarning(profiles, () => true, ["iris_sql_query"]);
     expect(line).toBe(
-      `${LEAD}profiles "a", "c" (redact): iris_sql_query; ` +
+      "Data policy: these raw-read and code-execution tools are enabled, so their results are not redacted or withheld: " +
+        'profiles "a", "c" (redact, which covers message bodies only): iris_sql_query; ' +
         `profiles "b", "d" (block, re-enabled by an explicit governance key): iris_sql_query${TAIL}`,
     );
     expect(line?.split("\n")).toHaveLength(1);
@@ -139,7 +230,7 @@ describe("buildDataPolicyWarning", () => {
       [{ name: "default", policy: "redact" }, { name: "prod", policy: "block" }],
       () => true,
     ) as string;
-    expect(line).toContain('"redact" covers message bodies only');
+    expect(line).toContain("(redact, which covers message bodies only)");
     expect(line).toContain('See "PHI data policy" in the README.');
     expect(line).toContain("governance keys");
     expect(line).toContain("IRIS_DATA_POLICY=block");

@@ -112,7 +112,7 @@ const DENIED = { value: false, source: "dataPolicy" };
 const WORLD_COVERED = ["iris_sql_query", "iris_sql_execute", "iris_global_get", "iris_execute_command"];
 
 describe("the declaration", () => {
-  it("is the 11 keys of decision #169, in order, as of 2026-11-25, and frozen", () => {
+  it("is the 12 keys of decisions #169 and #172, in order, as of 2026-11-25, and frozen", () => {
     expect([...DATA_POLICY_BLOCK_KEYS]).toEqual([
       "iris_sql_query",
       "iris_sql_execute",
@@ -124,6 +124,7 @@ describe("the declaration", () => {
       "iris_test_coverage",
       "iris_transform_test",
       "iris_docdb_document:get",
+      "iris_docdb_document:delete",
       "iris_docdb_find",
     ]);
     expect(DATA_POLICY_BLOCK_KEYS_AS_OF).toBe("2026-11-25");
@@ -136,6 +137,7 @@ describe("dataPolicySeed", () => {
     for (const key of DATA_POLICY_BLOCK_KEYS) expect(dataPolicySeed(key, "block"), key).toBe(false);
     expect(dataPolicySeed("iris_doc_get", "block")).toBeUndefined();
     expect(dataPolicySeed("iris_docdb_document:insert", "block")).toBeUndefined();
+    expect(dataPolicySeed("iris_docdb_document:update", "block")).toBeUndefined();
     expect(dataPolicySeed("iris_docdb_document", "block")).toBeUndefined();
   });
 

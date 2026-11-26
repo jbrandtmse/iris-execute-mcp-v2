@@ -18,8 +18,8 @@
  *   deliberately the file's OWN value, not the cascade — the cascade view is
  *   `effective`.
  * - Analysis: `validate` (fail-fast parity with server startup), `effective`
- *   (the full 8-step cascade, with the Story 45.4 `block` data-policy seed, for the CLI's own environment + the resolved
- *   file), `diff` (every file-layer entry compared against the default seed),
+ *   (the servers' cascade with the Story 45.4 `block` data-policy seed but without parent keys, over the frozen
+ *   baseline's keys plus, under `block`, the covered keys, for the CLI's own environment + the resolved file), `diff` (every file-layer entry compared against the default seed),
  *   `universe` (Story 32.2 — the FULL governed-key universe render: baseline ∪
  *   the five server packages' registered keys derived from built dist ∪ the
  *   framework discovery tool, with the REAL mutates/default-enabled

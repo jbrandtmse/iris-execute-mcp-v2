@@ -105,6 +105,7 @@ import {
   unwrapActionOptions,
   assertGovernanceClassification,
   effective,
+  configSource,
   getEffectivePolicy,
   getEffectiveConfigSources,
   presetSeed,
@@ -117,6 +118,7 @@ import {
 import {
   applyDataPolicies,
   buildDataPolicyWarning,
+  DATA_POLICY_BLOCK_KEYS,
   dataPolicySeed,
   effectiveDataPolicy,
   parseDataPolicyValue,
@@ -2828,6 +2830,20 @@ export class McpServerBase {
           this.mutatesLookup,
           GOVERNANCE_BASELINE,
           this.defaultEnabledWrites,
+          this.preset,
+          BASELINE_ACTION_CLASSIFICATIONS,
+          this.governanceFileConfig,
+          this.parentKeys,
+          effectiveDataPolicy(profiles.get(profileName) ?? {}),
+        ),
+      DATA_POLICY_BLOCK_KEYS,
+      // Under `block` a listed key is on only through an explicit layer; the line names it as `configSource` does.
+      (profileName, key) =>
+        configSource(
+          key,
+          profileName,
+          this.governanceConfig,
+          this.mutatesLookup,
           this.preset,
           BASELINE_ACTION_CLASSIFICATIONS,
           this.governanceFileConfig,

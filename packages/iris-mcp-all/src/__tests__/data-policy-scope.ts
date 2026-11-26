@@ -131,7 +131,14 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
   ["iris_env_diff", residual("Compares configuration values across profiles, lookup values included. Restrict it with its governance key.")],
   ["iris_env_promote", residual("Copies configuration values across profiles, lookup values included. Restrict it with its governance key.")],
   ["iris_transform_test", residual("Returns the output of a transformation run on a caller-supplied message. Restrict it with its governance key.", "off")],
-  ["iris_docdb_document", residual("Returns the content of DocDB documents. Restrict it with its governance key.", "off", ["get"])],
+  [
+    "iris_docdb_document",
+    residual(
+      "Returns the content of DocDB documents: get reads one, and delete returns the document it deletes. Restrict it with its governance key.",
+      "off",
+      ["get", "delete"],
+    ),
+  ],
   ["iris_docdb_find", residual("Returns the content of DocDB documents that match. Restrict it with its governance key.", "off")],
   ["iris_analytics_mdx", residual("Returns the result data of an MDX query. Restrict it with its governance key.")],
   ["iris_audit_manage", residual("Returns audit configuration and event data, whose descriptions can carry request text. Restrict it with its governance key.")],
