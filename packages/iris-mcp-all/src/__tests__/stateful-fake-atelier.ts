@@ -144,6 +144,40 @@ export interface StatefulFakeAtelier {
    * or the `docnames` read), so a test can show what a check that cannot run does.
    */
   failCompileCheck: "query" | "docnames" | undefined;
+  /**
+   * Set to `true` to make the read of the IPM-only `ExecuteMCPv2.InstallGuard` document (the bootstrap's ownership read) fail with an
+   * HTTP 500 error envelope instead of the 404 or 200 it would otherwise answer (Story 45.2 QA: the ownership of an older deployment
+   * cannot be read).
+   */
+  failGuardRead: boolean;
+  /**
+   * Set to `true` to model a least-privilege account (DW-772): `Setup_IsConfigured()` answers HTTP 200 with the row
+   * `{Configured: false}` (the JSON boolean the live probe returned: `IsConfigured` hits `<PROTECT>` in `%SYS` and returns
+   * 0) whatever `state.configured` says. The web application itself is untouched.
+   */
+  isConfiguredReadsFalse: boolean;
+  /**
+   * Set to `true` to model an account without `%Admin_Manage` on the install path (Story 45.5 QA, DW-773): `Setup_Configure(...)` answers
+   * an HTTP 500 error envelope (`<PROTECT>`) and leaves `state.configured` as it was. `Setup_ConfigureMapping` is unaffected.
+   */
+  configureFails: boolean;
+  /**
+   * Set to `true` to model a web application that is NOT registered: every request under `/api/executemcp/` answers the Web
+   * Gateway's HTML 404 page, byte for byte as captured on IRIS for Health 2026.2 with `/api/executemcp/v2` deleted (an
+   * installed web application answers an unknown route with the JSON envelope instead, which is what the fake does when this is off).
+   */
+  webAppAbsent: boolean;
+  /**
+   * Set to `true` to model an account without SQL privileges (Story 45.7, DW-788): `GET docnames/CLS?filter=` answers HTTP 200 with
+   * NO entries (plan probe P-788: IRIS answers an empty list, no error), while `POST action/index` answers the entries as usual.
+   */
+  docnamesEmpty: boolean;
+  /**
+   * Set to a text to model an account without `%Admin_Manage` on the install path as the bootstrap's `%ODBCOUT` queries see it (Story
+   * 45.7, DW-790): `Setup_Configure(...)` answers HTTP 200 with that text in its `ConfigureResult` column (IRIS's own status text,
+   * plan probe P-X) and leaves `state.configured` as it was. `Setup_ConfigureMapping` is unaffected.
+   */
+  configureRowText: string | undefined;
   close: () => Promise<void>;
 }
 
@@ -245,6 +279,12 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
   let failVersionQuery: StatefulFakeAtelier["failVersionQuery"];
   let compileFailure: StatefulFakeAtelier["compileFailure"];
   let failCompileCheck: StatefulFakeAtelier["failCompileCheck"];
+  let failGuardRead = false;
+  let isConfiguredReadsFalse = false;
+  let configureFails = false;
+  let webAppAbsent = false;
+  let docnamesEmpty = false;
+  let configureRowText: string | undefined;
   let versionQueries = 0;
   const visibleClasses = new Set(options.visibleClasses ?? []);
 
@@ -307,13 +347,18 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
     if (statement.includes("Setup_")) {
       if (state.compiledMarker === undefined) return missingFunction(res, "EXECUTEMCPV2.SETUP");
       if (statement.includes("Setup_IsConfigured")) {
-        reply(res, 200, envelope({ content: [{ Configured: state.configured ? 1 : 0 }] }));
+        reply(res, 200, envelope({ content: [{ Configured: isConfiguredReadsFalse ? false : state.configured ? 1 : 0 }] }));
       } else if (statement.includes("Setup_ConfigureMapping")) {
         state.mapped = true;
-        reply(res, 200, envelope({ content: [{ MappingResult: 1 }] }));
+        reply(res, 200, envelope({ content: [{ MappingResult: statement.includes("%ODBCOUT(") ? "1" : 1 }] }));
+      } else if (statement.includes("Setup_Configure") && configureFails) {
+        reply(res, 500, errorEnvelope("ERROR #5002: ObjectScript error: <PROTECT>", 5002));
+      } else if (statement.includes("Setup_Configure") && configureRowText !== undefined) {
+        reply(res, 200, envelope({ content: [{ ConfigureResult: configureRowText }] }));
       } else if (statement.includes("Setup_Configure")) {
         state.configured = true;
-        reply(res, 200, envelope({ content: [{ ConfigureResult: 1 }] }));
+        // The bootstrap's query wraps the call in `%ODBCOUT(...)` (DW-790): a success renders as the string "1".
+        reply(res, 200, envelope({ content: [{ ConfigureResult: statement.includes("%ODBCOUT(") ? "1" : 1 }] }));
       } else if (statement.includes("Setup_EnsureUnitTestRoot")) {
         reply(res, 200, envelope({ content: [{ UnitTestRoot: "/fake/mgr/" }] }));
       } else {
@@ -361,6 +406,14 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
       return;
     }
 
+    if (webAppAbsent && url.pathname.toLowerCase().startsWith("/api/executemcp/")) {
+      res.writeHead(404, { "Content-Type": "text/html; charset=UTF-8" });
+      res.end(
+        `<HTML><HEAD>\n<TITLE>Not Found</TITLE>\n</HEAD><BODY>\n<H1>Not Found</H1>\nThe requested URL ${url.pathname} was not found on this server.\n</BODY></HTML>\n`,
+      );
+      return;
+    }
+
     const atelier = /^\/api\/atelier\/v\d+\/([^/]+)\/(.*)$/.exec(url.pathname);
     if (!atelier) {
       reply(res, 404, errorEnvelope(`the fake IRIS has no route for ${method} ${url.pathname}`, 404));
@@ -384,9 +437,27 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
         return;
       }
       const filter = (url.searchParams.get("filter") ?? "").toLowerCase();
-      const content = [...state.docs.entries()]
-        .filter(([name]) => name.endsWith(".cls") && name.toLowerCase().includes(filter))
-        .map(([name, stored]) => ({ name, cat: "CLS", ts: stored.ts, upd: classUpdated(name), db: namespace, gen: false }));
+      const content = docnamesEmpty
+        ? []
+        : [...state.docs.entries()]
+            .filter(([name]) => name.endsWith(".cls") && name.toLowerCase().includes(filter))
+            .map(([name, stored]) => ({ name, cat: "CLS", ts: stored.ts, upd: classUpdated(name), db: namespace, gen: false }));
+      reply(res, 200, envelope({ content }));
+      return;
+    }
+
+    // `POST action/index` (DW-788): one entry per name asked, ordered by name as IRIS orders them. A stored class carries `upd`; a
+    // name with no document has an empty `ts`, no `upd` and the status text of IRIS (shape captured 2026-11-26, plan probe P-788).
+    if (method === "POST" && action === "action/index") {
+      const names = Array.isArray(body) ? (body as unknown[]).map(String) : [];
+      const content = names
+        .map((name) => {
+          const stored = state.docs.get(name);
+          return stored === undefined
+            ? { name, db: "", ts: "", cat: "CLS", gen: false, status: `ERROR #16005: Document '${name}' does NOT exist` }
+            : { name, db: namespace, ts: stored.ts, upd: classUpdated(name), cat: "CLS", gen: false, status: "" };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
       reply(res, 200, envelope({ content }));
       return;
     }
@@ -458,6 +529,10 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
         return;
       }
       if (method === "GET") {
+        if (failGuardRead && name === "ExecuteMCPv2.InstallGuard.cls") {
+          reply(res, 500, errorEnvelope("ERROR #5002: ObjectScript error: <STORE>", 5002));
+          return;
+        }
         const stored = state.docs.get(name);
         if (!stored) {
           reply(res, 404, errorEnvelope(`ERROR #16005: Document '${name}' does not exist`, 16005));
@@ -529,6 +604,42 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
     },
     set failCompileCheck(which) {
       failCompileCheck = which;
+    },
+    get failGuardRead() {
+      return failGuardRead;
+    },
+    set failGuardRead(fail) {
+      failGuardRead = fail;
+    },
+    get isConfiguredReadsFalse() {
+      return isConfiguredReadsFalse;
+    },
+    set isConfiguredReadsFalse(value) {
+      isConfiguredReadsFalse = value;
+    },
+    get configureFails() {
+      return configureFails;
+    },
+    set configureFails(value) {
+      configureFails = value;
+    },
+    get webAppAbsent() {
+      return webAppAbsent;
+    },
+    set webAppAbsent(value) {
+      webAppAbsent = value;
+    },
+    get docnamesEmpty() {
+      return docnamesEmpty;
+    },
+    set docnamesEmpty(value) {
+      docnamesEmpty = value;
+    },
+    get configureRowText() {
+      return configureRowText;
+    },
+    set configureRowText(value) {
+      configureRowText = value;
     },
     close: () =>
       new Promise<void>((resolve) => {

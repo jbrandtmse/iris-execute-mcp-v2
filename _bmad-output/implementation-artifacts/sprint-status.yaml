@@ -124,7 +124,7 @@
 # put new epic notes in epics.md, not here.
 
 generated: '2026-04-05'
-last_updated: '11-24-2026 00:10'
+last_updated: '11-26-2026 20:48'
 previous_update: '2026-09-16 (Story 37.1 dev complete via bmad-dev-story - ready-for-dev
   -> review. Fixed McpServerBase.start(): a default-profile health-check rejection
   no longer calls process.exit(1) - it logs (health-check-failed line + a new continuation
@@ -570,6 +570,16 @@ development_status:
   44-7-epic-44-burn-down: done
   44-8-local-resolver-hands-a-password-only-to-user-scoped-servers: done
   epic-44-retrospective: optional
+
+  epic-45: done
+  45-1-sql-statements-honor-sql-privileges: done
+  45-2-auto-install-setting-off-under-read-only: done
+  45-3-careful-uninstall-of-the-iris-side: done
+  45-4-block-turns-off-raw-read-and-code-execution-tools: done
+  45-5-what-the-safety-settings-protect: done
+  45-6-epic-45-burn-down-iris-side: done
+  45-7-epic-45-burn-down-typescript-and-docs: done
+  epic-45-retrospective: optional
 action_items:
   - id: "epic-38-retro-item-1-decide-whether-to-build-a-streamable-htt"
     epic: 38
@@ -690,3 +700,13 @@ action_items:
       provider); the live Copilot check was not run (owner decision #149); closed
       by the owner at the Epic 44 merge gate, 2026-11-23, with no retrospective (wave-9
       decision #153)"
+  - id: "epic-45-trigger-item-1-github-issue-1-security-boundaries"
+    epic: 45
+    action: "Deliver Epic 45 (Security Boundaries) for GitHub issue #1, the external
+      security report on commit 9a2f5150: SQL privilege checking on (45.1), auto-install
+      off under read-only (45.2), careful uninstall (45.3), block turns off raw-read
+      and code-execution tools (45.4), the trust-model docs and SECURITY.md (45.5);
+      close the issue at the 1.3.0 release"
+    owner: "build"
+    status: in-progress
+    ref: "https://github.com/jbrandtmse/iris-execute-mcp-v2/issues/1"

@@ -36,6 +36,7 @@ import { parseBootstrapMarker, type StampedBootstrapMarker } from "../../../shar
 import { verifyCompiled } from "../../../shared/src/bootstrap.js";
 import { IrisHttpClient } from "../../../shared/src/http-client.js";
 import { isLiveArmed } from "../../../shared/src/test-helpers/live-target.js";
+import type { FakeRequest } from "./stateful-fake-atelier.js";
 
 /** The document that carries the version marker. */
 export const SETUP_DOC = "ExecuteMCPv2.Setup.cls";
@@ -241,12 +242,16 @@ export async function seedInstance(
     );
   }
   for (const statement of [
-    "SELECT ExecuteMCPv2.Setup_Configure(?) AS ConfigureResult",
-    "SELECT ExecuteMCPv2.Setup_ConfigureMapping(?) AS MappingResult",
+    "SELECT %ODBCOUT(ExecuteMCPv2.Setup_Configure(?)) AS ConfigureResult",
+    "SELECT %ODBCOUT(ExecuteMCPv2.Setup_ConfigureMapping(?)) AS MappingResult",
   ]) {
     const answer = await atelierWrite(target, "POST", "action/query", { query: statement, parameters: [target.namespace] });
     const failure = failureOf(answer, [200]);
     if (failure !== undefined) throw new Error(`${statement}: ${failure}`);
+    // The status is in the row (DW-790): Atelier answers 200 whatever the procedure returned, `%ODBCOUT` renders success as "1".
+    const column = statement.includes("ConfigureResult") ? "ConfigureResult" : "MappingResult";
+    const value = String(((answer.json as { result?: { content?: Array<Record<string, unknown>> } } | undefined)?.result?.content ?? [])[0]?.[column] ?? "");
+    if (value !== "1") throw new Error(`${statement}: the procedure returned ${JSON.stringify(value)}, not "1".`);
   }
   const configured = await atelierQuery(target, "SELECT ExecuteMCPv2.Setup_IsConfigured() AS Configured");
   const flag = String(configured[0]?.["Configured"] ?? "0").toLowerCase();
@@ -488,7 +493,59 @@ export async function runServer(
   ctx: Pick<LegContext, "repoRoot" | "sdkEsmDir" | "target">,
   extraEnv: Record<string, string> = {},
 ): Promise<string> {
+  return (await runServerCalls(via, ctx, extraEnv)).stderr;
+}
+
+/** The statements the Story 45.2 spec counts as writes besides PUT, DELETE and a compile. */
+const WRITING_STATEMENT = /Setup_(Configure|ConfigureMapping|EnsureUnitTestRoot)\(/;
+
+/**
+ * Every write of a window of the stateful fake's requests: PUT, DELETE, a compile, or a query naming one of the three
+ * `Setup_*` configuration calls. Shared by the Story 45.2 orchestration test and the Epic 45 capstone (one oracle).
+ */
+export function writesIn(window: readonly FakeRequest[]): string[] {
+  return window
+    .filter((request) => {
+      if (request.method === "PUT" || request.method === "DELETE") return true;
+      const pathname = new URL(request.url, "http://fake.invalid").pathname;
+      if (request.method === "POST" && pathname.endsWith("/action/compile")) return true;
+      return request.method === "POST" && pathname.endsWith("/action/query") && WRITING_STATEMENT.test(request.body);
+    })
+    .map((request) => `${request.method} ${request.url}`);
+}
+
+/** The requests of a window of the stateful fake's requests to the custom REST service. */
+export function customRestIn(window: readonly FakeRequest[]): string[] {
+  return window.filter((request) => request.url.toLowerCase().startsWith("/api/executemcp/")).map((request) => `${request.method} ${request.url}`);
+}
+
+/** One extra tool call of {@link runServerCalls}, made after the `iris_server_info` read, with `server` added for the `other` path. */
+export interface ExtraCall {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+/** What {@link runServerCalls} produced: the server's stderr, and each extra call's result as the client received it. */
+export interface ServerRun {
+  stderr: string;
+  results: Array<{ isError?: boolean; structuredContent?: Record<string, unknown>; content?: Array<{ text?: string }> }>;
+}
+
+/**
+ * {@link runServer} that also makes `calls` (in order, after the read) before the server closes (Story 45.2). `extraEnv` is added
+ * to the server's environment, and `otherFields` to the `other` profile's `IRIS_PROFILES` entry on the `other` path (for
+ * example `autoInstall: false`). A call's result is returned whatever it is (an error result included); only a failed
+ * `iris_server_info` read throws.
+ */
+export async function runServerCalls(
+  via: LegSpec["via"],
+  ctx: Pick<LegContext, "repoRoot" | "sdkEsmDir" | "target">,
+  extraEnv: Record<string, string> = {},
+  calls: readonly ExtraCall[] = [],
+  otherFields: Record<string, unknown> = {},
+): Promise<ServerRun> {
   let stderr = "";
+  const results: ServerRun["results"] = [];
   const options = {
     sdkEsmDir: ctx.sdkEsmDir,
     entry: distEntry(ctx.repoRoot, "iris-dev-mcp"),
@@ -497,15 +554,21 @@ export async function runServer(
       stderr += chunk;
     },
   };
+  const extraCalls = async (session: Awaited<ReturnType<typeof openWireSession>>, extraArgs: Record<string, unknown>): Promise<void> => {
+    for (const call of calls) {
+      results.push((await session.raw(call.tool, { ...extraArgs, ...call.args })) as ServerRun["results"][number]);
+    }
+  };
   if (via === "startup") {
     const session = await openWireSession({ ...options, target: ctx.target }, extraEnv);
     try {
       const result = await session.raw("iris_server_info", {});
       if (result.isError) throw new Error(`iris_server_info failed: ${JSON.stringify(result.content)}`);
+      await extraCalls(session, {});
     } finally {
       await session.close();
     }
-    return stderr;
+    return { stderr, results };
   }
   const session = await openWireSession(
     { ...options, target: closedDefaultTarget(ctx.target.namespace) },
@@ -518,6 +581,7 @@ export async function runServer(
           username: ctx.target.username,
           password: ctx.target.password,
           namespace: ctx.target.namespace,
+          ...otherFields,
         },
       }),
     },
@@ -525,10 +589,11 @@ export async function runServer(
   try {
     const result = await session.raw("iris_server_info", { server: "other" });
     if (result.isError) throw new Error(`iris_server_info on "other" failed: ${JSON.stringify(result.content)}`);
+    await extraCalls(session, { server: "other" });
   } finally {
     await session.close();
   }
-  return stderr;
+  return { stderr, results };
 }
 
 /**

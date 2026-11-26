@@ -41,10 +41,13 @@ import type { ZodObject } from "zod";
 
 import type { IrisConnectionConfig } from "./config.js";
 import { loadConfig } from "./config.js";
-import { IrisHttpClient, bindSignal } from "./http-client.js";
+import { IrisHttpClient, bindSignal, recordSideRefusal } from "./http-client.js";
+import type { SideRefusalRecorder } from "./http-client.js";
+import { applyAutoInstall, parseOperatorAutoInstall } from "./auto-install.js";
 import { checkHealth } from "./health.js";
 import { negotiateVersion } from "./atelier.js";
-import { bootstrap } from "./bootstrap.js";
+import { bootstrap, buildIrisSideRefusal } from "./bootstrap.js";
+import type { BootstrapResult } from "./bootstrap.js";
 import { logger } from "./logger.js";
 import type { AuditConfig, AuditConfirmation, AuditEntryInput, AuditOutcome } from "./audit.js";
 import { AuditLogger, parseAuditConfig } from "./audit.js";
@@ -102,6 +105,7 @@ import {
   unwrapActionOptions,
   assertGovernanceClassification,
   effective,
+  configSource,
   getEffectivePolicy,
   getEffectiveConfigSources,
   presetSeed,
@@ -113,6 +117,9 @@ import {
 } from "./governance.js";
 import {
   applyDataPolicies,
+  buildDataPolicyWarning,
+  DATA_POLICY_BLOCK_KEYS,
+  dataPolicySeed,
   effectiveDataPolicy,
   parseDataPolicyValue,
   parseOperatorDataPolicy,
@@ -1194,9 +1201,12 @@ export class McpServerBase {
     // error. When the registry is not yet built (server constructed but not
     // start()ed), fall back to validating just the reserved default — the only
     // profile guaranteed to exist pre-start.
+    // Story 45.4 (AD-6): the profile's resolved data policy feeds the `block` seed, as it does at the
+    // gate and in the discovery tool. Before start() there is no registry and no policy (`undefined`).
+    let dataPolicy: DataPolicy | undefined;
     if (this.profiles) {
       try {
-        resolveProfile(this.profiles, profileName);
+        dataPolicy = resolveProfile(this.profiles, profileName).dataPolicy;
       } catch (error: unknown) {
         if (error instanceof ProfileResolutionError) {
           throw protocolError(ProtocolErrorCode.InvalidParams, error.message);
@@ -1223,10 +1233,11 @@ export class McpServerBase {
       BASELINE_ACTION_CLASSIFICATIONS,
       this.governanceFileConfig,
       this.parentKeys,
+      dataPolicy,
     );
 
     // Story 32.0 (AC 32.0.3): report which channel resolved each key
-    // (`env` | `file` | `parent` | `preset` | `default`) alongside the policy map -
+    // (`env` | `file` | `parent` | `dataPolicy` | `preset` | `default`) alongside the policy map -
     // emitted unconditionally (with no file set, keys report
     // env/preset/default). Built over the SAME visibleGovernedKeys() filter,
     // so the source map inherits the hidden-tool key omission structurally
@@ -1240,6 +1251,7 @@ export class McpServerBase {
       BASELINE_ACTION_CLASSIFICATIONS,
       this.governanceFileConfig,
       this.parentKeys,
+      dataPolicy,
     );
 
     return {
@@ -1848,6 +1860,9 @@ export class McpServerBase {
         BASELINE_ACTION_CLASSIFICATIONS,
         this.governanceFileConfig,
         this.parentKeys,
+        // Story 45.4 (AD-6): the CALLED profile's resolved data policy feeds the `block` seed. A call's
+        // own arguments never reach this decision: the policy comes from the registry, not the request.
+        profile.dataPolicy,
       )
     ) {
       // Disabled action (AC 14.4.2): structured denial. Human-readable text +
@@ -1875,10 +1890,17 @@ export class McpServerBase {
             this.parentKeys,
             this.governanceFileConfig,
           );
+      // Story 45.4 (AD-6): the `block` data-policy seed sits between the inherited disable and the preset,
+      // so a denial it caused carries `dataPolicyApplied` and never `presetApplied`.
+      const dataPolicyCaused =
+        !explicitOverride &&
+        inheritedFrom === undefined &&
+        dataPolicySeed(governanceKey, profile.dataPolicy) === false;
       const presetCaused =
         this.preset !== undefined &&
         !explicitOverride &&
         inheritedFrom === undefined &&
+        !dataPolicyCaused &&
         presetSeed(
           governanceKey,
           this.preset,
@@ -1888,17 +1910,20 @@ export class McpServerBase {
       logger.warn(
         `Tool ${tool.name}: action "${governanceKey}" denied by governance policy for profile "${profile.name}"` +
           (presetCaused ? ` (preset "${this.preset}").` : ".") +
-          (inheritedFrom !== undefined ? ` Inherited from "${inheritedFrom}".` : ""),
+          (inheritedFrom !== undefined ? ` Inherited from "${inheritedFrom}".` : "") +
+          (dataPolicyCaused ? ` Data policy "block".` : ""),
       );
       return refusalResult(
         REFUSAL_CODES.GOVERNANCE_DISABLED,
         `action '${governanceKey}' is disabled by governance policy for server '${profile.name}'` +
-          (inheritedFrom !== undefined ? ` (inherited from '${inheritedFrom}')` : ""),
+          (inheritedFrom !== undefined ? ` (inherited from '${inheritedFrom}')` : "") +
+          (dataPolicyCaused ? " (data policy 'block')" : ""),
         {
           action: governanceKey,
           server: profile.name,
           ...(inheritedFrom !== undefined ? { inheritedFrom } : {}),
           ...(presetCaused ? { presetApplied: this.preset } : {}),
+          ...(dataPolicyCaused ? { dataPolicyApplied: "block" } : {}),
         },
       );
     }
@@ -2021,13 +2046,43 @@ export class McpServerBase {
       this.governanceFileConfig,
     );
     // A call off the wire gets the request's abort signal on its HTTP clients and the confirmation helper.
-    const ctx =
+    const wireCtx =
       wireCall === undefined
         ? baseCtx
         : this.wireToolContext(baseCtx, tool, profile, parseResult.data, validatedArgs, wireCall);
+    // A profile whose IRIS side is not installed (automatic install off) refuses its custom-REST requests in its client
+    // (AD-1, Story 45.2). The recorder keeps the first such refusal of this call, refuses every later request of the call,
+    // and lets the framework answer with the refusal whatever the handler did with the error.
+    const sideRefusal: SideRefusalRecorder = {};
+    // One view per client object the call is handed. On a wire call each profile lookup returns a fresh signal-bound client, so
+    // it gets its own view; every view shares the one recorder, so the refusal holds across all of them.
+    const recorded = new Map<IrisHttpClient, IrisHttpClient>();
+    const record = (client: IrisHttpClient): IrisHttpClient => {
+      let view = recorded.get(client);
+      if (view === undefined) {
+        view = recordSideRefusal(client, sideRefusal);
+        recorded.set(client, view);
+      }
+      return view;
+    };
+    const ctx: ToolContext = {
+      ...wireCtx,
+      http: record(wireCtx.http),
+      resolveProfileClient: async (profileName: string) => record(await wireCtx.resolveProfileClient(profileName)),
+    };
+    const refusedResult = (): CallToolResult | undefined =>
+      sideRefusal.refusal === undefined
+        ? undefined
+        : refusalResult(
+            REFUSAL_CODES.IRIS_SIDE_NOT_INSTALLED,
+            sideRefusal.refusal.refusalText,
+            sideRefusal.refusal.fields,
+          );
 
     try {
       const result: ToolResult = await tool.handler(validatedArgs, ctx);
+      const refused = refusedResult();
+      if (refused !== undefined) return refused;
       // The handler asked for a confirmation: answer with the question, not with a tool result.
       if (result === CONFIRMATION_PENDING && wireCall?.pending !== undefined) return wireCall.pending;
       const callResult: CallToolResult = {
@@ -2042,6 +2097,8 @@ export class McpServerBase {
       }
       return callResult;
     } catch (error: unknown) {
+      const refused = refusedResult();
+      if (refused !== undefined) return refused;
       const message =
         error instanceof Error ? error.message : String(error);
       // A call the client cancelled has not failed: its audit entry says it was cancelled, and nothing is logged.
@@ -2404,6 +2461,11 @@ export class McpServerBase {
       if (typeof presetApplied === "string") {
         entryInput.presetApplied = presetApplied;
       }
+      // Story 45.4 (AD-19): a denial the `block` data-policy seed caused records that too (additive).
+      const dataPolicyApplied = structured?.dataPolicyApplied;
+      if (typeof dataPolicyApplied === "string") {
+        entryInput.dataPolicyApplied = dataPolicyApplied;
+      }
     }
     // Story 43.3 (AD-19): the person's answer to the confirmation dialog, when the call was asked one.
     if (confirmation !== undefined) entryInput.confirmation = confirmation;
@@ -2746,6 +2808,51 @@ export class McpServerBase {
     return { page, nextCursor };
   }
 
+  /**
+   * The startup warning of the `block` data policy (Story 45.4), or `undefined` when no profile has a covered
+   * tool to list. A key counts for a profile only when its tool is registered and VISIBLE on this server
+   * (`this.tools` holds the visible tools, so a hidden tool and a tool of another server are never named) and
+   * {@link effective} is `true` for that profile, with the profile's own policy and every explicit layer.
+   */
+  private dataPolicyStartupWarning(profiles: ProfileRegistry): string | undefined {
+    const visibleKeys = new Set<string>();
+    for (const keys of governanceKeysByTool(this.tools.values()).values()) {
+      for (const key of keys) visibleKeys.add(key);
+    }
+    return buildDataPolicyWarning(
+      [...profiles.values()].map((profile) => ({ name: profile.name, policy: effectiveDataPolicy(profile) })),
+      (profileName, key) =>
+        visibleKeys.has(key) &&
+        effective(
+          key,
+          profileName,
+          this.governanceConfig,
+          this.mutatesLookup,
+          GOVERNANCE_BASELINE,
+          this.defaultEnabledWrites,
+          this.preset,
+          BASELINE_ACTION_CLASSIFICATIONS,
+          this.governanceFileConfig,
+          this.parentKeys,
+          effectiveDataPolicy(profiles.get(profileName) ?? {}),
+        ),
+      DATA_POLICY_BLOCK_KEYS,
+      // Under `block` a listed key is on only through an explicit layer; the line names it as `configSource` does.
+      (profileName, key) =>
+        configSource(
+          key,
+          profileName,
+          this.governanceConfig,
+          this.mutatesLookup,
+          this.preset,
+          BASELINE_ACTION_CLASSIFICATIONS,
+          this.governanceFileConfig,
+          this.parentKeys,
+          effectiveDataPolicy(profiles.get(profileName) ?? {}),
+        ),
+    );
+  }
+
   // ── Transport and startup ──────────────────────────────────────────
 
   /**
@@ -2864,6 +2971,18 @@ export class McpServerBase {
     // `undefined` ⇒ the presetSeed layer is a pure pass-through (AC 24.1.1).
     this.preset = parseGovernancePreset();
 
+    // Resolve every profile's automatic install (Story 45.2; AD-9, AD-8, AD-14): the profile's IRIS_PROFILES entry, then
+    // IRIS_AUTO_INSTALL, then the read-only preset (which forces it off), then on. A malformed IRIS_AUTO_INSTALL, or an
+    // explicit "on" together with the read-only preset, fails fast here, before any request reaches IRIS. The registry holds
+    // the resolved value of every profile from here on; bootstrap reads it from the config it is given.
+    applyAutoInstall(this.profiles, parseOperatorAutoInstall(), this.preset);
+
+    // The data-policy warning (Story 45.4; AD-26): at most one `[WARN]` line, from configuration alone and
+    // before any request to IRIS, naming per `redact` or `block` profile the raw-read and code-execution
+    // tools that are visible on this server and enabled. It carries no value.
+    const dataPolicyWarning = this.dataPolicyStartupWarning(this.profiles);
+    if (dataPolicyWarning !== undefined) logger.warn(dataPolicyWarning);
+
     // Parse the audit-log configuration (Epic 29, spec `07-observability-
     // audit-log.md` §2), mirroring the governance parses immediately above.
     // Absent `IRIS_AUDIT_LOG` ⇒ `auditConfig` stays `undefined` ⇒
@@ -2923,6 +3042,9 @@ export class McpServerBase {
     //    are skipped for this request only; they run on that later first
     //    touch instead.
     let defaultEstablished = true;
+    // The default profile's own host:port (DW-767): `IRIS_PROFILES` can define `default`, and the client was built from it.
+    const defaultHost = this.profiles.get(DEFAULT_PROFILE_NAME)?.host ?? this.config.host;
+    const defaultPort = this.profiles.get(DEFAULT_PROFILE_NAME)?.port ?? this.config.port;
     try {
       await checkHealth(defaultClient);
     } catch (error: unknown) {
@@ -2943,7 +3065,7 @@ export class McpServerBase {
       // ONLY diagnostic, because the process no longer exits.
       logger.error(
         `Continuing startup without the "${DEFAULT_PROFILE_NAME}" profile ` +
-          `(${this.config.host}:${this.config.port}): tools targeting it will ` +
+          `(${defaultHost}:${defaultPort}): tools targeting it will ` +
           `return a connection error until it is reachable, then recover automatically ` +
           `(no restart needed). If the cause is configuration rather than an outage ` +
           `(e.g. an HTTP 401/403/404 in the line above — wrong credentials, or the ` +
@@ -2978,11 +3100,27 @@ export class McpServerBase {
       // 4.5. Bootstrap custom REST service if needed (default profile).
       if (this.options.needsCustomRest) {
         try {
+          // The bootstrap takes the registry's `default` profile (DW-767), the same profile `defaultClient` was
+          // built from: its namespace is the one the bootstrap reads and writes, its host:port is the one every
+          // bootstrap message names, and it carries the resolved automatic install (Story 45.2). It equals
+          // `this.config` in every connection field unless IRIS_PROFILES defines `default`, which then wins. As
+          // before, the config carries `autoInstall` only when the install is off (an install that is on is the
+          // absence of the field).
+          const defaultProfile = this.profiles.get(DEFAULT_PROFILE_NAME);
+          let bootstrapConfig: IrisConnectionConfig = this.config;
+          if (defaultProfile !== undefined) {
+            const { autoInstall, autoInstallSource, ...connection } = defaultProfile;
+            bootstrapConfig =
+              autoInstall === false
+                ? { ...connection, autoInstall: false, ...(autoInstallSource !== undefined ? { autoInstallSource } : {}) }
+                : connection;
+          }
           const result = await bootstrap(
             defaultClient,
-            this.config,
+            bootstrapConfig,
             this.atelierVersion,
           );
+          this.armCustomRestRefusal(defaultClient, bootstrapConfig, DEFAULT_PROFILE_NAME, result);
           if (result.errors.length > 0) {
             logger.warn(
               `Bootstrap completed with errors: ${result.errors.join("; ")}`,
@@ -3239,6 +3377,7 @@ export class McpServerBase {
   ): Promise<void> {
     try {
       const result = await bootstrap(client, profile, atelierVersion);
+      this.armCustomRestRefusal(client, profile, profile.name, result);
       if (result.errors.length > 0) {
         logger.warn(
           `Bootstrap for profile "${profile.name}" completed with errors: ${result.errors.join("; ")}`,
@@ -3251,6 +3390,31 @@ export class McpServerBase {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn(
         `Bootstrap failed for profile "${profile.name}": ${message}. Custom REST tools may not work against this profile.`,
+      );
+    }
+  }
+
+  /**
+   * Arm a profile's client with the `IRIS_SIDE_NOT_INSTALLED` refusal when its bootstrap left the custom REST service
+   * unavailable with the automatic install off (Story 45.2; AD-1, AD-14): from then on the client refuses every request to
+   * `/api/executemcp/` before any I/O. A result with `webAppUnconfirmed` arms the refusal for an absent web application
+   * only (DW-772). A bootstrap result with neither changes nothing.
+   *
+   * @param profileName - The profile name for the text (the startup config of `default` carries none).
+   */
+  private armCustomRestRefusal(
+    client: IrisHttpClient,
+    config: IrisConnectionConfig,
+    profileName: string,
+    result: BootstrapResult,
+  ): void {
+    if (result.customRestRefused === true) {
+      client.refuseCustomRest(buildIrisSideRefusal({ ...config, name: profileName } as IrisConnectionConfig, result));
+    } else if (result.webAppUnconfirmed === true) {
+      // DW-772, DW-791: the web application lookup failed or the web application is absent, so the tools go on and only the
+      // 404 of an absent web application refuses, with `found: "unconfigured"`.
+      client.refuseCustomRestWhenAbsent(
+        buildIrisSideRefusal({ ...config, name: profileName } as IrisConnectionConfig, result),
       );
     }
   }

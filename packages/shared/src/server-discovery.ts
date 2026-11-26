@@ -43,6 +43,7 @@ import type {
   ParentKeys,
 } from "./governance.js";
 import { effectiveDataPolicy, type DataPolicy, type DataPolicySource } from "./data-policy.js";
+import type { AutoInstallSource } from "./auto-install.js";
 import { getEffectiveConfigSources, getEffectivePolicy } from "./governance.js";
 import type { IrisProfile, ProfileRegistry, ProfileSource } from "./profiles.js";
 import { DEFAULT_PROFILE_NAME, resolveProfile } from "./profiles.js";
@@ -124,6 +125,16 @@ export interface ProfileRosterEntry {
    * `IRIS_GOVERNANCE_FILE:profiles`, `IRIS_GOVERNANCE_FILE:global` or `default`.
    */
   dataPolicySource: DataPolicySource;
+  /**
+   * Whether the profile installs, upgrades and repairs the IRIS side on connect (Story 45.2). `false`
+   * means bootstrap only reads and the custom-REST tools refuse while the IRIS side is not installed.
+   */
+  autoInstall: boolean;
+  /**
+   * The channel that supplied {@link autoInstall}: `IRIS_PROFILES`, `IRIS_AUTO_INSTALL`,
+   * `IRIS_GOVERNANCE_PRESET` or `default`.
+   */
+  autoInstallSource: AutoInstallSource;
 }
 
 /**
@@ -157,8 +168,9 @@ export interface ServerDiscoveryResult {
     policy?: Record<string, boolean>;
     /**
      * Per-key config channel that resolved the single profile's policy (Epic
-     * 32, Story 32.0, AC 32.0.3): `env` | `file` | `parent` | `preset` | `default`
-     * (`parent`, Story 38.4: the key inherits a disable from its parent key).
+     * 32, Story 32.0, AC 32.0.3): `env` | `file` | `parent` | `dataPolicy` | `preset` | `default`
+     * (`parent`, Story 38.4: the key inherits a disable from its parent key; `dataPolicy`,
+     * Story 45.4: the profile's `block` data policy seeds the key disabled).
      * Emitted UNCONDITIONALLY alongside `policy` (absent only when
      * `allProfiles`), over the SAME visibility-filtered key set — the
      * hidden-tool key omission (Epic 30) applies identically, so no hidden
@@ -215,6 +227,8 @@ export function buildRosterEntry(profile: IrisProfile): ProfileRosterEntry {
     ...(profile.sourceFile !== undefined ? { sourceFile: profile.sourceFile } : {}),
     dataPolicy: effectiveDataPolicy(profile),
     dataPolicySource: profile.dataPolicySource ?? "default",
+    autoInstall: profile.autoInstall ?? true,
+    autoInstallSource: profile.autoInstallSource ?? "default",
   };
 }
 
@@ -290,6 +304,8 @@ export function computeServerDiscovery(
     const policies: Record<string, Record<string, boolean>> = {};
     const configSources: Record<string, Record<string, GovernanceConfigSource>> = {};
     for (const name of profiles.keys()) {
+      // Story 45.4 (AD-6): each profile's own resolved data policy feeds the `block` seed.
+      const dataPolicy = profiles.get(name)?.dataPolicy;
       // Use defineProperty so a profile name that collides with a prototype
       // member (e.g. "__proto__", "constructor") is written as a real own
       // enumerable property rather than silently no-op'ing the assignment —
@@ -308,6 +324,7 @@ export function computeServerDiscovery(
           classifications,
           fileConfig,
           parentKeys,
+          dataPolicy,
         ),
         enumerable: true,
         writable: true,
@@ -325,6 +342,7 @@ export function computeServerDiscovery(
           classifications,
           fileConfig,
           parentKeys,
+          dataPolicy,
         ),
         enumerable: true,
         writable: true,
@@ -349,6 +367,7 @@ export function computeServerDiscovery(
         classifications,
         fileConfig,
         parentKeys,
+        profile.dataPolicy,
       ),
       configSource: getEffectiveConfigSources(
         profile.name,
@@ -359,6 +378,7 @@ export function computeServerDiscovery(
         classifications,
         fileConfig,
         parentKeys,
+        profile.dataPolicy,
       ),
     };
   }

@@ -30,7 +30,8 @@ export function isCheckableRoutine(name: string): boolean {
  * The documents among `names` that the check does not confirm as compiled, in the order of `names`: classes by the class
  * dictionary and IRIS's up-to-date flag, `.mac` routines by IRIS's up-to-date flag. Other documents are not checked. The reads:
  * one dictionary query per 100 classes and one `docnames/CLS` listing per package root of the classes, one `docnames/RTN`
- * listing per package root of the routines, none when there is nothing to check.
+ * listing per package root of the routines, and one `POST action/index` per 100 documents the filtered listing left out (it is
+ * empty for an account without SQL privileges), none when there is nothing to check.
  *
  * @throws Whatever the requests throw: a check that cannot run is never a pass, so the caller reports it.
  */

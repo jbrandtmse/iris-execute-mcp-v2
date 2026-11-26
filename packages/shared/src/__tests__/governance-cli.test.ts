@@ -24,6 +24,7 @@ import {
   loadGovernanceFile,
   type GovernanceConfigSource,
 } from "../governance.js";
+import { DATA_POLICY_BLOCK_KEYS } from "../data-policy.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 import { BASELINE_ACTION_CLASSIFICATIONS } from "../baseline-classifications.js";
 
@@ -853,4 +854,123 @@ describe("Story 39.2: the governance file's dataPolicy section", () => {
     expect(code).toBe(0);
     expect(stdout.text).toContain("OK: all 1 key(s) in IRIS_GOVERNANCE_FILE");
   }, 60_000);
+});
+
+describe("Story 45.4: effective applies the block data-policy seed (decision #169, D5)", () => {
+  /** The covered keys that `effective` renders: the 12 of the declaration, all of them under block. */
+  const COVERED = DATA_POLICY_BLOCK_KEYS;
+
+  async function renderEffective(
+    env: Record<string, string | undefined>,
+    extra: string[] = [],
+  ): Promise<{ code: number; payload: { dataPolicy?: string; policy: Record<string, boolean>; configSource: Record<string, string> }; stdout: string; stderr: string }> {
+    const { deps, stdout, stderr } = baseDeps(env);
+    const code = await runCli(["effective", "--json", ...extra], deps);
+    return { code, payload: JSON.parse(stdout.text) as never, stdout: stdout.text, stderr: stderr.text };
+  }
+
+  it("IRIS_DATA_POLICY=block: every covered key is false with source dataPolicy, and the others are as without it", async () => {
+    const block = await renderEffective({ IRIS_DATA_POLICY: "block" });
+    expect(block.code).toBe(0);
+    expect(block.payload.dataPolicy).toBe("block");
+    for (const key of COVERED) {
+      expect(block.payload.policy[key], key).toBe(false);
+      expect(block.payload.configSource[key], key).toBe("dataPolicy");
+    }
+    const plain = await renderEffective({});
+    for (const key of Object.keys(plain.payload.policy)) {
+      if (COVERED.includes(key)) continue;
+      expect(block.payload.policy[key], key).toBe(plain.payload.policy[key]);
+      expect(block.payload.configSource[key], key).toBe(plain.payload.configSource[key]);
+    }
+  });
+
+  it("the text render names the policy in its header and shows the source", async () => {
+    const { deps, stdout } = baseDeps({ IRIS_DATA_POLICY: "block" });
+    expect(await runCli(["effective"], deps)).toBe(0);
+    expect(stdout.text).toContain('Effective governance policy for profile "default" (data policy: block):');
+    expect(stdout.text).toContain("iris_sql_query = false   (source: dataPolicy)");
+  });
+
+  it("an explicit true re-enables one key and shows its channel (env, then file)", async () => {
+    const env = { IRIS_DATA_POLICY: "block", IRIS_GOVERNANCE: JSON.stringify({ global: { iris_sql_query: true } }) };
+    const viaEnv = await renderEffective(env);
+    expect(viaEnv.payload.policy["iris_sql_query"]).toBe(true);
+    expect(viaEnv.payload.configSource["iris_sql_query"]).toBe("env");
+    expect(viaEnv.payload.configSource["iris_global_get"]).toBe("dataPolicy");
+
+    writeGovernance({ global: { iris_global_get: true } });
+    const viaFile = await renderEffective({ IRIS_DATA_POLICY: "block" }, ["--file", file]);
+    expect(viaFile.payload.policy["iris_global_get"]).toBe(true);
+    expect(viaFile.payload.configSource["iris_global_get"]).toBe("file");
+    expect(viaFile.payload.configSource["iris_sql_execute"]).toBe("dataPolicy");
+  });
+
+  it("an explicit false keeps its own attribution, and block with the read-only preset keeps the preset for non-covered writes", async () => {
+    const env = {
+      IRIS_DATA_POLICY: "block",
+      IRIS_GOVERNANCE_PRESET: "read-only",
+      IRIS_GOVERNANCE: JSON.stringify({ global: { iris_global_get: false } }),
+    };
+    const { payload } = await renderEffective(env);
+    expect(payload.configSource["iris_global_get"]).toBe("env");
+    expect(payload.configSource["iris_sql_execute"]).toBe("dataPolicy");
+    expect(payload.configSource["iris_doc_put"]).toBe("preset");
+  });
+
+  it("takes the policy from an IRIS_PROFILES entry (own profile only), then IRIS_DATA_POLICY, then the file section", async () => {
+    const profiles = JSON.stringify({ prod: { dataPolicy: "block" } });
+    expect((await renderEffective({ IRIS_PROFILES: profiles }, ["--profile", "prod"])).payload.dataPolicy).toBe("block");
+    // The default profile does not inherit prod's entry.
+    const other = await renderEffective({ IRIS_PROFILES: profiles });
+    expect(other.payload.dataPolicy).toBeUndefined();
+    expect(other.payload.configSource["iris_sql_execute"]).toBe("default");
+    // The entry beats the operator variable.
+    expect((await renderEffective({ IRIS_PROFILES: profiles, IRIS_DATA_POLICY: "allow" }, ["--profile", "prod"])).payload.dataPolicy).toBe("block");
+    // The file's section applies when nothing above sets one: profile first, then global.
+    writeGovernance({ dataPolicy: { global: "allow", profiles: { prod: "block" } } });
+    expect((await renderEffective({}, ["--file", file, "--profile", "prod"])).payload.dataPolicy).toBe("block");
+    expect((await renderEffective({}, ["--file", file])).payload.dataPolicy).toBeUndefined();
+    writeGovernance({ dataPolicy: { global: "block" } });
+    expect((await renderEffective({}, ["--file", file])).payload.dataPolicy).toBe("block");
+  });
+
+  it("under redact, allow and no policy the output is byte-identical", async () => {
+    const plain = await renderEffective({});
+    for (const policy of ["redact", "allow", "REDACT"]) {
+      const same = await renderEffective({ IRIS_DATA_POLICY: policy });
+      expect(same.stdout, policy).toBe(plain.stdout);
+    }
+    const { deps: textDeps, stdout: text } = baseDeps({});
+    await runCli(["effective"], textDeps);
+    const { deps: redactDeps, stdout: redactText } = baseDeps({ IRIS_DATA_POLICY: "redact" });
+    await runCli(["effective"], redactDeps);
+    expect(redactText.text).toBe(text.text);
+    expect(plain.payload.dataPolicy).toBeUndefined();
+  });
+
+  it("a malformed IRIS_DATA_POLICY or entry dataPolicy exits 1 with the servers' text", async () => {
+    const operator = baseDeps({ IRIS_DATA_POLICY: "open" });
+    expect(await runCli(["effective"], operator.deps)).toBe(1);
+    expect(operator.stderr.text).toContain('IRIS_DATA_POLICY must be "block", "redact" or "allow". Received: "open".');
+
+    const entry = baseDeps({ IRIS_PROFILES: JSON.stringify({ p: { dataPolicy: 3 } }) });
+    expect(await runCli(["effective"], entry.deps)).toBe(1);
+    expect(entry.stderr.text).toContain('IRIS_PROFILES is invalid: profile "p": "dataPolicy" must be "block", "redact" or "allow".');
+  });
+
+  it("matches a DIRECT call of the shared engine for every key it renders (single-sourcing)", async () => {
+    const env = { IRIS_DATA_POLICY: "block", IRIS_GOVERNANCE: JSON.stringify({ global: { iris_global_list: true } }) };
+    const { payload } = await renderEffective(env);
+    const emptyLookup = new Map<string, never>();
+    const envConfig = { global: { iris_global_list: true } };
+    for (const key of Object.keys(payload.policy)) {
+      expect(payload.policy[key], key).toBe(
+        effective(key, "default", envConfig, emptyLookup, GOVERNANCE_BASELINE, new Set(), undefined, BASELINE_ACTION_CLASSIFICATIONS, undefined, undefined, "block"),
+      );
+      expect(payload.configSource[key], key).toBe(
+        configSource(key, "default", envConfig, emptyLookup, undefined, BASELINE_ACTION_CLASSIFICATIONS, undefined, undefined, "block"),
+      );
+    }
+  });
 });

@@ -258,6 +258,19 @@ jobs:
       - name: remove the throwaway
         if: "${{ always() }}"
         run: node scripts/throwaway-iris.mjs down --state ${{ runner.temp }}/throwaway-live.json
+      - name: start the uninstall throwaway
+        id: uninstall
+        if: "${{ !cancelled() && steps.setup.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs up --image intersystems/irishealth-community:2026.2@sha256:462de1fb3597272fde0e03afad006af1b18b59c90f1c1fb5566c79b027a7af0a --namespace USER --host-port 52790 --state ${{ runner.temp }}/throwaway-uninstall.json
+      - name: suite uninstall-round-trip
+        if: "${{ !cancelled() && steps.uninstall.outcome == 'success' }}"
+        run: THROWAWAY_STATE_FILE=${{ runner.temp }}/throwaway-uninstall.json node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-uninstall.json -- node scripts/ci-live-suite.mjs uninstall-round-trip
+      - name: uninstall container log
+        if: "${{ failure() || cancelled() }}"
+        run: node scripts/throwaway-iris.mjs logs --state ${{ runner.temp }}/throwaway-uninstall.json
+      - name: remove the uninstall throwaway
+        if: "${{ always() }}"
+        run: node scripts/throwaway-iris.mjs down --state ${{ runner.temp }}/throwaway-uninstall.json
 
   package:
     name: package

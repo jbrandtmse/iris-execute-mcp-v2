@@ -6,6 +6,7 @@
  */
 
 import type { DataPolicy, DataPolicySource } from "./data-policy.js";
+import type { AutoInstallSource } from "./auto-install.js";
 
 /** Configuration required to connect to an IRIS instance over HTTP. */
 export interface IrisConnectionConfig {
@@ -87,6 +88,15 @@ export interface IrisConnectionConfig {
   dataPolicy?: DataPolicy;
   /** The channel that supplied {@link dataPolicy}. */
   dataPolicySource?: DataPolicySource;
+  /**
+   * Whether this connection's profile installs, upgrades and repairs the IRIS side on connect (Story 45.2).
+   * {@link loadConfig} never sets it. The profile registry carries the resolved value of every profile
+   * (see `auto-install.ts`); `false` means bootstrap only reads. Absent on a hand-built config, which counts
+   * as on. A value is never inherited from the `default` profile.
+   */
+  autoInstall?: boolean;
+  /** The channel that supplied {@link autoInstall}. */
+  autoInstallSource?: AutoInstallSource;
 }
 
 /**
@@ -141,6 +151,10 @@ export function readCredentialName(
  * | IRIS_SQL_MAX_ROWS_AFFECTED | *(unset: no rows-affected ceiling)*, non-negative integer |
  * | IRIS_TEST_TIMEOUT | *(unset: `iris_execute_tests` and `iris_test_coverage` keep their 120s default)*, seconds |
  * | IRIS_ACCEPT_LANGUAGE | `en-US,en;q=0.9` |
+ *
+ * `IRIS_AUTO_INSTALL` (`true` or `false`; unset: on, except under `IRIS_GOVERNANCE_PRESET=read-only`) is
+ * not read here: `parseOperatorAutoInstall` in `auto-install.ts` reads it at server start, because the
+ * resolution also needs the governance preset and the `IRIS_PROFILES` entries.
  *
  * @throws {Error} When IRIS_USERNAME is not set, or IRIS_PASSWORD is not set
  *   and IRIS_CREDENTIAL_NAME is not set either. With IRIS_CREDENTIAL_NAME set

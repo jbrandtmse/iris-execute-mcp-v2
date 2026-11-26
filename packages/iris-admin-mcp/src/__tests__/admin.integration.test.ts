@@ -275,6 +275,132 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
     });
   });
 
+  // ── 1b. Database fields that live on SYS.Database (Story 45.6, DW-765) ──
+  //
+  // `Config.Databases` has no Resource, ReadOnly or GlobalJournalState, so the list used to report "", false and 0 for
+  // every database, create dropped them and modify failed. Self-contained: the disposable database has its own name and
+  // directory, and `finally` deletes it.
+
+  describe("database fields on SYS.Database (DW-765)", () => {
+    type DatabaseRow = {
+      name: string;
+      resource: string;
+      readOnly: boolean;
+      globalJournalState: number;
+    };
+    const FIELDS_DB_NAME = "MCPADMINTEST-FIELDS";
+
+    it("lists the real resource and read-only flag of the system databases", async () => {
+      const { first, rows } = await listAllRows<DatabaseRow>(databaseListTool, "databases", ctx);
+      expect(first.isError, first.content[0]?.text).toBeFalsy();
+      const byName = (name: string) => rows.find((row) => row.name.toUpperCase() === name);
+      expect(byName("USER")?.resource).toBe("%DB_USER");
+      expect(byName("IRISLIB")?.resource).toBe("%DB_IRISLIB");
+      expect(byName("IRISLIB")?.readOnly, "IRISLIB is mounted read-only").toBe(true);
+      expect(byName("USER")?.readOnly).toBe(false);
+      expect(byName("USER")?.globalJournalState, "USER journals its globals").toBeGreaterThan(0);
+    });
+
+    it("applies resource, readOnly and globalJournalState on create and on modify, read back through the list", async () => {
+      const read = async (): Promise<DatabaseRow | undefined> => {
+        const { rows } = await listAllRows<DatabaseRow>(databaseListTool, "databases", ctx);
+        return rows.find((row) => row.name.toUpperCase() === FIELDS_DB_NAME);
+      };
+      const baseDirectory = await testDatabaseDirectory(ctx);
+      const directory = baseDirectory.replace(/mcpadmintestdata/, "mcpadmintestfields");
+      // A database of this name that an earlier run left behind would fail the create for that run's reason.
+      await safeDelete(databaseManageTool, { action: "delete", name: FIELDS_DB_NAME }, ctx);
+      try {
+        const create = await databaseManageTool.handler(
+          { action: "create", name: FIELDS_DB_NAME, directory, resource: "%DB_USER", globalJournalState: 2, readOnly: true },
+          ctx,
+        );
+        expect(create.isError, create.content[0]?.text).toBeFalsy();
+        const afterCreate = await read();
+        expect(afterCreate?.resource, "create applied the resource").toBe("%DB_USER");
+        expect(afterCreate?.globalJournalState, "create applied the journal state").toBe(2);
+        expect(afterCreate?.readOnly, "create applied readOnly").toBe(true);
+
+        // IRIS refuses a change to a read-only database ("the volume is readonly"), so the flags change first.
+        const modifyFlags = await databaseManageTool.handler(
+          { action: "modify", name: FIELDS_DB_NAME, readOnly: false, globalJournalState: 3 },
+          ctx,
+        );
+        expect(modifyFlags.isError, modifyFlags.content[0]?.text).toBeFalsy();
+        const afterFlags = await read();
+        expect(afterFlags?.readOnly, "modify applied readOnly").toBe(false);
+        expect(afterFlags?.globalJournalState, "modify applied the journal state").toBe(3);
+        expect(afterFlags?.resource, "modify of the flags left the resource alone").toBe("%DB_USER");
+
+        const modify = await databaseManageTool.handler(
+          { action: "modify", name: FIELDS_DB_NAME, resource: "%DB_IRISLIB" },
+          ctx,
+        );
+        expect(modify.isError, modify.content[0]?.text).toBeFalsy();
+        const afterModify = await read();
+        expect(afterModify?.resource, "modify applied the resource").toBe("%DB_IRISLIB");
+        expect(afterModify?.globalJournalState, "modify left the journal state alone").toBe(3);
+        expect(afterModify?.readOnly, "modify left readOnly alone").toBe(false);
+      } finally {
+        await safeDelete(databaseManageTool, { action: "delete", name: FIELDS_DB_NAME }, ctx);
+      }
+    });
+
+    it("an account with only %Development and read access to the databases reads the same resource and flags the administrator reads", async () => {
+      const roleName = "MCPAdminTestLPDbRole";
+      const userName = "MCPAdminTestLPDbUser";
+      const password = "MCPAdm1nLPDb!Pwd";
+      const { rows: adminRows } = await listAllRows<DatabaseRow>(databaseListTool, "databases", ctx);
+      const adminRow = (name: string): DatabaseRow | undefined => adminRows.find((row) => row.name.toUpperCase() === name.toUpperCase());
+
+      // The databases the account can open: the target namespace's own (read and write), and the two system ones the call reads
+      // SYS.Database through (read only).
+      const namespaces = await namespaceListTool.handler({}, ctx);
+      expect(namespaces.isError, namespaces.content[0]?.text).toBeFalsy();
+      const targetNamespace = (namespaces.structuredContent as { namespaces: Array<{ name: string; globals: string; routines: string }> }).namespaces.find(
+        (entry) => entry.name.toUpperCase() === config.namespace.toUpperCase(),
+      );
+      expect(targetNamespace, `the namespace list holds ${config.namespace}`).toBeDefined();
+      const ownDatabases = [...new Set([targetNamespace?.globals ?? "", targetNamespace?.routines ?? ""])];
+      const ownResources = ownDatabases.map((name) => adminRow(name)?.resource ?? "");
+      expect(ownResources.every((resource) => resource !== ""), `the administrator reads a resource for ${ownDatabases.join(", ")}`).toBe(true);
+      const grants = [...ownResources.map((resource) => `${resource}:RW`), "%DB_IRISSYS:R", "%DB_IRISLIB:R", "%Development:U"].join(",");
+
+      try {
+        const role = await roleManageTool.handler({ action: "create", name: roleName, description: "Integration test role", resources: grants }, ctx);
+        expect(role.isError, role.content[0]?.text).toBeFalsy();
+        const user = await userManageTool.handler(
+          { action: "create", name: userName, password, fullName: "MCP Admin Integration Test User", roles: roleName, enabled: true, namespace: "USER" },
+          ctx,
+        );
+        expect(user.isError, user.content[0]?.text).toBeFalsy();
+
+        const limitedConfig: IrisConnectionConfig = { ...config, username: userName, password };
+        const limitedClient = new IrisHttpClient(limitedConfig);
+        try {
+          const limitedCtx = buildToolContext("SYS", limitedConfig, limitedClient, await negotiateVersion(limitedClient));
+          const { first, rows: limitedRows } = await listAllRows<DatabaseRow>(databaseListTool, "databases", limitedCtx);
+          expect(first.isError, first.content[0]?.text).toBeFalsy();
+          const limitedRow = (name: string): DatabaseRow | undefined => limitedRows.find((row) => row.name.toUpperCase() === name.toUpperCase());
+          for (const name of ["IRISSYS", "IRISLIB", ...ownDatabases]) {
+            const expected = adminRow(name);
+            expect(limitedRow(name)?.resource, `${name}: the account reads the administrator's resource`).toBe(expected?.resource);
+            expect(limitedRow(name)?.readOnly, `${name}: the account reads the administrator's readOnly`).toBe(expected?.readOnly);
+            expect(limitedRow(name)?.globalJournalState, `${name}: the account reads the administrator's globalJournalState`).toBe(expected?.globalJournalState);
+          }
+          expect(limitedRow("IRISSYS")?.resource, "IRISSYS holds its own resource, not the empty default").toBe("%DB_IRISSYS");
+          expect(limitedRow("IRISLIB")?.resource).toBe("%DB_IRISLIB");
+          expect(limitedRow("IRISLIB")?.readOnly, "IRISLIB is mounted read-only").toBe(true);
+        } finally {
+          limitedClient.destroy();
+        }
+      } finally {
+        await safeDelete(userManageTool, { action: "delete", name: userName }, ctx);
+        await safeDelete(roleManageTool, { action: "delete", name: roleName }, ctx);
+      }
+    });
+  });
+
   // ── 2. Namespace create & verify ─────────────────────────────────
 
   describe("namespace management", () => {

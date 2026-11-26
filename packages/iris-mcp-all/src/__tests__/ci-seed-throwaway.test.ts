@@ -2,7 +2,7 @@
  * Story 42.3 (AC 42.3.2) -- `scripts/ci-seed-throwaway.mjs`, which prepares a throwaway IRIS for Health container for CI's armed suites:
  * the real `bootstrap()`, a check that `Ens.Director` is visible, and the test and fixture classes.
  *
- *  - THE LIST. `seedDocuments` holds exactly the 65 files of `src/ExecuteMCPv2/Tests/**` and `QAFixtures/*`, and none of the
+ *  - THE LIST. `seedDocuments` holds exactly the 66 files of `src/ExecuteMCPv2/Tests/**` and `QAFixtures/*`, and none of the
  *    35 bootstrapped classes (a bootstrapped class loaded from `src/` carries the `dev` marker, AD-14). The disjointness
  *    guard is also run over a synthetic repository that violates it.
  *  - THE REFUSALS. An environment that is not a throwaway target is refused before the shared dist is loaded or a request is made.
@@ -57,19 +57,19 @@ const throwawayEnv = (port: number | string, namespace = "HSCUSTOM"): Record<str
 describe("seedDocuments: the classes the seed deploys", () => {
   const documents = seedDocuments(REPO_ROOT);
 
-  it("holds exactly the 65 files of src/ExecuteMCPv2/Tests and QAFixtures, as documents of the same name", () => {
+  it("holds exactly the 66 files of src/ExecuteMCPv2/Tests and QAFixtures, as documents of the same name", () => {
     const onDisk = [
       ...filesUnder(path.join(REPO_ROOT, "src", "ExecuteMCPv2", "Tests"), path.join(REPO_ROOT, "src")),
       ...filesUnder(path.join(REPO_ROOT, "src", "ExecuteMCPv2", "QAFixtures"), path.join(REPO_ROOT, "src")),
     ].sort();
 
-    expect(onDisk.length).toBe(65);
-    expect(documents.length).toBe(65);
+    expect(onDisk.length).toBe(66);
+    expect(documents.length).toBe(66);
     expect(documents.map((document: { path: string }) => document.path)).toEqual(onDisk.map((file) => `src/${file}`));
     expect(documents.every((document: { name: string }) => /^ExecuteMCPv2\.(Tests|QAFixtures)\.[A-Za-z0-9]+\.cls$/.test(document.name))).toBe(true);
     expect(documents.map((document: { name: string }) => document.name)).toContain("ExecuteMCPv2.QAFixtures.LongRunningTest.cls");
     expect(documents.map((document: { name: string }) => document.name)).toContain("ExecuteMCPv2.Tests.UtilsTest.cls");
-    expect(new Set(documents.map((document: { name: string }) => document.name)).size).toBe(65);
+    expect(new Set(documents.map((document: { name: string }) => document.name)).size).toBe(66);
   });
 
   it("holds none of the bootstrapped classes, by the embed and by the roster of gen-bootstrap.mjs", () => {
@@ -249,7 +249,7 @@ describe("seeding the stateful fake Atelier with the real shared dist", () => {
   };
   const fixtureNames = (seedDocuments(REPO_ROOT) as Array<{ name: string }>).map((document) => document.name);
 
-  it("runs the real bootstrap, checks Ens.Director, then deploys and compiles only the 65 test and fixture classes", async () => {
+  it("runs the real bootstrap, checks Ens.Director, then deploys and compiles only the 66 test and fixture classes", async () => {
     await withFake({}, async (fake) => {
       const { code, logs } = await seed(fake);
 
@@ -257,7 +257,7 @@ describe("seeding the stateful fake Atelier with the real shared dist", () => {
       const summary = summarizeRequests(fake.requests);
       expect(summary.puts.slice(0, 35)).toEqual([...BOOTSTRAP_CLASSES.keys()]);
       expect(summary.puts.slice(35)).toEqual(fixtureNames);
-      expect(summary.puts.length).toBe(100);
+      expect(summary.puts.length).toBe(101);
       expect(summary.compiles, "one compile for the bootstrap classes, one for the fixtures").toBe(2);
       expect(summary.queries).toContain(INTEROP_QUERY);
       expect([...fake.state.docs.keys()].sort()).toEqual([...BOOTSTRAP_CLASSES.keys(), ...fixtureNames].sort());
@@ -265,7 +265,7 @@ describe("seeding the stateful fake Atelier with the real shared dist", () => {
       expect(compileBodies[0]).toEqual([...BOOTSTRAP_CLASSES.keys()]);
       expect(compileBodies[1]).toEqual(fixtureNames);
       expect(logs).toContain("Ens.Director is visible in HSCUSTOM");
-      expect(logs).toContain("deployed and compiled 65 test and fixture classes");
+      expect(logs).toContain("deployed and compiled 66 test and fixture classes");
     });
   }, 120_000);
 
@@ -347,7 +347,7 @@ describe("seeding the stateful fake Atelier with the real shared dist", () => {
       const { code, logs } = await seed(fake);
 
       expect(code, logs).toBe(0);
-      expect(logs).toContain("deployed and compiled 65 test and fixture classes");
+      expect(logs).toContain("deployed and compiled 66 test and fixture classes");
     });
   }, 120_000);
 
@@ -412,7 +412,7 @@ describe("seeding the stateful fake Atelier with the real shared dist", () => {
 
       const seeded = await run(throwawayEnv(fake.port));
       expect(seeded.status, seeded.stderr.slice(-2000)).toBe(0);
-      expect(summarizeRequests(fake.requests).puts.length).toBe(100);
+      expect(summarizeRequests(fake.requests).puts.length).toBe(101);
     });
   }, 180_000);
 

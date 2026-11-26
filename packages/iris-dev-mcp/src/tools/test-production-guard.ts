@@ -64,7 +64,9 @@ export interface ProductionGuardResult {
  * @param level - The tool's `level`.
  * @returns The decision, or `undefined` when the route does not exist (HTTP 404: the IRIS-side classes predate
  *   the guard, or the service is not deployed), in which case the run goes ahead unguarded as it did before the
- *   guard. Any other failure is thrown to the caller.
+ *   guard. Any other failure is thrown to the caller, among them the `IrisSideNotInstalledError` of a profile whose
+ *   IRIS side is not installed while its automatic install is off (the client refuses the request before sending it,
+ *   or, for an `unconfigured` side, raises it on the 404 of an absent web application instead of an `IrisApiError`).
  */
 export async function readProductionGuard(
   ctx: Pick<ToolContext, "http">,

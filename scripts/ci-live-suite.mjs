@@ -5,7 +5,9 @@
 //   node scripts/ci-live-suite.mjs <suite-id>
 //   The ids and what each runs are the `LIVE_SUITES` of `scripts/lib/ci-checks.mjs`. CI runs a suite as
 //   `node scripts/throwaway-iris.mjs exec --state <file> -- node scripts/ci-live-suite.mjs <suite-id>`; the two
-//   bootstrap-guard suites start their own throwaway container.
+//   bootstrap-guard suites start their own throwaway container, and so does the uninstall round trip (Story 45.3, kind
+//   'own-container'): its container is started by the workflow's own `up` step and the suite runs through `exec`, with
+//   THROWAWAY_STATE_FILE set to the state file of that container.
 //
 // CONTRACT
 //   1. Refusal comes first, before anything is spawned (exit 2): an unknown suite id, and, for every suite that does not make

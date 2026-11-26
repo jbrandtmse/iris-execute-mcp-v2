@@ -27,6 +27,7 @@
     "check:provenance": "node scripts/check-provenance.mjs",
     "validate:prompts": "node scripts/validate-prompts.mjs",
     "live:bootstrap-guard": "node scripts/throwaway-iris.mjs run -- pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-42-2-bootstrap-guard-live-gate.test.ts",
+    "live:uninstall-round-trip": "sh -c 'S=\"$(mktemp -d)/uninstall.json\"; node scripts/throwaway-iris.mjs up --image intersystems/irishealth-community:2026.2@sha256:462de1fb3597272fde0e03afad006af1b18b59c90f1c1fb5566c79b027a7af0a --namespace USER --host-port 52792 --state \"$S\" && { THROWAWAY_STATE_FILE=\"$S\" node scripts/throwaway-iris.mjs exec --state \"$S\" -- pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-45-3-uninstall-round-trip-live-gate.test.ts; R=$?; node scripts/throwaway-iris.mjs down --state \"$S\"; exit $R; }'",
     "measure:tools-payload": "node scripts/measure-tools-payload.mjs",
     "gen:tools-list-snapshot": "node scripts/gen-tools-list-snapshot.mjs",
     "gen:tools-list-snapshot:check": "node scripts/gen-tools-list-snapshot.mjs --check",

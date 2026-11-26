@@ -164,9 +164,10 @@ describe("Story 42.5: SECURITY.md", () => {
   it("names the supported versions, and reports through GitHub private vulnerability reporting with no email address", () => {
     expect(policy).toContain("The latest `1.x` release receives security fixes");
     expect(policy).toContain("GitHub private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability**");
-    expect(policy).toContain("No email address is published for security reports");
+    // Story 45.7 (the Planner's wording, Design Notes A4): the sentence that said no address is published became one line.
+    expect(policy).toContain("Please use private reporting rather than email or a public issue or pull request.");
+    expect(policy).not.toContain("No email address is published");
     expect(policy, "no email address anywhere in the policy").not.toMatch(/[\w.+-]+@[\w-]+\.[\w.-]+/);
-    expect(policy).toContain("do not open a public issue or pull request for a vulnerability");
   });
 
   it("states the scope: the npm packages, the IRIS classes, the extension and the IPM package", () => {

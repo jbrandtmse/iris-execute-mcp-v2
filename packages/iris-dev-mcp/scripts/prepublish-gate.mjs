@@ -118,6 +118,11 @@ const gateTestFiles = [
   // a failed class: writes only the disposable ExecuteMCPv2.Temp.QaStory447 documents (a failing class and persistent classes with no
   // data rows), and removes them and any global that carries the name.
   "src/__tests__/compile-check-live-gate.test.ts",
+  // Story 45.1 (S-45.1-sql-privileges): `iris_sql_query` / `iris_sql_execute` as a least-privilege account against the real /dev/sql/execute
+  // route (SQLCODE -99 refusals, the ordering ahead of every decline, GRANT and REVOKE). Writes the disposable ExecuteMCPv2.Temp.QaStory451Priv
+  // class (persistent, compiled, one SqlProc), its data and counter global, and, ONLY on a throwaway (IRIS_THROWAWAY from scripts/throwaway-iris.mjs;
+  // otherwise its legs skip), the role QaStory451Role and the user QaStory451Lp; removes all of them and asserts nothing named QaStory451 is left.
+  "src/__tests__/sql-privileges-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its

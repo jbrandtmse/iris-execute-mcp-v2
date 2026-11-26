@@ -202,6 +202,13 @@ export interface AuditEntryInput {
    */
   presetApplied?: string;
   /**
+   * The data policy that caused a governance denial (Story 45.4, AD-6, AD-19), COPIED from the denial's
+   * `structuredContent.dataPolicyApplied` (`"block"`): present only when the `block` data-policy seed (not an
+   * explicit setting, an inherited disable or the preset) denied the call. Only recorded when
+   * `outcome === "denied"` AND the source field was present. Additive.
+   */
+  dataPolicyApplied?: string;
+  /**
    * What the PHI data policy did over the call (Story 39.2, AD-19): the policy in force and the
    * number of bodies shown redacted and withheld. Present only for a call to a tool that declares
    * `ToolDefinition.dataPolicy` (and, with `actions`, whose action is listed) on a profile that
@@ -234,6 +241,7 @@ interface AuditEntry {
   error?: string;
   denyReason?: string;
   presetApplied?: string;
+  dataPolicyApplied?: string;
   dataPolicy?: DataPolicySummary;
   confirmation?: AuditConfirmation;
 }
@@ -320,6 +328,9 @@ export class AuditLogger {
     }
     if (input.outcome === "denied" && input.presetApplied !== undefined) {
       entry.presetApplied = input.presetApplied;
+    }
+    if (input.outcome === "denied" && input.dataPolicyApplied !== undefined) {
+      entry.dataPolicyApplied = input.dataPolicyApplied;
     }
     if (input.dataPolicy !== undefined) {
       entry.dataPolicy = input.dataPolicy;

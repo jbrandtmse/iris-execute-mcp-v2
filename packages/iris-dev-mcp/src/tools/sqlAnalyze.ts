@@ -154,6 +154,35 @@ const ADVISE_DATA_PATH = `${BASE_URL}/dev/sql/advise-data`;
 const DEFAULT_ADVISE_TOPN = 5;
 const MAX_ADVISE_TOPN = 20;
 
+/** `INFORMATION_SCHEMA.STATEMENTS` stores dynamic SQL as `DECLARE <cursor> CURSOR FOR <select>` (IRIS 2026.2),
+ *  and `EXPLAIN` rejects a `DECLARE`; the workload mode advises the wrapped SELECT. */
+const DECLARE_CURSOR_PREFIX = /^DECLARE\s+\S+\s+CURSOR\s+FOR\s+/i;
+
+/** The workload mode's own traffic, never a candidate (DW-794): each `advise` run stores its EXPLAIN as
+ *  `SELECT %SYSTEM.QUERY_PLAN(...)`, the advise-data route's dictionary lookups read `%Dictionary`, and the workload and
+ *  `stats` reads read `INFORMATION_SCHEMA`. IRIS 2026.2 stores the text normalized (upper case, tokens spaced:
+ *  `%SYSTEM . QUERY_PLAN (`), so both the SQL filter and the row check match without the dots and case-insensitively. */
+const OWN_STATEMENT_FILTER =
+  "UPPER(Statement) NOT LIKE '%\\%SYSTEM%QUERY\\_PLAN%' ESCAPE '\\' " +
+  "AND UPPER(Statement) NOT LIKE '%INFORMATION\\_SCHEMA%' ESCAPE '\\' " +
+  "AND UPPER(Statement) NOT LIKE '%\\%DICTIONARY%' ESCAPE '\\'";
+const OWN_STATEMENT = /%SYSTEM\s*\.\s*QUERY_PLAN|INFORMATION_SCHEMA|%DICTIONARY\s*\./i;
+
+/** IRIS's own error text of an advise-data failure (the `status.errors` entries), without the HTTP client's generic summary. */
+function irisErrorText(error: IrisApiError): string {
+  const parts = error.errors
+    .map((entry) =>
+      typeof entry === "string"
+        ? entry
+        : entry !== null && typeof entry === "object" && typeof (entry as Record<string, unknown>)["error"] === "string"
+          ? ((entry as Record<string, unknown>)["error"] as string)
+          : "",
+    )
+    .map((text) => text.trim())
+    .filter((text) => text !== "");
+  return parts.length > 0 ? parts.join(" | ") : error.message;
+}
+
 /**
  * Ensure a value is a record suitable for MCP `structuredContent` (never a
  * bare array). Local copy — mirrors `iris-data-mcp/docdb.ts`'s `toStructured`;
@@ -302,14 +331,15 @@ async function handleAdvise(
       : DEFAULT_ADVISE_TOPN;
     const workloadSql =
       `SELECT TOP ${topNValue} Hash, Statement, StatCount, StatTotal, StatAverage, ` +
-      "StatStdDev, StatRowCount, Timestamp FROM INFORMATION_SCHEMA.STATEMENTS ORDER BY Timestamp DESC";
+      "StatStdDev, StatRowCount, Timestamp FROM INFORMATION_SCHEMA.STATEMENTS " +
+      `WHERE ${OWN_STATEMENT_FILTER} ORDER BY Timestamp DESC`;
 
     let rows: Record<string, unknown>[];
     try {
       const response = await ctx.http.post(atelierPath(ctx.atelierVersion, ns, "action/query"), {
         query: workloadSql,
       });
-      rows = rowObjects(response);
+      rows = rowObjects(response).filter((row) => !OWN_STATEMENT.test(String(row["Statement"] ?? "")));
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
         return {
@@ -338,6 +368,8 @@ async function handleAdvise(
     // `errorCount` additionally lets the all-failed case below be told apart
     // from the all-blank case (neither of which is a "no problems found").
     let errorCount = 0;
+    let firstErrorMessage = "";
+    let privilegeRefusedCount = 0;
     for (const row of rows) {
       const stmt = String((row as Record<string, unknown>).Statement ?? "").trim();
       if (stmt === "") {
@@ -345,7 +377,7 @@ async function handleAdvise(
         continue;
       }
       try {
-        const { findings, notes } = await adviseStatement(ctx, ns, stmt);
+        const { findings, notes } = await adviseStatement(ctx, ns, stmt.replace(DECLARE_CURSOR_PREFIX, ""));
         for (const f of findings) allFindings.push(f);
         for (const n of notes) noteSet.add(n);
         analyzedCount++;
@@ -360,6 +392,8 @@ async function handleAdvise(
         if (error instanceof IrisApiError) {
           skippedCount++;
           errorCount++;
+          if (firstErrorMessage === "") firstErrorMessage = irisErrorText(error);
+          if (/not privileged/i.test(error.message)) privilegeRefusedCount++;
           continue;
         }
         throw error;
@@ -384,8 +418,18 @@ async function handleAdvise(
             text:
               `The advisor could not analyze any of the ${errorCount} recent statement(s) — ` +
               `every 'advise-data' call failed. Checked ${rows.length} recent statement(s) ` +
-              `(top ${topNValue}). Try 'query' mode with a specific SQL statement to see the ` +
-              "underlying error.",
+              `(top ${topNValue}). ` +
+              (firstErrorMessage === ""
+                ? ""
+                : `First failure: ${firstErrorMessage.replace(/\s+/g, " ").trim().slice(0, 300)}. `) +
+              (privilegeRefusedCount > 0
+                ? `IRIS refused the EXPLAIN for ${privilegeRefusedCount} of them because this account ` +
+                  "has no SQL privilege on the tables they read (an IRIS SQL privilege check, by " +
+                  "design)" +
+                  (privilegeRefusedCount < errorCount ? "; the others failed for the reasons IRIS gave" : "") +
+                  ". Grant the SQL privilege, or use " +
+                  "'query' mode on a table this account may read."
+                : "Try 'query' mode with a specific SQL statement to see the underlying error."),
           },
         ],
         isError: true,

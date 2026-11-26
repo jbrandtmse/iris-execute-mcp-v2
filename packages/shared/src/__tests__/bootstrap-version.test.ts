@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { classifyDeployedMarker, parseBootstrapMarker } from "../bootstrap-version.js";
+import { classifyDeployedMarker, parseBootstrapMarker, sameBootstrapClasses } from "../bootstrap-version.js";
 
 // The expected values below are the rows of the Story 42.2 I/O matrix and the ordering rule of AD-14
 // (semver first, then sequence; equal semver and sequence with another hash, `dev` and anything
@@ -230,5 +230,42 @@ describe("the shared parity case table (DW-674)", () => {
     const raw = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "bootstrap-marker-parity-cases.json"), "utf8");
     expect(/[\u0080-\uFFFF]/.test(raw)).toBe(false);
     expect(raw).toContain("\\u0661");
+  });
+});
+
+describe("sameBootstrapClasses (DW-770)", () => {
+  // The predicate is the hash of the deployed marker against the hash of the stamped embedded marker: the semver and the sequence
+  // say which release stamped the classes, not what the classes are. Expected values are the rules of Story 45.7.
+  it("a stamped marker with the same hash: true, at a lower, equal or higher semver and sequence", () => {
+    for (const deployed of [`0.0.1+0.${HASH}`, EMBEDDED, `0.0.9+99.${HASH}`, `9.9.9+1.${HASH}`]) {
+      expect(sameBootstrapClasses(deployed, EMBEDDED), deployed).toBe(true);
+    }
+  });
+
+  it("a stamped marker with another hash: false", () => {
+    expect(sameBootstrapClasses(`0.0.2+1.${OTHER_HASH}`, EMBEDDED)).toBe(false);
+    expect(sameBootstrapClasses(`0.0.1+1.${OTHER_HASH}`, EMBEDDED)).toBe(false);
+  });
+
+  it("a legacy bare hash: true when it is this build's hash, false otherwise", () => {
+    expect(sameBootstrapClasses(HASH, EMBEDDED)).toBe(true);
+    expect(sameBootstrapClasses(OTHER_HASH, EMBEDDED)).toBe(false);
+  });
+
+  it("`dev`, the empty string and anything unparseable: false", () => {
+    for (const deployed of ["dev", "", "not-a-marker", ` 0.0.2+1.${HASH}`, `0.0.2+1.${HASH.toUpperCase()}`, `0.0.2+${HASH}`]) {
+      expect(sameBootstrapClasses(deployed, EMBEDDED), JSON.stringify(deployed)).toBe(false);
+    }
+  });
+
+  it("an embedded marker that is not stamped never matches, not even itself", () => {
+    expect(sameBootstrapClasses(HASH, HASH)).toBe(false);
+    expect(sameBootstrapClasses("dev", "dev")).toBe(false);
+    expect(sameBootstrapClasses(EMBEDDED, "")).toBe(false);
+  });
+
+  it("agrees with classifyDeployedMarker where that says `current`", () => {
+    expect(classifyDeployedMarker(EMBEDDED, EMBEDDED)).toBe("current");
+    expect(sameBootstrapClasses(EMBEDDED, EMBEDDED)).toBe(true);
   });
 });
