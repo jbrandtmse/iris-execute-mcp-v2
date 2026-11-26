@@ -4411,3 +4411,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 45.3 CR: such an install has a found record (IPM ConfigureMapping), so the no-record rule does not fire; nothing is removed wrongly, only report text is missing
 - 2026-11-26T04:06:50Z status=routed owner=burndown by=cr note=Burn-down candidate: amend the I/O Matrix so a found %ALL still carries the manual delete command, and apply the no-record ^UnitTestRoot rule per namespace; Setup.cls change
 - 2026-11-26T04:09:37Z status=routed owner=burndown by=lead note=Planner 2026-11-25: the burn-down fixes the text (the 1.2.0-upgrade path most current users take), not close by decision, unless that costs more than a few lines
+
+### DW-781: Code-running write tools (compile/load, start a production, build a cube, run a task) stay on under block alone
+- source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 45.4 plan Rule #56 sweep; they are writes, off by default except where an operator enables them
+- 2026-11-26T06:08:56Z status=wontfix-accepted owner=45-4-block-turns-off-raw-read-and-code-execution-tools by=harvest note=Closed by Planner ruling (decision #170): writes are off by default and enabling one is a deliberate operator act; the owner's ruling named raw-read and code-execution tools; the read-only preset covers them; docs recommend block plus IRIS_GOVERNANCE_PRESET=read-only for a PHI instance; the owner may reopen
+
+### DW-782: iris_docdb_document:delete stays on under block and returns the deleted document (a read by known ID)
+- source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: med | fix-risk: low | footprint: in-footprint
+- evidence: 45.4 build review; verified in irislib/%Api/DocDB/v1.cls; the key is in the frozen baseline (governance-baseline.ts:74), so it is enabled by default
+- 2026-11-26T06:08:56Z status=routed owner=45-4-block-turns-off-raw-read-and-code-execution-tools by=harvest note=Lead decision #172: add iris_docdb_document:delete to DATA_POLICY_BLOCK_KEYS (12 keys); patched at this story's code review with the cross-check, docs, back-compat sweep (redact/allow unchanged) and a wire leg
+
+### DW-783: iris_analytics_mdx stays on under block
+- source: spec-45-4-block-turns-off-raw-read-and-code-execution-tools.md | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: 45.4 plan and build: the handler returns labels and cells only, never DRILLTHROUGH rows
+- 2026-11-26T06:08:56Z status=by-design owner=45-4-block-turns-off-raw-read-and-code-execution-tools by=harvest note=Documented residual (decision #169): aggregates, not stored records
