@@ -52,7 +52,7 @@ export interface UniverseJson {
   mutates: Record<string, "read" | "write">;
   defaultEnabledWrites: string[];
   policy: Record<string, boolean>;
-  configSource: Record<string, "env" | "file" | "parent" | "preset" | "default">;
+  configSource: Record<string, "env" | "file" | "parent" | "dataPolicy" | "preset" | "default">;
   note: string;
   error?: string;
 }
@@ -280,7 +280,7 @@ export interface KeyRow {
   /** true for a frozen-baseline (grandfathered) key; false for post-foundation. */
   baseline: boolean;
   effective: boolean;
-  source: "env" | "file" | "parent" | "preset" | "default" | "unknown";
+  source: "env" | "file" | "parent" | "dataPolicy" | "preset" | "default" | "unknown";
   toggle: ToggleValue;
   staged: boolean;
 }

@@ -394,10 +394,16 @@ describe("Story 45.2: an older marker whose ownership read fails, with the insta
           expect(new Map([...fake.state.docs].map(([name, doc]) => [name, doc.lines.join("\n")]))).toEqual(docsBefore);
           expect(fake.state.compiledMarker).toBe(seededMarker);
 
-          // Every warning of the run, apart from the unrelated notice that IRIS_PROFILES defines the reserved `default` profile.
+          // Every warning of the run, apart from the unrelated notice that IRIS_PROFILES defines the reserved `default` profile and
+          // the Story 45.4 startup line (`S-45.4-block-raw-tools`: a dev server under `redact` names its open raw-read tools once).
           const warnings = run.stderr
             .split(/\r?\n/)
-            .filter((line) => line.startsWith("[WARN]") && !line.includes('IRIS_PROFILES defines the reserved "default" profile'));
+            .filter(
+              (line) =>
+                line.startsWith("[WARN]") &&
+                !line.includes('IRIS_PROFILES defines the reserved "default" profile') &&
+                !line.startsWith("[WARN] Data policy:"),
+            );
           expect(warnings, "exactly one warning").toHaveLength(1);
           expect(warnings[0]).toContain("[WARN] Bootstrap:");
           const warning = warnings[0] as string;

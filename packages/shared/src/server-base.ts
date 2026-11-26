@@ -116,6 +116,8 @@ import {
 } from "./governance.js";
 import {
   applyDataPolicies,
+  buildDataPolicyWarning,
+  dataPolicySeed,
   effectiveDataPolicy,
   parseDataPolicyValue,
   parseOperatorDataPolicy,
@@ -1197,9 +1199,12 @@ export class McpServerBase {
     // error. When the registry is not yet built (server constructed but not
     // start()ed), fall back to validating just the reserved default — the only
     // profile guaranteed to exist pre-start.
+    // Story 45.4 (AD-6): the profile's resolved data policy feeds the `block` seed, as it does at the
+    // gate and in the discovery tool. Before start() there is no registry and no policy (`undefined`).
+    let dataPolicy: DataPolicy | undefined;
     if (this.profiles) {
       try {
-        resolveProfile(this.profiles, profileName);
+        dataPolicy = resolveProfile(this.profiles, profileName).dataPolicy;
       } catch (error: unknown) {
         if (error instanceof ProfileResolutionError) {
           throw protocolError(ProtocolErrorCode.InvalidParams, error.message);
@@ -1226,10 +1231,11 @@ export class McpServerBase {
       BASELINE_ACTION_CLASSIFICATIONS,
       this.governanceFileConfig,
       this.parentKeys,
+      dataPolicy,
     );
 
     // Story 32.0 (AC 32.0.3): report which channel resolved each key
-    // (`env` | `file` | `parent` | `preset` | `default`) alongside the policy map -
+    // (`env` | `file` | `parent` | `dataPolicy` | `preset` | `default`) alongside the policy map -
     // emitted unconditionally (with no file set, keys report
     // env/preset/default). Built over the SAME visibleGovernedKeys() filter,
     // so the source map inherits the hidden-tool key omission structurally
@@ -1243,6 +1249,7 @@ export class McpServerBase {
       BASELINE_ACTION_CLASSIFICATIONS,
       this.governanceFileConfig,
       this.parentKeys,
+      dataPolicy,
     );
 
     return {
@@ -1851,6 +1858,9 @@ export class McpServerBase {
         BASELINE_ACTION_CLASSIFICATIONS,
         this.governanceFileConfig,
         this.parentKeys,
+        // Story 45.4 (AD-6): the CALLED profile's resolved data policy feeds the `block` seed. A call's
+        // own arguments never reach this decision: the policy comes from the registry, not the request.
+        profile.dataPolicy,
       )
     ) {
       // Disabled action (AC 14.4.2): structured denial. Human-readable text +
@@ -1878,10 +1888,17 @@ export class McpServerBase {
             this.parentKeys,
             this.governanceFileConfig,
           );
+      // Story 45.4 (AD-6): the `block` data-policy seed sits between the inherited disable and the preset,
+      // so a denial it caused carries `dataPolicyApplied` and never `presetApplied`.
+      const dataPolicyCaused =
+        !explicitOverride &&
+        inheritedFrom === undefined &&
+        dataPolicySeed(governanceKey, profile.dataPolicy) === false;
       const presetCaused =
         this.preset !== undefined &&
         !explicitOverride &&
         inheritedFrom === undefined &&
+        !dataPolicyCaused &&
         presetSeed(
           governanceKey,
           this.preset,
@@ -1891,17 +1908,20 @@ export class McpServerBase {
       logger.warn(
         `Tool ${tool.name}: action "${governanceKey}" denied by governance policy for profile "${profile.name}"` +
           (presetCaused ? ` (preset "${this.preset}").` : ".") +
-          (inheritedFrom !== undefined ? ` Inherited from "${inheritedFrom}".` : ""),
+          (inheritedFrom !== undefined ? ` Inherited from "${inheritedFrom}".` : "") +
+          (dataPolicyCaused ? ` Data policy "block".` : ""),
       );
       return refusalResult(
         REFUSAL_CODES.GOVERNANCE_DISABLED,
         `action '${governanceKey}' is disabled by governance policy for server '${profile.name}'` +
-          (inheritedFrom !== undefined ? ` (inherited from '${inheritedFrom}')` : ""),
+          (inheritedFrom !== undefined ? ` (inherited from '${inheritedFrom}')` : "") +
+          (dataPolicyCaused ? " (data policy 'block')" : ""),
         {
           action: governanceKey,
           server: profile.name,
           ...(inheritedFrom !== undefined ? { inheritedFrom } : {}),
           ...(presetCaused ? { presetApplied: this.preset } : {}),
+          ...(dataPolicyCaused ? { dataPolicyApplied: "block" } : {}),
         },
       );
     }
@@ -2439,6 +2459,11 @@ export class McpServerBase {
       if (typeof presetApplied === "string") {
         entryInput.presetApplied = presetApplied;
       }
+      // Story 45.4 (AD-19): a denial the `block` data-policy seed caused records that too (additive).
+      const dataPolicyApplied = structured?.dataPolicyApplied;
+      if (typeof dataPolicyApplied === "string") {
+        entryInput.dataPolicyApplied = dataPolicyApplied;
+      }
     }
     // Story 43.3 (AD-19): the person's answer to the confirmation dialog, when the call was asked one.
     if (confirmation !== undefined) entryInput.confirmation = confirmation;
@@ -2781,6 +2806,37 @@ export class McpServerBase {
     return { page, nextCursor };
   }
 
+  /**
+   * The startup warning of the `block` data policy (Story 45.4), or `undefined` when no profile has a covered
+   * tool to list. A key counts for a profile only when its tool is registered and VISIBLE on this server
+   * (`this.tools` holds the visible tools, so a hidden tool and a tool of another server are never named) and
+   * {@link effective} is `true` for that profile, with the profile's own policy and every explicit layer.
+   */
+  private dataPolicyStartupWarning(profiles: ProfileRegistry): string | undefined {
+    const visibleKeys = new Set<string>();
+    for (const keys of governanceKeysByTool(this.tools.values()).values()) {
+      for (const key of keys) visibleKeys.add(key);
+    }
+    return buildDataPolicyWarning(
+      [...profiles.values()].map((profile) => ({ name: profile.name, policy: effectiveDataPolicy(profile) })),
+      (profileName, key) =>
+        visibleKeys.has(key) &&
+        effective(
+          key,
+          profileName,
+          this.governanceConfig,
+          this.mutatesLookup,
+          GOVERNANCE_BASELINE,
+          this.defaultEnabledWrites,
+          this.preset,
+          BASELINE_ACTION_CLASSIFICATIONS,
+          this.governanceFileConfig,
+          this.parentKeys,
+          effectiveDataPolicy(profiles.get(profileName) ?? {}),
+        ),
+    );
+  }
+
   // ── Transport and startup ──────────────────────────────────────────
 
   /**
@@ -2904,6 +2960,12 @@ export class McpServerBase {
     // explicit "on" together with the read-only preset, fails fast here, before any request reaches IRIS. The registry holds
     // the resolved value of every profile from here on; bootstrap reads it from the config it is given.
     applyAutoInstall(this.profiles, parseOperatorAutoInstall(), this.preset);
+
+    // The data-policy warning (Story 45.4; AD-26): at most one `[WARN]` line, from configuration alone and
+    // before any request to IRIS, naming per `redact` or `block` profile the raw-read and code-execution
+    // tools that are visible on this server and enabled. It carries no value.
+    const dataPolicyWarning = this.dataPolicyStartupWarning(this.profiles);
+    if (dataPolicyWarning !== undefined) logger.warn(dataPolicyWarning);
 
     // Parse the audit-log configuration (Epic 29, spec `07-observability-
     // audit-log.md` §2), mirroring the governance parses immediately above.

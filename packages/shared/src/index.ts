@@ -73,12 +73,17 @@ export {
   effectiveDataPolicy,
   tightenDataPolicy,
   decideBodyPolicy,
+  DATA_POLICY_BLOCK_KEYS,
+  DATA_POLICY_BLOCK_KEYS_AS_OF,
+  dataPolicySeed,
+  buildDataPolicyWarning,
 } from "./data-policy.js";
 export type {
   DataPolicy,
   DataPolicySource,
   DataPolicyCarrier,
   DataPolicySummary,
+  DataPolicyWarningProfile,
   BodyKind,
   BodyPolicyOutcome,
   BodyPolicyPlan,

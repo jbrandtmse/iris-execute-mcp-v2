@@ -32,6 +32,7 @@ All servers use the same environment variables:
 | `IRIS_PASSWORD` | *(required)* | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
+| `IRIS_DATA_POLICY` | *(unset — `redact`)* | **Optional.** `block`, `redact` or `allow`: the PHI data policy (per profile: an `IRIS_PROFILES` entry's `dataPolicy` or the governance file's `dataPolicy` section). `block` turns off the raw-read tools of this server, `iris_docdb_document:get` (the `insert`, `update` and `delete` actions stay on) and `iris_docdb_find`; an explicit governance key re-enables one (`{"profiles":{"prod":{"iris_docdb_find":true}}}`), and `IRIS_TOOLS_ENABLE` only shows a tool and does not. Under `redact` (the default) nothing changes except one startup `[WARN]` line naming the enabled ones, because `redact` covers message bodies only. See [PHI data policy](../../README.md#phi-data-policy) in the suite README. |
 | `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header sent on every request, pinning `%Status` error text to a predictable language instead of whatever locale an unspecified header resolves to. IRIS also chooses the message language per request, by matching this header against the languages the instance has, so a localized prefix can still appear when the header names one — existing prefix-stripping is unaffected. Details: [suite README](../../README.md#2-set-environment-variables). |
 
 ### Multiple servers & the `server` parameter

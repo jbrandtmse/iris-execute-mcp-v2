@@ -2,6 +2,27 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] - Story 45.4: Block Turns Off Raw-Read and Code-Execution Tools
+
+Epic 45 Security Boundaries, answering GitHub issue #1 point 1. One sanctioned behavior change (AD-15), `S-45.4-block-raw-tools`.
+
+### Behavior changes
+
+- **`IRIS_DATA_POLICY=block` turns off the raw-read and code-execution tools (`S-45.4-block-raw-tools`).** For a profile whose data policy is `block`, these 11 governance keys seed disabled: `iris_sql_query`, `iris_sql_execute`, `iris_global_get`, `iris_global_list`, `iris_execute_command`, `iris_execute_classmethod`, `iris_execute_tests`, `iris_test_coverage`, `iris_transform_test`, `iris_docdb_document:get` and `iris_docdb_find`. Before, `block` withheld message bodies in the governed message tools only, and these tools returned the same data in full. The seed is a new layer of the governance cascade: `env.profile ?? env.global ?? file.profile ?? file.global ?? inheritedDisable ?? dataPolicySeed ?? presetSeed ?? defaultSeed`. It sits below every explicit setting and above the read-only preset, so `block` also turns off `iris_sql_query`, which `read-only` leaves on.
+- **A call the seed denies is a `GOVERNANCE_DISABLED` refusal with a new field (`S-45.4-block-raw-tools`).** The structured content gains `dataPolicyApplied: "block"` (as `presetApplied` does for the preset, and never together with it), the text ends ` (data policy 'block')`, no request reaches IRIS, and the audit entry (`outcome: "denied"`) copies `dataPolicyApplied`. `DATA_POLICY_BLOCKED` stays the governed message tools' own refusal.
+- **An explicit `true` re-enables a key, and it stays visible (`S-45.4-block-raw-tools`).** In `IRIS_GOVERNANCE` or the governance file, per profile or global. Its `configSource` is then `env` or `file`, and the startup warning names it. An explicit `false`, or a disabled parent key, keeps its own attribution. `IRIS_TOOLS_ENABLE` only shows a tool and never re-enables a covered one; a call's own arguments never do. A seeded disable is not inherited by a child key, so enabling `iris_sql_execute` does not enable `iris_sql_query`.
+- **`configSource` has a new value, `dataPolicy` (`S-45.4-block-raw-tools`).** `iris_server_profiles`, the `iris-governance://` resource and the `iris-mcp-governance` CLI (`effective` and `universe`, which apply the same seed and name `(data policy: block)` in their header) report it for a key the seed disabled. Under `redact` and `allow` no key reports it and the CLI output is byte-identical.
+- **One startup `[WARN]` line names the open tools (`S-45.4-block-raw-tools`).** Each server writes at most one line, computed from configuration alone before any request to IRIS, naming for each `redact` or `block` profile the covered tools that are visible on that server and enabled (under `block`, only the re-enabled ones). Profiles with the same policy and tools share a group. It says that `redact` covers message bodies only, points to the README's "PHI data policy" section, and names the ways out (the governance keys, or `block`); it never offers `allow`. With the default policy a stock dev server logs it, so this line is the only change a `redact` or `allow` user sees.
+- **The PHI data policy scope table moves to 2026-11-25.** `iris_global_list` and `iris_locks_list` move from not applicable to residual (`iris_locks_list` stays on under `block`), every residual row has an "Under `block`" verdict, and a cross-package test checks the verdicts against the declaration `DATA_POLICY_BLOCK_KEYS` (in `@iris-mcp/shared`) and the README.
+
+### Not covered
+
+- `block` does not cover the write tools that run code (compiling or loading a class runs its generators; starting a production, building a cube or running a task runs existing code). The `read-only` preset turns those off; use both for a connection to an instance with PHI. `iris_analytics_mdx` returns axis labels and cell values only and stays on.
+
+### Compatibility
+
+- Under `redact`, `allow` and an unset policy, every key's enabled state and `configSource` on all five servers, every tool result, every `iris_server_profiles` field, every governance verdict, every denial and every audit entry are byte-identical to the build before this story; a test replays that build's recorded output. No tool, action, governance key, preset row or input field is added, `GOVERNANCE_BASELINE` is untouched, and `BOOTSTRAP_VERSION` does not move.
+
 ## [Unreleased] - Story 45.3: Careful Uninstall of the IRIS Side
 
 Epic 45 Security Boundaries, answering GitHub issue #1 point 3. One sanctioned behavior change (AD-15), `S-45.3-careful-uninstall`.
