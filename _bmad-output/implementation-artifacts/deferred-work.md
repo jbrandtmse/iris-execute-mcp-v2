@@ -4369,3 +4369,28 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Live on a throwaway 2026.2: Atelier SELECT ExecuteMCPv2.Setup_IsConfigured() returns {Configured:false} for %Development:U + the DB resource, true for _SYSTEM; Setup.cls:173-184 catches PROTECT and returns 0. Install off: the could-not-confirm WARN on every start. Install on (pre-existing): every connect of that account recompiles the classes and fails Configure with the %Admin_Manage warning
 - 2026-11-25T22:56:02Z status=routed owner=burndown by=cr note=Burn-down candidate. A distinct cannot-read result would remove the WARN, the per-connect recompile for least-privilege accounts and the 404 heuristic, but IsConfigured's return values are pinned by AC 45.3.8 and it is one of DW-771's five procedures: probe first whether the TS probe can read the web app another way (e.g. a read-only route an account with %Development can call), else a new non-SqlProc path; .cls change moves BOOTSTRAP_VERSION
 - 2026-11-25T23:18:33Z status=routed owner=burndown by=lead note=Planner 2026-11-25 (decision #167), BINDING: terminal disposition inside Epic 45 (resolved, or closed by an owner decision), never re-deferred. Probe first (Rule #16) whether IsConfigured or a new non-SQL helper can tell PROTECT from not-registered (e.g. a third state the probe maps to an unconfirmed/unknown state that never triggers a recompile), keeping the pinned five SqlProcs' contracts; if the only fix changes a pinned procedure contract, bring it to the Planner first. Order: 45.5 documents today's least-privilege behavior at each auto-install setting; the burn-down story (runs after 45.5) updates that text in the same change if its fix lands
+
+### DW-774: IPM Unconfigure-phase invoke in module.xml so a bare zpm uninstall also removes the web app, mapping and %ALL
+- source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: 45.3 build review; today the order is the one-liner first, then zpm uninstall (probe P7); module.xml is in the stamped IPM tree, regenerated only at release
+- 2026-11-26T02:13:32Z status=routed owner=burndown by=harvest note=IPM tree change; burn-down candidate
+
+### DW-775: A run that fails after deleting the classes cannot be re-run without reinstalling (Setup itself is gone)
+- source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: 45.3 build review; order is web app, mapping, classes, %ALL, ^UnitTestRoot, records; a failure in the %ALL or ^UnitTestRoot step leaves the classes deleted and the records kept
+- 2026-11-26T02:13:32Z status=routed owner=45-3-careful-uninstall-of-the-iris-side by=harvest note=Lead directive to this story's CR: delete the classes after %ALL and ^UnitTestRoot (they do not depend on the classes), just before the records, so a failed later step leaves Setup in place and a re-run resumes (Planner condition 2, decision #163)
+
+### DW-776: The two-namespace line says each namespace loses its classes also when one namespace's copy is left (dev or IPM-owned)
+- source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: 45.3 build review
+- 2026-11-26T02:13:32Z status=routed owner=45-3-careful-uninstall-of-the-iris-side by=harvest note=Lead directive to this story's CR: word the line from the per-namespace outcome
+
+### DW-777: pnpm live:uninstall-round-trip is a POSIX sh one-liner with no signal trap and no Windows form
+- source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: 45.3 build review; package.json live:uninstall-round-trip
+- 2026-11-26T02:13:32Z status=by-design owner=45-3-careful-uninstall-of-the-iris-side by=harvest note=Developer convenience script; CI runs the suite through ci-live-suite.mjs on Linux with its own always-down step; the sibling live:* scripts have the same shape
+
+### DW-778: SetupTest and SetupUninstallTest decision pins run only by hand on a throwaway; no automatic suite runs them
+- source: spec-45-3-careful-uninstall-of-the-iris-side.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: 45.3 build review; the classes are seeded into the CI throwaway but nothing executes them; the 15-leg live gate covers the same decisions end to end
+- 2026-11-26T02:13:32Z status=routed owner=burndown by=harvest note=Burn-down candidate: run the seeded ObjectScript unit classes in the CI throwaway suite with total checked (Rule #35)
