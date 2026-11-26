@@ -6597,7 +6597,7 @@ This is the first of two `/epic-cycle` burn-down stories, chartered on 2026-11-2
 
 ### Story 45.7: Epic 45 Burn-down, TypeScript and Docs
 
-The second burn-down story, chartered with 45.6 (wave-10 decision #175). It takes the 3 story-closable ledger entries that change the TypeScript servers and the docs. It runs after 45.6, because DW-773's outcome shapes what it documents. The rules are the same as 45.6: terminal dispositions only, probe first, live or mutation proof, and the 45.5 section updated where behavior moves.
+The second burn-down story, chartered with 45.6 (wave-10 decision #175). It takes the story-closable ledger entries that change the TypeScript servers and the docs (3 at the charter, 7 after decision #178). It runs after 45.6, because DW-773's outcome shapes what it documents. The rules are the same as 45.6: terminal dispositions only, probe first, live or mutation proof, and the 45.5 section updated where behavior moves.
 
 - **AC 45.7.1** — Each entry below ends terminal, with its disposition mirrored into the ledger. The tally is counted mechanically (Rule #51).
 - **AC 45.7.2** — Back-compat (Rule #19): every behavior not named by an entry is pinned unchanged. The least-privilege axis (decision #166) holds in the lead smoke.
@@ -6614,3 +6614,10 @@ The second burn-down story, chartered with 45.6 (wave-10 decision #175). It take
   - **"Supported versions" overclaims.** Replace "within a major … an upgrade needs no change on your side" with: "Within a major, the packages, the REST routes and the tool surface only grow. A minor release can change a behavior for safety; its CHANGELOG lists each change and what to do. A security fix is published as a new release of the latest 1.x." This is because 1.2.0 and 1.3.0 both carry sanctioned behavior changes.
   - **Tone.** Replace "No email address is published for security reports, so please do not look for one" with "Please use private reporting rather than email or a public issue or pull request."
   - **Pins.** Update the doc-claims pins.
+
+*(Four entries were added 2026-11-26 from the Story 45.6 plan, build and review, decision #178. 45.7 now takes 7 entries plus the `SECURITY.md` wording.)*
+
+- **DW-788.** The bootstrap's compile check reads Atelier `docnames` with a filter. IRIS returns that list empty to an account without SQL privileges, so a least-privilege account gets "Compile failed: 35 of 35" on every start, on both editions, whether the install is on or off. Read the unfiltered list or the per-document read instead. Prove it live with a least-privilege account (no compile failure reported when every class is compiled). Then update the README least-privilege text and the 45.5 "install on" description to what is true after the fix. (ledger; routed from Story 45.6 plan)
+- **DW-790 (Planner: it matters).** The bootstrap discards the `%Status` row that `Setup_Configure` and `Setup_ConfigureMapping` return, so a refused or failed call reports `configured: true` and hides real failures. Read the row from both calls and report the failure text. Pin it with the live refusal path (an account without `%Admin_Manage`) and verify it with a mutation. (ledger; routed from Story 45.6 build)
+- **DW-791.** TypeScript texts still describe the old least-privilege behavior (`warnWebAppUnconfirmed`, the `bootstrap.ts` comments, and the `bootstrap-auto-install.test.ts` header). Align them with shipped behavior, together with DW-788 and DW-790. (ledger; routed from Story 45.6 review)
+- **DW-792.** A rolled-back `Config.Namespaces.Create("%ALL")` breaks the namespace table until `Config.Namespaces.ActivateAll()` runs (45.6 QA, on a throwaway). An IPM install that fails in a later phase, after `Configure` created `%ALL`, may leave the same state. Probe first with a module whose later phase fails. If it reproduces, decide between reporting it and repairing it with `ActivateAll`, or close it with evidence. (ledger; routed from Story 45.6 review)

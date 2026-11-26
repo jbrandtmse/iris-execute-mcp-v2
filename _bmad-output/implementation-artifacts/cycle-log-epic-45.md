@@ -121,3 +121,5 @@
 2026-11-26T15:26:39Z	Story 45.6	smoke_complete	lead=live_gate(pnpm_live:uninstall-round-trip)23/23+armed_capstone_on_seeded_HSCUSTOM_throwaway_21/21(LP_legs) teardown=clean bootstrap=1.2.0+12.bd38d590c26e
 2026-11-26T15:26:39Z	Story 45.6	fresh_check	files=shared1+all8 in_order=pass shuffle_seed7=pass tests=161p/28s shared_full=98f/2941p full_all=257f/6753p/765s live-guards=79/0 gen_ipm_check=ok
 2026-11-26T15:26:39Z	Story 45.6	story_cycle	commits=45f52674(build),4e93d6ad(qa),17b56d0a(cr) review=CLEAN smoke=gate23/23+capstone21/21 dispositions=resolved7,wontfix1 decisions=174,176,177 quota_weekly=68%
+2026-11-26T15:27:32Z	Story 45.6	committed	sha=56dad75e ci=pending run=45849160665
+2026-11-26T15:27:32Z	Story 45.7	stage_spawned	stage=plan spawn_at=2026-11-26T15:27:32Z model=claude-opus-5-5 agent_name=45-7-burndown-ts-plan-1 cycle_iteration=1 ledger_inbox=DW-767,770,784,788,790,791,792 decision=178 prev_ci=pending(45849160665) quota_weekly=68%
