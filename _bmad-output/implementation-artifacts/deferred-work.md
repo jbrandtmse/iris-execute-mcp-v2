@@ -4469,3 +4469,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-45-6-epic-45-burn-down-iris-side.md | severity: med | fix-risk: low | footprint: in-footprint
 - evidence: 45.6 plan probe P5, IRIS for Health and Community 2026.2: as %Development:U + DB RW, GET docnames/CLS?filter=ExecuteMCPv2 answers 200 with 0 entries; unfiltered docnames lists all 35; doc read upd:true; dictionary Compiled=1; adding %DB_IRISLIB:R/%DB_IRISSYS:R does not help
 - 2026-11-26T11:31:04Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=harvest note=Routed to 45.7 (TypeScript: packages/shared/src/bootstrap.ts upToDateDocuments/verifyCompiled): read the unfiltered list or the per-document read; it is the install-on half of DW-773's least-privilege noise, and 45.7 documents the final behavior
+
+### DW-789: IsConfigured's Catch may run with $NAMESPACE still %SYS (the switch succeeded, Security.Applications.Exists threw), so ..WebAppRegistered() may not resolve
+- source: spec-45-6-epic-45-burn-down-iris-side.md | severity: med | fix-risk: low | footprint: in-footprint
+- evidence: 45.6 build review (unverified): needs an account that can enter %SYS but cannot read Security.Applications; project rule: restore the namespace first in a catch block
+- 2026-11-26T13:13:59Z status=routed owner=45-6-epic-45-burn-down-iris-side by=harvest note=Lead directive to this story's CR: restore the original namespace at the top of the Catch before the fallback (no probe needed for the defensive fix); pin with a unit/live leg if a reachable account exists, else record why it is unreachable
+
+### DW-790: The bootstrap discards the status row Setup_Configure and Setup_ConfigureMapping return, so a refused call (e.g. the 45.6 guard) reports configured:true
+- source: spec-45-6-epic-45-burn-down-iris-side.md | severity: med | fix-risk: low | footprint: in-footprint
+- evidence: 45.6 mutation B exposed it: packages/shared/src/bootstrap.ts configureWebApp/configurePackageMapping read the SQL call's success, not the %Status value in the result row
+- 2026-11-26T13:13:59Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=harvest note=45.7 (TypeScript): read the returned %Status and report the step failed with its text; mutation-prove
