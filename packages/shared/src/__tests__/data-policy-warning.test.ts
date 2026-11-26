@@ -70,6 +70,41 @@ describe("buildDataPolicyWarning", () => {
     );
   });
 
+  it("a redact profile and a re-enabling block profile with the SAME key list are two groups in ONE line, never merged (QA 45.4)", () => {
+    const profiles: DataPolicyWarningProfile[] = [
+      { name: "a", policy: "redact" },
+      { name: "b", policy: "block" },
+      { name: "c", policy: "redact" },
+      { name: "d", policy: "block" },
+    ];
+    const line = buildDataPolicyWarning(profiles, () => true, ["iris_sql_query"]);
+    expect(line).toBe(
+      `${LEAD}profiles "a", "c" (redact): iris_sql_query; ` +
+        `profiles "b", "d" (block, re-enabled by an explicit governance key): iris_sql_query${TAIL}`,
+    );
+    expect(line?.split("\n")).toHaveLength(1);
+  });
+
+  it("allow profiles in the middle of the list never split or join a group (QA 45.4)", () => {
+    const profiles: DataPolicyWarningProfile[] = [
+      { name: "a", policy: "redact" },
+      { name: "open", policy: "allow" },
+      { name: "b", policy: "redact" },
+    ];
+    expect(buildDataPolicyWarning(profiles, () => true, ["iris_sql_query"])).toBe(
+      `${LEAD}profiles "a", "b" (redact): iris_sql_query${TAIL}`,
+    );
+  });
+
+  it("is undefined when every covered tool is disabled or hidden for every profile, with several profiles of every policy (QA 45.4)", () => {
+    const profiles: DataPolicyWarningProfile[] = [
+      { name: "a", policy: "redact" },
+      { name: "b", policy: "block" },
+      { name: "c", policy: "allow" },
+    ];
+    expect(buildDataPolicyWarning(profiles, () => false)).toBeUndefined();
+  });
+
   it("keeps profiles with different key lists in separate groups, each written once", () => {
     const profiles: DataPolicyWarningProfile[] = [
       { name: "a", policy: "redact" },
