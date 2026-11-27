@@ -47,7 +47,8 @@ describe("Story 44.8: the changelogs", () => {
   });
 
   it("the extension CHANGELOG's first section names Story 44.8 and qualifies the Local-harness claim", () => {
-    const first = squash(read("extensions/iris-mcp-launcher/CHANGELOG.md").split(/^(?=## \[)/m)[1] ?? "");
+    // Released in 1.2.0; later releases (1.3.0 onward) sit above it, so its section is found by name.
+    const first = squash(read("extensions/iris-mcp-launcher/CHANGELOG.md").split(/^(?=## \[)/m).find((section) => section.startsWith("## [1.2.0]")) ?? "");
     expect(first).toMatch(/^## \[(Unreleased|\d+\.\d+\.\d+)\]/);
     expect(first).toContain("Story 44.8");
     expect(first).toContain("DW-752");

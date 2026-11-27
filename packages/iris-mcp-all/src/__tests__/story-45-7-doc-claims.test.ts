@@ -33,7 +33,10 @@ const changelogRaw = read("CHANGELOG.md");
 const CHANGESET_45_7 = ".changeset/story-45-7-epic-45-burn-down-typescript-and-docs.md";
 const CHANGESET_45_6 = ".changeset/story-45-6-epic-45-burn-down-iris-side.md";
 const present = (relative: string): boolean => existsSync(path.join(REPO_ROOT, relative));
-const section = squash(changelogRaw.slice(changelogRaw.indexOf("## [Unreleased] - Story 45.7"), changelogRaw.indexOf("## [Unreleased] - Story 45.6")));
+// The version step renames `## [Unreleased] - Story …` to `## [<version> detail] - Story …`; either heading form is found.
+const storyHeadingIndex = (story: string): number =>
+  changelogRaw.search(new RegExp(`^## \\[(?:Unreleased|\\d+\\.\\d+\\.\\d+ detail)\\] - Story ${story.replace(".", "\\.")}`, "m"));
+const section = squash(changelogRaw.slice(storyHeadingIndex("45.7"), storyHeadingIndex("45.6")));
 
 const SANCTIONS = [
   "S-45.7-same-classes-current",
@@ -124,7 +127,7 @@ describe("Story 45.7: the CHANGELOG section, the changeset and the doc sentences
     expect(section).toContain("Under `redact` the dev server's startup `[WARN]` line also names the three keys when `iris_sql_analyze` is visible (it is under the default `full` preset; `core` hides it).");
     expect(readme).toContain("Under `redact`, the dev server's startup warning also names those three SQL analyzer keys when the SQL analyzer tool is visible (it is under the default `full` preset; `core` hides it).");
     // The unreleased 1.3.0 notes read as one release: the 45.5 bullet agrees with the 15 keys and no longer says "under probe".
-    const notes = squash(changelogRaw.slice(changelogRaw.indexOf("## [Unreleased] - Story 45.7"), changelogRaw.indexOf("## [Unreleased] - Story 45.4")));
+    const notes = squash(changelogRaw.slice(storyHeadingIndex("45.7"), storyHeadingIndex("45.4")));
     expect(notes).toContain("`block` turns off the raw-read and code-execution keys (15 in 1.3.0: Story 45.7 adds the `stats`, `running` and `advise` actions of `iris_sql_analyze`");
     expect(notes).not.toContain("the 12 raw-read and code-execution keys");
     expect(notes).not.toContain("which is under probe");

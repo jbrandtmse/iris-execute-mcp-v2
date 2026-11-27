@@ -1,6 +1,6 @@
 {
   "name": "@iris-mcp/shared",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Shared framework for the IRIS MCP servers: configuration, governance, audit and the IRIS gateway, plus the iris-mcp-credentials and iris-mcp-governance commands",
   "keywords": [
     "iris",

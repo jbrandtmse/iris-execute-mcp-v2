@@ -23,6 +23,9 @@ const squash = (text: string): string => text.replace(/\s+/g, " ");
 
 const readme = read("README.md");
 const changelog = read("CHANGELOG.md");
+/** Where a story's CHANGELOG section starts: the version step renames `## [Unreleased] - Story …` to `## [<version> detail] - Story …`, and either form is found. */
+const storyHeadingIndex = (title: string): number =>
+  changelog.search(new RegExp(`^## \\[(?:Unreleased|\\d+\\.\\d+\\.\\d+ detail)\\] - Story ${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "m"));
 const setup = read("src/ExecuteMCPv2/Setup.cls");
 const changesetPath = ".changeset/story-45-3-careful-uninstall-of-the-iris-side.md";
 const SANCTION = "`S-45.3-careful-uninstall`";
@@ -154,7 +157,7 @@ describe("Story 45.3 QA: the README claims against their oracles", () => {
     return start >= 0 && end > start ? squash(setup.slice(start, end)) : "";
   })();
   const changelogEntry = (() => {
-    const start = changelog.indexOf("## [Unreleased] - Story 45.3: Careful Uninstall of the IRIS Side");
+    const start = storyHeadingIndex("45.3: Careful Uninstall of the IRIS Side");
     return squash(changelog.slice(start, changelog.indexOf("\n## ", start + 1)));
   })();
   const changeset = existsSync(path.join(REPO_ROOT, changesetPath)) ? squash(read(changesetPath)) : "";
@@ -295,13 +298,13 @@ describe("Story 45.3: the claims against the class source", () => {
 });
 
 describe("Story 45.3: the CHANGELOG entry", () => {
-  const start = changelog.indexOf("## [Unreleased] - Story 45.3: Careful Uninstall of the IRIS Side");
+  const start = storyHeadingIndex("45.3: Careful Uninstall of the IRIS Side");
   const end = changelog.indexOf("\n## ", start + 1);
   const entry = squash(changelog.slice(start, end));
 
   it("sits above the Story 45.2 entry and names the sanction id, the record, the one-liner, the no-record rule and the IPM order", () => {
     expect(start).toBeGreaterThan(-1);
-    expect(start).toBeLessThan(changelog.indexOf("## [Unreleased] - Story 45.2: Auto-Install Setting, Off Under Read-Only"));
+    expect(start).toBeLessThan(storyHeadingIndex("45.2: Auto-Install Setting, Off Under Read-Only"));
     expect(entry).toContain(SANCTION);
     expect(entry).toContain("`^ExecuteMCPv2.InstallRecord`");
     expect(entry).toContain("`Do ##class(ExecuteMCPv2.Setup).Uninstall()`");

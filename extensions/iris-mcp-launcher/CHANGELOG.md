@@ -2,6 +2,18 @@
 
 All notable changes to the IRIS MCP Launcher VS Code extension are documented in this file.
 
+## [1.3.0] — 2026-11-26
+
+### Changed
+
+- **The governance editor shows a new source badge, `dataPolicy`** (Story 45.4). Under `IRIS_DATA_POLICY=block` the servers turn
+  off the raw-read and code-execution tools, and a key that the data policy turned off reports `dataPolicy` as its source, as
+  `iris_server_profiles` and the `iris-mcp-governance` CLI do. The editor now shows that badge next to `env`, `file`, `parent`,
+  `preset` and `default`.
+- **The README names `IRIS_AUTO_INSTALL`** (Stories 45.2 and 45.5) among the variables the launcher leaves alone, so every server it
+  starts inherits it. It is unset by default, which means the automatic install is on (the read-only preset turns it off), and the
+  launcher writes no per-profile `autoInstall`.
+
 ## [1.2.0] — 2026-11-24
 
 ### Fixed

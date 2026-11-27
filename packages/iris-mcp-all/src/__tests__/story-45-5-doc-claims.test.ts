@@ -581,13 +581,15 @@ describe("Story 45.5: the startup warning points to the section, and the pointer
 
 describe("Story 45.5: the CHANGELOG section and the changeset", () => {
   const changelog = readRepo("CHANGELOG.md");
-  const heading = "## [Unreleased] - Story 45.5: What the Safety Settings Protect";
-  const start = changelog.indexOf(heading);
-  const entry = squash(changelog.slice(start, changelog.indexOf("\n## [Unreleased] - Story 45.4", start)));
+  // The version step renames `## [Unreleased] - Story …` to `## [<version> detail] - Story …`; either heading form is found.
+  const storyHeadingIndex = (title: string): number =>
+    changelog.search(new RegExp(`^## \\[(?:Unreleased|\\d+\\.\\d+\\.\\d+ detail)\\] - Story ${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "m"));
+  const start = storyHeadingIndex("45.5: What the Safety Settings Protect");
+  const entry = squash(changelog.slice(start, storyHeadingIndex("45.4") - 1));
 
   it("is the section above Story 45.4's, and says what changed, the narrowed scope (C-3) and the release handoff", () => {
     expect(start).toBeGreaterThan(-1);
-    expect(start).toBeLessThan(changelog.indexOf("## [Unreleased] - Story 45.4"));
+    expect(start).toBeLessThan(storyHeadingIndex("45.4"));
     expect(entry).toContain("answering GitHub issue #1 points 1, 2 and 4");
     expect(entry).toContain("`BOOTSTRAP_VERSION` is unchanged");
     expect(entry).toContain("`S-45.4-block-raw-tools`");

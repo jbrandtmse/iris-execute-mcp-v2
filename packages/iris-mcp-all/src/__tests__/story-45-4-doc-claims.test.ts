@@ -201,10 +201,13 @@ describe("Story 45.4: the CHANGELOG section and the changeset", () => {
   const changelog = read("CHANGELOG.md");
 
   it("has the section above the Story 45.3 one, naming the sanction, the cascade and what stays on", () => {
-    const heading = "## [Unreleased] - Story 45.4: Block Turns Off Raw-Read and Code-Execution Tools";
-    expect(changelog).toContain(heading);
-    expect(changelog.indexOf(heading), "above the Story 45.3 section").toBeLessThan(changelog.indexOf("## [Unreleased] - Story 45.3"));
-    const section = squash(changelog.slice(changelog.indexOf(heading), changelog.indexOf("## [Unreleased] - Story 45.3")));
+    // The version step renames `## [Unreleased] - Story …` to `## [<version> detail] - Story …`; either heading form is found.
+    const storyHeadingIndex = (title: string): number =>
+      changelog.search(new RegExp(`^## \\[(?:Unreleased|\\d+\\.\\d+\\.\\d+ detail)\\] - Story ${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "m"));
+    const start = storyHeadingIndex("45.4: Block Turns Off Raw-Read and Code-Execution Tools");
+    expect(start).toBeGreaterThan(-1);
+    expect(start, "above the Story 45.3 section").toBeLessThan(storyHeadingIndex("45.3"));
+    const section = squash(changelog.slice(start, storyHeadingIndex("45.3")));
     expect(section).toContain(SANCTION);
     expect(section).toContain("`env.profile ?? env.global ?? file.profile ?? file.global ?? inheritedDisable ?? dataPolicySeed ?? presetSeed ?? defaultSeed`");
     expect(section).toContain('`dataPolicyApplied: "block"`');

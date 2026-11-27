@@ -31,7 +31,7 @@
  * packages/shared/package.json. Compared against
  * `ExecuteMCPv2.Setup_GetBootstrapVersion()` at MCP server startup.
  */
-export const BOOTSTRAP_VERSION = "1.2.0+13.864f12b75f7b";
+export const BOOTSTRAP_VERSION = "1.3.0+13.864f12b75f7b";
 
 export interface BootstrapClass {
   name: string;
@@ -1300,7 +1300,7 @@ Parameter GUARDTEXT = "changed nothing: it was called inside a transaction durin
 /// deployment, an equal semver and sequence with a different hash, the
 /// <code>"dev"</code> placeholder and any unparseable value are left in place
 /// with a warning.</p>
-Parameter BOOTSTRAPVERSION = "1.2.0+13.864f12b75f7b";
+Parameter BOOTSTRAPVERSION = "1.3.0+13.864f12b75f7b";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -22035,7 +22035,7 @@ Class ExecuteMCPv2.InstallGuard Extends %RegisteredObject
 /// This package's bootstrap version marker, <code>&lt;semver&gt;+&lt;sequence&gt;.&lt;hash&gt;</code>.
 /// <p>The value on disk is <code>"dev"</code>, a placeholder. <code>scripts/gen-bootstrap.mjs</code>
 /// stamps the real marker into the copy it embeds and packages, and this file is not edited for it.</p>
-Parameter BOOTSTRAPVERSION = "1.2.0+13.864f12b75f7b";
+Parameter BOOTSTRAPVERSION = "1.3.0+13.864f12b75f7b";
 
 /// The class whose compiled BOOTSTRAPVERSION parameter is the deployed marker.
 Parameter SETUPCLASS = "ExecuteMCPv2.Setup";

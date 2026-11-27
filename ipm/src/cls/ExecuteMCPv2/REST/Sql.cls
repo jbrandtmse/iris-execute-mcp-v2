@@ -17,8 +17,14 @@
 /// statement whose text contains the <code>%NOJOURN</code> token is declined before execution
 /// (outcome <code>noJournal</code>): it turns journaling off, so a rollback could not undo it.
 /// This is the one keyword check in the safety path, and it can only refuse.</li>
-/// <li><b>Neither.</b> The statement runs as the Atelier <code>action/query</code> route runs
-/// it, with no transaction from this handler.</li>
+/// <li><b>Neither.</b> The statement runs with no transaction from this handler.</li>
+/// <li><b>SQL privileges.</b> The statement is prepared with SQL privilege checking on, as the
+/// calling account: SELECT, INSERT, UPDATE, DELETE and EXECUTE need the account's SQL grants, and
+/// DDL needs its DDL privileges. Nothing in the request or the configuration turns the check off.
+/// A statement the account has no grant for fails at prepare with the SQLCODE error envelope
+/// (SQLCODE -99), before classification, so that error answers ahead of every decline below.
+/// The privileges IRIS checks only at execution (GRANT and some DDL such as CREATE INDEX) are
+/// refused by IRIS at execution, or by a decline below when one applies first.</li>
 /// <li><b>Transactions.</b> When this handler opened a transaction, it requires
 /// <code>$TLEVEL</code> to be the level it opened after execution (a function, procedure or
 /// trigger that started, committed or rolled back a transaction is outcome
@@ -175,9 +181,11 @@ ClassMethod ReadFlag(pBody As %DynamicObject, pName As %String, Output pValue As
     Quit $$$OK
 }
 
-/// Prepares, classifies, checks and executes the statement in the current namespace. A
-/// declined statement is not an error: <var>pResult</var> carries its outcome. A transaction
-/// opened here is rolled back to the level found on entry unless the cap check committed it.
+/// Prepares, classifies, checks and executes the statement in the current namespace. The prepare
+/// checks SQL privileges (<code>checkPriv</code> 1, never off), so a statement whose privileges
+/// IRIS checks at prepare returns the SQLCODE error before any decline. A declined statement is not an error:
+/// <var>pResult</var> carries its outcome. A transaction opened here is rolled back to the level
+/// found on entry unless the cap check committed it.
 /// When <code>$TLEVEL</code> is no longer the level opened here, the outcome is
 /// <code>transactionEnded</code>, also when the statement then failed.
 ClassMethod Perform(pQuery As %String, ByRef pArgs, pReadOnly As %Boolean, pCountOnly As %Boolean, pCap As %String, Output pResult As %DynamicObject) As %Status
@@ -188,7 +196,7 @@ ClassMethod Perform(pQuery As %String, ByRef pArgs, pReadOnly As %Boolean, pCoun
     Set tOpened = 0
     Try {
         Set tStmt = ##class(%SQL.Statement).%New()
-        Set tSC = tStmt.%Prepare(.pQuery, 0)
+        Set tSC = tStmt.%Prepare(.pQuery, 1)
         If $$$ISERR(tSC) Quit
 
         Set tType = +tStmt.%Metadata.statementType
