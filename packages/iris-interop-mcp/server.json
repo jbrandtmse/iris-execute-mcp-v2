@@ -8,13 +8,13 @@
     "source": "github",
     "subfolder": "packages/iris-interop-mcp"
   },
-  "version": "1.2.0",
+  "version": "1.3.0",
   "websiteUrl": "https://github.com/jbrandtmse/iris-execute-mcp-v2/tree/main/packages/iris-interop-mcp#readme",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@iris-mcp/interop",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"

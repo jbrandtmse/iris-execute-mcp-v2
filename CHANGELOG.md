@@ -2,13 +2,53 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
-## [Unreleased] - Epic 45 follow-up: test-run polling
+## [1.3.0] — 2026-11-26
+
+Epic 45 Security Boundaries, a minor release (approved by the owner on 2026-11-26) because it adds a setting and makes sanctioned behavior changes. It answers GitHub issue #1, which asked what the suite's safety settings really protect. The SQL tools now respect the account's SQL privileges, a read-only server no longer installs anything on IRIS, one command removes the IRIS side carefully, `IRIS_DATA_POLICY=block` also turns off the tools that read raw data or run code, and the README says where the protection ends: the safety settings guard the agent, and the IRIS account's privileges guard the data. The `[1.3.0 detail]` sections below have the details. Every behavior change here is a sanctioned AD-15 change, named by its `S-45.*` id and recorded with its wave-10 decision.
+
+**Upgrade note.** After a release that changes the IRIS-side classes, run one server start with the automatic install on, or `zpm "install iris-execute-mcp-v2 1.3.0"`, so that the IRIS side matches the servers. Where IPM installed the classes, only `zpm` upgrades them. The hash at the end of `BOOTSTRAP_VERSION` tells you whether a release changes the classes: 1.3.0 does (see IRIS side below). Until that upgrade, a server with the automatic install off (the read-only preset turns it off) refuses its custom-REST tools with `IRIS_SIDE_NOT_INSTALLED`; the tools that use only the Atelier API keep working. Restart the refusing server after the upgrade. A later release that only restamps the version, with the same hash, needs nothing.
+
+### Behavior changes
+
+- **SQL statements honor SQL privileges (Story 45.1, `S-45.1-sql-privileges`).** `iris_sql_query` and `iris_sql_execute` now prepare every statement as the calling account with SQL privilege checking on. A statement the account has no grant for fails with `SQLCODE: -99` and nothing runs, and that error now comes before the read-only, `countOnly`, row-cap and `%NOJOURN` declines. An account with `%All`, or with the grants the statement needs, sees no change.
+- **The automatic install is a setting, and the read-only preset turns it off (Story 45.2, `S-45.2-read-only-no-install`).** New variable `IRIS_AUTO_INSTALL` and a per-profile `autoInstall` field in `IRIS_PROFILES`. A read-only server now installs nothing on IRIS: no classes, no web application, no `%ALL` namespace or mapping, no `^UnitTestRoot`. With the install off and the IRIS side missing or older than the server, the profile's custom-REST calls, `iris_execute_tests` and `iris_test_coverage` included, are refused with the new code `IRIS_SIDE_NOT_INSTALLED`. Turning the install on together with the read-only preset fails startup. `iris_server_profiles` reports `autoInstall` and `autoInstallSource`. With none of these settings set, startup is byte-identical.
+- **A careful uninstall of the IRIS side (Story 45.3, `S-45.3-careful-uninstall`; Story 45.6, `S-45.6-uninstall-report-text`).** `Do ##class(ExecuteMCPv2.Setup).Uninstall()`, run in an IRIS terminal by a user with `%Admin_Manage`, removes what the install created, not only the web application: the `ExecuteMCPv2` mapping in `%ALL`, `%ALL` itself only when the install created it and nothing else is mapped in it, `^UnitTestRoot` only where the install set it and it is unchanged, the classes the install deployed, and the install records. It reports what it removed, what it left (with the command to remove it by hand) and what failed. The install now writes a record of what it created (`^ExecuteMCPv2.InstallRecord`). Run the command before `zpm "uninstall iris-execute-mcp-v2"`, and stop any server whose automatic install is on first, or set `IRIS_AUTO_INSTALL=false`.
+- **`IRIS_DATA_POLICY=block` turns off the raw-read and code-execution tools (Story 45.4, `S-45.4-block-raw-tools`; Story 45.7, `S-45.7-block-sql-analyze`).** Under `block`, 15 governance keys start disabled: `iris_sql_query`, `iris_sql_execute`, `iris_global_get`, `iris_global_list`, `iris_execute_command`, `iris_execute_classmethod`, `iris_execute_tests`, `iris_test_coverage`, `iris_transform_test`, `iris_docdb_document:get`, `iris_docdb_document:delete`, `iris_docdb_find`, and the `stats`, `running` and `advise` actions of `iris_sql_analyze`. A call is refused with `GOVERNANCE_DISABLED` and `dataPolicyApplied: "block"`, and `configSource` gains the value `dataPolicy`. An explicit `true` in `IRIS_GOVERNANCE` or the governance file re-enables a key. Each server logs at most one startup `[WARN]` line naming the covered tools that are still on; with the default `redact` policy a stock dev, interop or data server now logs it, and that line is the only change a `redact` user sees. The line points to the README's new "What the safety settings protect" section.
+- **`Configure` and `ConfigureMapping` refuse a `SELECT` run by `iris_sql_query` (Story 45.6, `S-45.6-setup-transaction-guard`).** Called inside a transaction during a web request, they return an error and change nothing. The automatic install, IPM and an IRIS terminal run them as before; run `zpm` from an IRIS terminal, not through `iris_execute_command`.
+- **A least-privilege account sees its installed IRIS side correctly (Story 45.6, `S-45.6-isconfigured-lookup`; Story 45.7, `S-45.7-compile-check-index`).** An account that cannot read the web application's definition in `%SYS` now reads `current`, not `unconfigured`, and no longer logs `Compile failed: 35 of 35` on every connect. `iris_doc_compile`, `iris_doc_load` and `iris_env_promote` give such an account the right compile verdict.
+- **The database tools report and apply the real fields (Story 45.6, `S-45.6-database-fields`).** `iris_database_list` reports the real `resource`, `readOnly` and `globalJournalState`, and `iris_database_manage` create and modify apply them.
+- **Bootstrap corrections (Story 45.7).** With the automatic install off, an IRIS side with the same classes (the same hash) reads `current` whatever its version (`S-45.7-same-classes-current`). The startup bootstrap follows the `default` entry of `IRIS_PROFILES` (`S-45.7-default-profile-bootstrap`). A refused `Configure` or `ConfigureMapping` is reported as a failure, not as configured (`S-45.7-configure-status`). A failed IPM install leaves `%ALL` and the mapping in place and consistent (`S-45.7-mapping-survives-rollback`); for an instance that an earlier release's failed install left broken, run `Do ##class(Config.Namespaces).ActivateAll()` in `%SYS`.
+
+### Fixed
+
+- **`iris_execute_tests` polls again when IRIS's work queue is briefly busy (`ERROR #7808`)**, instead of reporting 0 tests.
+- **`iris_sql_analyze` `advise` in workload mode works again and leaves out its own traffic** (Story 45.7, DW-793 and DW-794).
+- **The bootstrap compiles in a namespace that is not interoperability-enabled** (Story 45.6, DW-787).
+- The two Epic 45 burn-downs (Stories 45.6 and 45.7) resolve the ledger entries their sections list; one, DW-774 (`zpm uninstall` leaves the configuration), is closed by decision.
+
+### Security policy and documentation
+
+- **The README section "What the safety settings protect" (Story 45.5)** says that governance, the presets, the confirmation dialogs, the audit log, the data policy, the SQL safety settings and the document write guards guard the agent, not the IRIS account: the account's privileges are the boundary. It states the minimum account for the SQL tools and the residuals.
+- **`SECURITY.md` has a narrower scope and says so (Stories 45.5 and 45.7).** Getting past a control through the servers' own tools is in scope; using the IRIS account directly, a finding that depends on more privileges than the account needs, and a residual the README documents are out of scope. A minor release can change a behavior for safety, and its CHANGELOG lists each change and what to do. Report privately, not by email or a public issue.
+
+### Known limitations
+
+- **IRIS's Atelier `action/query` still prepares without SQL privilege checks** (Story 45.1). It is IRIS's own API, reachable by the same account, so the account's privileges remain the boundary.
+- **`block` does not cover the write tools that run code** (Story 45.4): compiling or loading a class, starting a production, building a cube or running a task. The read-only preset turns those off; use both for a connection to an instance with PHI.
+- **With the automatic install off, an `unknown` IRIS side is not refused, and an `unconfigured` reading only warns** (Story 45.2). For an `unconfigured` reading, a truly missing web application answers HTTP 404, and the call is then refused with `IRIS_SIDE_NOT_INSTALLED`.
+- **An install made by 1.2.0 or earlier has no install record** (Story 45.3), so the uninstall never removes `%ALL` or `^UnitTestRoot` there and names the commands to remove them by hand. Run alone, `zpm "uninstall iris-execute-mcp-v2"` still removes the classes only.
+
+### IRIS side
+
+- `BOOTSTRAP_VERSION` moves from `1.2.0+5.6cbac260e73f` to `1.3.0+13.864f12b75f7b`, counting from the v1.2.0 release. Four stories changed IRIS-side classes: Story 45.1 `ExecuteMCPv2.REST.Sql` (`+8`), Story 45.3 `ExecuteMCPv2.Setup` (`+10`), Story 45.6 `Setup`, `REST.Config` and `REST.Interop` (`+12`), and Story 45.7 `Setup` (`+13`). The hash changed, so the upgrade note above applies. A server with the automatic install on redeploys its IRIS classes on the next connect.
+
+## [1.3.0 detail] - Epic 45 follow-up: test-run polling
 
 ### Fixes
 
 - **`iris_execute_tests` no longer reports 0 tests when IRIS's work queue is briefly busy (ERROR #7808); it polls again.** IRIS answers a progress poll with `ERROR #7808: Unable to obtain group '…' command lock` when the running job holds the work manager's command lock for more than 5 seconds. No result is lost by such a poll, so the tool now waits and polls again, up to 12 times in a row, within the call's time limit. Any other error is reported as before.
 
-## [Unreleased] - Story 45.7: Epic 45 Burn-down, TypeScript and Docs
+## [1.3.0 detail] - Story 45.7: Epic 45 Burn-down, TypeScript and Docs
 
 Epic 45 Security Boundaries. Nine ledger entries owned by the last burn-down: the bootstrap's TypeScript, one IRIS-side method and the documents. Six sanctioned behavior changes (AD-15): `S-45.7-same-classes-current`, `S-45.7-default-profile-bootstrap`, `S-45.7-block-sql-analyze`, `S-45.7-compile-check-index`, `S-45.7-configure-status` and `S-45.7-mapping-survives-rollback`. No tool, action, governance key, preset, refusal code or input field is added or changed.
 
@@ -35,7 +75,7 @@ Epic 45 Security Boundaries. Nine ledger entries owned by the last burn-down: th
 
 - `src/ExecuteMCPv2/Setup.cls` changed (`ConfigureMapping`): `BOOTSTRAP_VERSION` moves from `1.2.0+12.bd38d590c26e` to `1.2.0+13.864f12b75f7b`. `ExecuteMCPv2.Tests.SetupTest` gains `TestMappingSurvivesRollbackOfOuterTransaction` (11 tests), and `TestGuardRefusesInTransactionDuringWebRequest` runs on IRIS Community too: with no second namespace it creates a disposable one over its own database and removes it afterwards.
 
-## [Unreleased] - Story 45.6: Epic 45 Burn-down, IRIS Side
+## [1.3.0 detail] - Story 45.6: Epic 45 Burn-down, IRIS Side
 
 Epic 45 Security Boundaries. Seven ledger entries of the IRIS-side classes, their tests and the IPM generator. Four sanctioned behavior changes (AD-15): `S-45.6-setup-transaction-guard`, `S-45.6-isconfigured-lookup`, `S-45.6-database-fields` and `S-45.6-uninstall-report-text`. No tool, action, governance key, preset, refusal code or input field is added or changed.
 
@@ -62,7 +102,7 @@ Epic 45 Security Boundaries. Seven ledger entries of the IRIS-side classes, thei
 
 - `src/ExecuteMCPv2/Setup.cls`, `REST/Config.cls` and `REST/Interop.cls` changed: `BOOTSTRAP_VERSION` moves from `1.2.0+10.109d0129528f` to `1.2.0+12.bd38d590c26e`.
 
-## [Unreleased] - Story 45.5: What the Safety Settings Protect
+## [1.3.0 detail] - Story 45.5: What the Safety Settings Protect
 
 Epic 45 Security Boundaries, answering GitHub issue #1 points 1, 2 and 4. The story writes the trust model down and closes the epic with a gate test. It changes no tool, action, governance key, preset, refusal code or input field, and no IRIS-side class (`BOOTSTRAP_VERSION` is unchanged).
 
@@ -93,7 +133,7 @@ Epic 45 Security Boundaries, answering GitHub issue #1 points 1, 2 and 4. The st
 - The release is `1.3.0` (minor) and carries every `@iris-mcp/*` package through the Changesets fixed group. `@iris-mcp/shared` carries the new IRIS-side embed (`1.2.0+13.864f12b75f7b` on the branch after Story 45.7; the version step restamps the semver), and the IPM tree is stamped only at `pnpm run version`.
 - The release notes must state the narrowed `SECURITY.md` scope, the upgrade note (every install-off deployment finds a `stale` IRIS side on its first `1.3.0` start, and its custom-REST tools refuse until one upgrade) and the new warning pointer.
 
-## [Unreleased] - Story 45.4: Block Turns Off Raw-Read and Code-Execution Tools
+## [1.3.0 detail] - Story 45.4: Block Turns Off Raw-Read and Code-Execution Tools
 
 Epic 45 Security Boundaries, answering GitHub issue #1 point 1. One sanctioned behavior change (AD-15), `S-45.4-block-raw-tools`.
 
@@ -114,7 +154,7 @@ Epic 45 Security Boundaries, answering GitHub issue #1 point 1. One sanctioned b
 
 - Under `redact`, `allow` and an unset policy, every key's enabled state and `configSource` on all five servers, every tool result, every `iris_server_profiles` field, every governance verdict, every denial and every audit entry are byte-identical to the build before this story; a test replays that build's recorded output. No tool, action, governance key, preset row or input field is added, `GOVERNANCE_BASELINE` is untouched, and `BOOTSTRAP_VERSION` does not move.
 
-## [Unreleased] - Story 45.3: Careful Uninstall of the IRIS Side
+## [1.3.0 detail] - Story 45.3: Careful Uninstall of the IRIS Side
 
 Epic 45 Security Boundaries, answering GitHub issue #1 point 3. One sanctioned behavior change (AD-15), `S-45.3-careful-uninstall`.
 
@@ -134,7 +174,7 @@ Epic 45 Security Boundaries, answering GitHub issue #1 point 3. One sanctioned b
 
 - `src/ExecuteMCPv2/Setup.cls` changed: `BOOTSTRAP_VERSION` moves from `1.2.0+8.5cedcac20ae9` to `1.2.0+10.109d0129528f`. The tests `SetupTest` and the new `SetupUninstallTest` never call `Uninstall()`.
 
-## [Unreleased] - Story 45.2: Auto-Install Setting, Off Under Read-Only
+## [1.3.0 detail] - Story 45.2: Auto-Install Setting, Off Under Read-Only
 
 Epic 45 Security Boundaries, answering GitHub issue #1 point 3. One sanctioned behavior change (AD-15), `S-45.2-read-only-no-install`.
 
@@ -160,7 +200,7 @@ Epic 45 Security Boundaries, answering GitHub issue #1 point 3. One sanctioned b
 
 - No class changed; `BOOTSTRAP_VERSION` is unchanged.
 
-## [Unreleased] - Story 45.1: SQL Statements Honor SQL Privileges
+## [1.3.0 detail] - Story 45.1: SQL Statements Honor SQL Privileges
 
 Epic 45 Security Boundaries, answering GitHub issue #1 point 4. One sanctioned behavior change (AD-15), `S-45.1-sql-privileges`.
 

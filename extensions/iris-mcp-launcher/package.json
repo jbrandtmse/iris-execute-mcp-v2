@@ -2,7 +2,7 @@
   "name": "iris-mcp-launcher",
   "displayName": "IRIS MCP Launcher",
   "description": "Registers the IRIS MCP Server Suite with VS Code, resolving credentials from the InterSystems Server Manager extension at spawn time. Copilot-family agents only — see README for the client-coverage boundary.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "publisher": "iris-mcp",
   "author": "jbrandtmse (https://github.com/jbrandtmse)",

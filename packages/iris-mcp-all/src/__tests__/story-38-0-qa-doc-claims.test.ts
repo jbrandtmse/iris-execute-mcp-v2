@@ -117,7 +117,8 @@ describe("IRIS_NAMESPACE default (Story 38.0, DW-469, AC-3)", () => {
     expect(section).toMatch(/### Changed [^\n]*`IRIS_NAMESPACE`[^\n]*`USER`/);
 
     const launcher = read("extensions/iris-mcp-launcher/CHANGELOG.md");
-    const unreleased = /## \[0\.1\.0\][\s\S]*?(?=\n## \[)/.exec(launcher)?.[0] ?? launcher;
+    // The 0.1.0 entries were released as 1.1.0, the extension's first store-ready release; later releases sit above it, so it is found by name.
+    const unreleased = /## \[(?:0\.1\.0|1\.1\.0)\][\s\S]*?(?=\n## \[|$)/.exec(launcher)?.[0] ?? launcher;
     const changed = /### Changed\n([\s\S]*?)(?=\n### |\n## |$)/.exec(unreleased)?.[1] ?? "";
     expect(changed).toMatch(/`irisMcpLauncher\.namespace` now defaults to `USER`/);
   });

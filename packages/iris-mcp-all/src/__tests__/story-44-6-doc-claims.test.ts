@@ -81,10 +81,11 @@ describe("Story 44.6: the changelogs and the changeset", () => {
   const changesetPath = ".changeset/story-44-6-launcher-provider-works-in-copilot-sessions.md";
   const changesetPresent = existsSync(path.join(REPO_ROOT, changesetPath));
 
-  // The release step renames "## [Unreleased]" to "## [<version>] — <date>"; either heading form passes.
+  // The release step renames "## [Unreleased]" to "## [<version>] — <date>"; either heading form passes. The fix was released in 1.2.0,
+  // and later releases (1.3.0 onward) sit above it, so its section is found by name.
   it("the extension CHANGELOG's first section records the Copilot-harness fix", () => {
     const changelog = read("extensions/iris-mcp-launcher/CHANGELOG.md");
-    const first = changelog.split(/^(?=## \[)/m)[1] ?? "";
+    const first = changelog.split(/^(?=## \[)/m).find((section) => section.startsWith("## [1.2.0]")) ?? "";
     expect(first.split("\n")[0]).toMatch(/^## \[(Unreleased|\d+\.\d+\.\d+)\]/);
     expect(squash(first)).toContain("start in a Copilot-harness chat session");
   });
