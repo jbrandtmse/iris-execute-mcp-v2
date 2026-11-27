@@ -110,6 +110,7 @@ The class name is derived from the directory prefix BEFORE the first glob metach
 ## #34 / #40 / #41 — Second-environment & not-configured coverage
 
 - (#34) A tool whose output depends on namespace/locale/schema state smokes a SECOND, genuinely-different namespace (or records an explicit residual risk). Epic 21 shipped three defects invisible to a green suite + single-namespace smoke.
+- (#34, account axis) A story whose docs recommend an account or privilege set runs at least one live leg AS that account, and an epic capstone that touches privileges includes a least-privilege leg. A live proof run only as `_SYSTEM`/`%All` hides what only a least-privilege account hits (Epic 45: DW-772 passed dev, QA and review; DW-773 and DW-788 too).
 - (#40) For `scope:"NONE"` tools with no namespace knob: stand up a disposable `%CSP.REST` webapp bound to the second namespace, drive the tool through it, confirm the namespace-sensitive area actually DIFFERS (proving the smoke is real), then DELETE the webapp.
 - (#41) Unit-test the NOT-CONFIGURED branch that the fully-configured default namespace masks (e.g. `%SYS` has no `Ens.Director`; non-mirror member) — that branch usually carries its own contract (`notApplicable`, not error) and otherwise ships untested behind a green suite.
 
