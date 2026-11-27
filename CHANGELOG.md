@@ -2,6 +2,12 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] - Epic 45 follow-up: test-run polling
+
+### Fixes
+
+- **`iris_execute_tests` no longer reports 0 tests when IRIS's work queue is briefly busy (ERROR #7808); it polls again.** IRIS answers a progress poll with `ERROR #7808: Unable to obtain group '…' command lock` when the running job holds the work manager's command lock for more than 5 seconds. No result is lost by such a poll, so the tool now waits and polls again, up to 12 times in a row, within the call's time limit. Any other error is reported as before.
+
 ## [Unreleased] - Story 45.7: Epic 45 Burn-down, TypeScript and Docs
 
 Epic 45 Security Boundaries. Nine ledger entries owned by the last burn-down: the bootstrap's TypeScript, one IRIS-side method and the documents. Six sanctioned behavior changes (AD-15): `S-45.7-same-classes-current`, `S-45.7-default-profile-bootstrap`, `S-45.7-block-sql-analyze`, `S-45.7-compile-check-index`, `S-45.7-configure-status` and `S-45.7-mapping-survives-rollback`. No tool, action, governance key, preset, refusal code or input field is added or changed.

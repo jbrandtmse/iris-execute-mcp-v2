@@ -207,6 +207,24 @@ const MAX_TEST_TIMEOUT_SECONDS = 3600;
 const MAX_CAPTURE_READ_FAILURES = 3;
 
 /**
+ * How many CONSECUTIVE `/work/{id}` polls may fail with ERROR #7808 (the work manager's group command lock, held by
+ * the running job past the manager's own 5 s lock timeout) before the poll gives up and reports the error. Each
+ * contention already cost the manager 5 s, so 12 is about a minute of continuous contention; the poll deadline
+ * still bounds the whole wait. A successful poll resets the count.
+ */
+export const MAX_WORK_LOCK_CONTENTIONS = 12;
+
+/**
+ * Whether `error` is the Atelier `/work/{id}` poll failing with ERROR #7808 (`$$$MultiNoModLock`, "Unable to obtain
+ * group '<id>' command lock", `irislib/%occErrors.inc`): transient lock contention, never a result of the job.
+ */
+export function isWorkLockContention(error: unknown): boolean {
+  if (!(error instanceof IrisApiError)) return false;
+  const texts = [error.message, ...error.errors.map((entry) => (typeof entry === "string" ? entry : JSON.stringify(entry)))];
+  return texts.some((text) => /ERROR #7808\b/.test(text));
+}
+
+/**
  * The Atelier `/work` unittest endpoint's `methods` request filter and its
  * result rows both use test method names with the leading `Test` prefix
  * STRIPPED (e.g. `ExtractTablesSingleTable`, not
@@ -1041,9 +1059,25 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
         r.method !== undefined ? `${r.class}::${r.method}` : `class-summary::${r.class}`;
 
       let captureReadFailures = 0;
+      let lockContentions = 0;
 
       while (clock.now() < deadline) {
-        const pollResp = await ctx.http.get<unknown>(pollPath);
+        let pollResp: Awaited<ReturnType<typeof ctx.http.get<unknown>>>;
+        try {
+          pollResp = await ctx.http.get<unknown>(pollPath);
+        } catch (error: unknown) {
+          // ERROR #7808 (MultiNoModLock): the work manager could not take its group command lock within its own
+          // 5 s timeout (`%occWorkQueue.inc` CheckAccessLock), because the running job held it. The lock is taken
+          // before anything is drained, so the failed poll lost no rows: it is contention, not a failure of the job.
+          // Wait and poll again, within the deadline and a cap on consecutive contentions.
+          if (isWorkLockContention(error) && lockContentions < MAX_WORK_LOCK_CONTENTIONS) {
+            lockContentions++;
+            await clock.sleep(TEST_POLL_INTERVAL);
+            continue;
+          }
+          throw error;
+        }
+        lockContentions = 0;
         const pollResult = pollResp.result;
         const pollEnvelope = pollResp as unknown as Record<string, unknown>;
         const hasRetry = !!pollEnvelope.retryafter;

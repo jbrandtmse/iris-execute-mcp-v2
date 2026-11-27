@@ -4521,3 +4521,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 45.7 build (after the DW-793 fix), on a Community throwaway
 - 2026-11-26T18:12:08Z status=routed owner=45-7-epic-45-burn-down-typescript-and-docs by=harvest note=Fix in this story (cheap, the epic's last story): exclude the tool's own QUERY_PLAN/EXPLAIN statements from the workload candidates; pin with a unit test and a mutation
 - 2026-11-26T20:09:46Z status=resolved-by:45-7-epic-45-burn-down-typescript-and-docs owner=45-7-epic-45-burn-down-typescript-and-docs by=lead note=Story 45.7 (build 300f7d6c, QA 1f125c0d, CR 25447736): proven live on throwaways with a mutation per entry (spec Design Notes disposition table and Verification); BOOTSTRAP_VERSION 1.2.0+12.bd38d590c26e -> 1.2.0+13.864f12b75f7b
+
+### DW-795: iris_execute_tests reports total 0 when the Atelier /work poll fails with ERROR #7808 (work-manager group command lock, 5 s timeout) although the job is healthy
+- source: main CI 45899784897 attempt 1 (integration-dev, SetupTest) | severity: med | fix-risk: low | footprint: in-footprint
+- evidence: CI: GET /api/atelier/v8/HSCUSTOM/work/42538326 -> ERROR #7808 Unable to obtain group command lock; partial 5/5 passed; %occWorkQueue.inc CheckAccessLock = Lock +WORK(WorkerCmd,group):5; the lock precedes any drain
+- 2026-11-26T22:18:59Z status=resolved-by:45-7-epic-45-burn-down-typescript-and-docs owner=45-7-epic-45-burn-down-typescript-and-docs by=lead note=Fixed on fix/epic-45-ci-flakes: the poll retries #7808 up to MAX_WORK_LOCK_CONTENTIONS=12 consecutive times within the deadline, resets on success, other errors unchanged; 3 unit tests on the CI error shape; mutation (retry off) 2 red; patch changeset for @iris-mcp/dev
+
+### DW-796: story-45-4-back-compat flaked once in main CI: dev/enable-query/redact/read-only differed from its unset twin in the same run (field truncated in the log)
+- source: main CI 45899784897 attempt 1 (prepublish-all) | severity: low | fix-risk: low | footprint: in-footprint
+- evidence: The replay runs against a 503 stub (no IRIS state); timing probe: the last denial [WARN] reaches stderr at +0 ms relative to the tool result (separate pipes, no order); not reproduced locally in 31 runs (sequential, parallel, early-read under load)
+- 2026-11-26T22:18:59Z status=resolved-by:45-7-epic-45-burn-down-typescript-and-docs owner=45-7-epic-45-burn-down-typescript-and-docs by=lead note=Resolved-hardened (Planner): runCase waits for one [WARN] Tool <name>: line per denied call before reading stderr; the test now prints the first differing path and values. Reopen if the new diagnostic names a field other than warnLines
